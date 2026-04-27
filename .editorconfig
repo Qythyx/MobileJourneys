@@ -1,0 +1,246 @@
+﻿# This file is the top-most EditorConfig file
+root = true
+
+# All Files
+[*]
+indent_style = tab
+indent_size = 4
+insert_final_newline = true
+max_line_length = 120
+trim_trailing_whitespace = true
+
+# Silly hack to make the Shell items not wrap
+[MainShell.cs]
+max_line_length = 140
+
+
+[*.yml]
+indent_style = space
+indent_size = 2
+
+[*.md]
+indent_style = space
+indent_size = 2
+
+######################
+# Coding Conventions #
+######################
+# Docs: https://docs.microsoft.com/en-us/visualstudio/ide/editorconfig-language-conventions?view=vs-2019#net-code-style-settings
+
+[*.cs]
+# Make suggestions warnings
+dotnet_analyzer_diagnostic.category-roslynator.severity = warning
+dotnet_diagnostic.CS8604.severity = error # Possible null reference
+dotnet_diagnostic.IDE0001.severity = warning # Name can be simplified
+dotnet_diagnostic.IDE0002.severity = warning # Name can be simplified
+dotnet_diagnostic.IDE0005.severity = warning # Remove unused usings
+dotnet_diagnostic.IDE0028.severity = warning # Collection initialization can be simplified
+dotnet_diagnostic.IDE0044.severity = warning # Make field readonly
+dotnet_diagnostic.IDE0051.severity = warning # Private member 'MockLogger.VariableMatcher' is unused
+dotnet_diagnostic.IDE0090.severity = warning # Use implicit object creation when type is apparent
+dotnet_diagnostic.IDE0130.severity = warning # Namespace does not match folder structure
+dotnet_diagnostic.IDE0200.severity = warning # Lambda expression can be removed
+dotnet_diagnostic.IDE0290.severity = warning # Use primary constructor
+dotnet_diagnostic.IDE0300.severity = warning # Collection initialization can be simplified
+dotnet_diagnostic.IDE0303.severity = warning # Collection initialization can be simplified
+dotnet_diagnostic.IDE0305.severity = warning # Collection initialization can be simplified
+dotnet_diagnostic.IDE0320.severity = warning # Make anonymous function static
+dotnet_diagnostic.IDE0350.severity = warning # Lambda expression can be simplified
+dotnet_diagnostic.IDE0370.severity = warning # Suppression is unnecessary
+
+# Suppress unwanted warnings
+dotnet_diagnostic.RCS1217.severity = none # Convert interpolated string to concatenation
+dotnet_diagnostic.RCS1238.severity = none # Avoid nested ?: operators
+dotnet_diagnostic.CS1591.severity = none # Missing XML comment for publicly visible type or member
+
+# this. preferences
+dotnet_style_qualification_for_field = false:warning
+dotnet_style_qualification_for_property = false:warning
+dotnet_style_qualification_for_method = false:warning
+dotnet_style_qualification_for_event = false:warning
+
+# Language keywords instead of framework type names for type references
+dotnet_style_predefined_type_for_locals_parameters_members = true:warning
+dotnet_style_predefined_type_for_member_access = true:warning
+
+# Modifier preferences
+dotnet_style_require_accessibility_modifiers = for_non_interface_members:warning
+dotnet_style_readonly_field = true:warning
+csharp_preferred_modifier_order = public,private,protected,internal,static,extern,new,virtual,abstract,sealed,override,readonly,unsafe,volatile,async:warning
+
+# Parentheses preferences
+dotnet_style_parentheses_in_arithmetic_binary_operators = always_for_clarity:warning
+dotnet_style_parentheses_in_relational_binary_operators = always_for_clarity:warning
+dotnet_style_parentheses_in_other_binary_operators = always_for_clarity:warning
+dotnet_style_parentheses_in_other_operators = always_for_clarity:warning
+
+# Expression-level preferences
+dotnet_style_object_initializer = true:warning
+dotnet_style_collection_initializer = true:warning
+dotnet_style_explicit_tuple_names = true:warning
+dotnet_style_prefer_inferred_tuple_names = true:warning
+dotnet_style_prefer_inferred_anonymous_type_member_names = true:warning
+dotnet_style_prefer_auto_properties = true:warning
+dotnet_style_prefer_is_null_check_over_reference_equality_method = true:warning
+dotnet_style_prefer_conditional_expression_over_assignment = true:warning
+dotnet_style_prefer_conditional_expression_over_return = true:warning
+
+# Null-checking preferences
+dotnet_style_coalesce_expression = true:warning
+dotnet_style_null_propagation = true:warning
+
+dotnet_style_namespace_match_folder = true:warning
+
+#########################
+# Code Quality Settings #
+#########################
+# Docs: https://docs.microsoft.com/en-us/visualstudio/ide/editorconfig-language-conventions?view=vs-2019#net-code-quality-settings
+
+# Code quality preferences
+dotnet_code_quality_unused_parameters = all:warning
+
+# Implicit and explicit types
+csharp_style_var_for_built_in_types = true:warning
+csharp_style_var_when_type_is_apparent = true:warning
+csharp_style_var_elsewhere = true:warning
+
+# Expression-bodied members
+csharp_style_expression_bodied_methods = true:warning
+csharp_style_expression_bodied_constructors = true:warning
+csharp_style_expression_bodied_operators = true:warning
+csharp_style_expression_bodied_properties = true:warning
+csharp_style_expression_bodied_indexers = true:warning
+csharp_style_expression_bodied_accessors = true:warning
+csharp_style_expression_bodied_lambdas = true:warning
+csharp_style_expression_bodied_local_functions = true:warning
+
+# Pattern matching
+csharp_style_pattern_matching_over_is_with_cast_check = true:warning
+csharp_style_pattern_matching_over_as_with_null_check = true:warning
+
+# Inlined variable declarations
+csharp_style_inlined_variable_declaration = true:warning
+
+# Expression-level preferences
+csharp_prefer_simple_default_expression = true:warning
+csharp_style_implicit_object_creation_when_type_is_apparent = true:warning
+
+# Null-checking preferences
+csharp_style_throw_expression = true:warning
+csharp_style_conditional_delegate_call = true:warning
+
+# Code block - concerns the use of curly braces { } to surround code blocks
+csharp_prefer_braces = always:error
+csharp_style_unused_value_expression_statement_preference = discard_variable:warning
+csharp_style_unused_value_assignment_preference = discard_variable:warning
+
+# Index and range preferences
+csharp_style_prefer_index_operator = true:warning
+csharp_style_prefer_range_operator = true:warning
+
+# Miscellaneous preferences
+csharp_style_deconstructed_variable_declaration = true:warning
+csharp_style_pattern_local_over_anonymous_function = true:warning
+csharp_using_directive_placement = outside_namespace:warning
+csharp_prefer_static_local_function = true:warning
+csharp_prefer_simple_using_statement = true:warning
+csharp_style_prefer_switch_expression = true:warning
+
+# Suppress namespace should match folder structure for MAUI Platforms code
+[**/Platforms/**/*.cs]
+dotnet_diagnostic.IDE0130.severity = none
+
+#######################
+# Formatting settings #
+#######################
+# Docs: https://docs.microsoft.com/en-us/visualstudio/ide/editorconfig-formatting-conventions?view=vs-2019#net-formatting-settings
+
+# Organize usings
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false
+
+# New-line options
+# code element: accessors, anonymous_methods, anonymous_types, control_blocks, events, indexers, lambdas, local_functions, methods, object_collection_array_initializers, properties, types
+# control_blocks
+csharp_new_line_before_open_brace = methods, properties, types
+csharp_new_line_before_else = false
+csharp_new_line_before_catch = false
+csharp_new_line_before_finally = false
+csharp_new_line_before_members_in_object_initializers = true
+csharp_new_line_before_members_in_anonymous_types = true
+csharp_new_line_between_query_expression_clauses = true
+
+# Indentation options
+csharp_indent_case_contents = true
+csharp_indent_switch_labels = true
+csharp_indent_labels = flush_left
+csharp_indent_block_contents = true
+csharp_indent_braces = false
+csharp_indent_case_contents_when_block = true
+
+# Spacing options
+csharp_space_after_cast = false
+csharp_space_after_keywords_in_control_flow_statements = false
+csharp_space_between_parentheses = none
+csharp_space_before_colon_in_inheritance_clause = true
+csharp_space_after_colon_in_inheritance_clause = true
+csharp_space_around_binary_operators = before_and_after
+csharp_space_between_method_declaration_parameter_list_parentheses = false
+csharp_space_between_method_declaration_empty_parameter_list_parentheses = false
+csharp_space_between_method_declaration_name_and_open_parenthesis = false
+csharp_space_between_method_call_parameter_list_parentheses = false
+csharp_space_between_method_call_empty_parameter_list_parentheses = false
+csharp_space_between_method_call_name_and_opening_parenthesis = false
+csharp_space_after_comma = true
+csharp_space_before_comma = false
+csharp_space_after_dot = false
+csharp_space_before_dot = false
+csharp_space_after_semicolon_in_for_statement = true
+csharp_space_before_semicolon_in_for_statement = false
+csharp_space_around_declaration_statements = false
+csharp_space_before_open_square_brackets = false
+csharp_space_between_empty_square_brackets = false
+csharp_space_between_square_brackets = false
+
+# Wrap options
+csharp_preserve_single_line_statements = false
+csharp_preserve_single_line_blocks = true
+
+######################
+# Naming Conventions #
+######################
+
+# Style Definitions
+dotnet_naming_style.pascal_case_style.capitalization             = pascal_case
+# Use PascalCase for constant fields
+dotnet_naming_rule.constant_fields_should_be_pascal_case.severity = suggestion
+dotnet_naming_rule.constant_fields_should_be_pascal_case.symbols  = constant_fields
+dotnet_naming_rule.constant_fields_should_be_pascal_case.style    = pascal_case_style
+dotnet_naming_symbols.constant_fields.applicable_kinds            = field
+dotnet_naming_symbols.constant_fields.applicable_accessibilities  = *
+dotnet_naming_symbols.constant_fields.required_modifiers          = const
+# Define the 'private_fields' symbol group:
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+# Define the 'private_static_fields' symbol group
+dotnet_naming_symbols.private_static_fields.applicable_kinds = field
+dotnet_naming_symbols.private_static_fields.applicable_accessibilities = private
+dotnet_naming_symbols.private_static_fields.required_modifiers = static
+# Define the 'underscored' naming style
+dotnet_naming_style.underscored.capitalization = pascal_case
+dotnet_naming_style.underscored.required_prefix = _
+# Define the 'private_fields_underscored' naming rule
+dotnet_naming_rule.private_fields_underscored.symbols = private_fields
+dotnet_naming_rule.private_fields_underscored.style = underscored
+dotnet_naming_rule.private_fields_underscored.severity = error
+# Define the 'private_static_fields_none' naming rule
+dotnet_naming_rule.private_static_fields_none.symbols = private_static_fields
+dotnet_naming_rule.private_static_fields_none.style = underscored
+dotnet_naming_rule.private_static_fields_none.severity = none
+
+
+[*.{csproj,props,targets,xml,config}]
+# Configurable behaviors
+indent_style = tab
+indent_size = 2
+max_line_length = 120

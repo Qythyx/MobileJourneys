@@ -1,0 +1,8 @@
+<Project>
+	<ItemGroup>
+		<PackageVersion Include="Appium.WebDriver" Version="8.2.0" />
+		<PackageVersion Include="Codeuctivity.ImageSharpCompare" Version="4.1.379" />
+		<PackageVersion Include="Microsoft.Testing.Platform" Version="1.8.3" />
+		<PackageVersion Include="SixLabors.ImageSharp" Version="3.1.12" />
+	</ItemGroup>
+</Project>
