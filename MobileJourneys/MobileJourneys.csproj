@@ -11,4 +11,7 @@
 		<PackageReference Include="Microsoft.Testing.Platform" />
 		<PackageReference Include="SixLabors.ImageSharp" />
 	</ItemGroup>
+	<ItemGroup>
+		<InternalsVisibleTo Include="MobileJourneys.Tests" />
+	</ItemGroup>
 </Project>

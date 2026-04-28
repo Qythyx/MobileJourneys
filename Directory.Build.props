@@ -16,4 +16,12 @@
 			>true</ContinuousIntegrationBuild
 		>
 	</PropertyGroup>
+	<!-- Test projects run under Microsoft.Testing.Platform via NUnit3TestAdapter's MTP integration. -->
+	<PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
+		<IsTestProject>true</IsTestProject>
+		<OutputType>Exe</OutputType>
+		<TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+		<EnableNUnitRunner>true</EnableNUnitRunner>
+		<GenerateDocumentationFile>false</GenerateDocumentationFile>
+	</PropertyGroup>
 </Project>
