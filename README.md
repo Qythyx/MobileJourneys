@@ -22,6 +22,30 @@ records — and verified against per-platform PNG screenshot baselines.
   journeys, with `--filter`, `--rerun`, `--list-extraneous`, `--delete-extraneous`
   CLI flags.
 
+## External dependencies
+
+Beyond the .NET SDK, MobileJourneys drives real simulators/emulators via several
+external tools. **`DependencyChecker.Verify(config)` runs at the start of every
+test session** and fails fast (with an install hint) if any required tool is
+missing — only the platforms you've configured in `FrameworkConfig.PlatformConfigs`
+are checked.
+
+| Tool                                | Used for                                                   | When required                                | Install                                                                                                                                            |
+| ----------------------------------- | ---------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Appium 2.x](https://appium.io/)    | Driving iOS / Android via WebDriver                        | Always                                       | `npm install -g appium` (and `node`/`npm` on PATH)                                                                                                 |
+| Xcode command-line tools (`xcrun`)  | iOS simulator boot, theme/font, screenshots, push payloads | If any `IosPlatformConfig` is configured     | `xcode-select --install`                                                                                                                           |
+| Android SDK platform-tools (`adb`)  | Android emulator control, theme/font, logcat               | If any `AndroidPlatformConfig` is configured | Android Studio → SDK Manager → "Android SDK Platform-Tools", or [standalone download](https://developer.android.com/tools/releases/platform-tools) |
+| `ANDROID_HOME` environment variable | Resolves `$ANDROID_HOME/platform-tools/adb`                | If any `AndroidPlatformConfig` is configured | `export ANDROID_HOME=$HOME/Library/Android/sdk` (typical macOS path)                                                                               |
+
+A simulator/emulator must be **booted before the test session starts** (the
+framework attaches via Appium; it does not boot devices itself). On macOS:
+
+```bash
+xcrun simctl list devices       # list simulators
+xcrun simctl boot "iPhone 17 Pro"
+emulator -avd Pixel_8_API35     # Android (in a separate terminal)
+```
+
 ## Quick start
 
 The framework is consumed by an MTP-based test executable that supplies its own

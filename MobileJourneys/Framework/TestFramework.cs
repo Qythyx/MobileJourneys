@@ -83,6 +83,10 @@ public sealed class TestFramework(
 
 	private async Task RunAsync(ExecuteRequestContext context, SessionUid sessionUid)
 	{
+		// Fail fast on missing external deps (Appium, xcrun, adb) with an install hint
+		// instead of producing cryptic Appium errors mid-session.
+		DependencyChecker.Verify(config);
+
 		var options = serviceProvider.GetCommandLineOptions();
 		var filters = options.TryGetOptionArgumentList(CommandLineProvider.FilterOption, out var values) ? values : [];
 		var rerun = options.IsOptionSet(CommandLineProvider.RerunOption);
