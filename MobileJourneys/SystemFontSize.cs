@@ -1,9 +1,14 @@
 namespace MobileJourneys;
 
 /// <summary>
-/// System-wide font size category. Mirrors iOS's UIContentSizeCategory; on Android
-/// each value maps to a numeric <c>font_scale</c> setting via
-/// <see cref="SimulatorHelper.SetSystemFontSize"/>.
+/// System-wide font size category. Mirrors iOS's
+/// <see href="https://developer.apple.com/documentation/uikit/uicontentsizecategory">
+/// UIContentSizeCategory</see>; on Android each value maps to a numeric
+/// <see href="https://developer.android.com/reference/android/provider/Settings.System#FONT_SCALE">
+/// Settings.System.FONT_SCALE</see> via <see cref="SimulatorHelper.SetSystemFontSize"/>.
+/// The specific Android float values (0.82, 0.88, 0.94, 1.0, 1.15, 1.30, …) are chosen
+/// to approximate iOS's categories — Android itself doesn't define a fixed enum, just
+/// a multiplier.
 /// </summary>
 public enum SystemFontSize
 {
