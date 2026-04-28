@@ -4,6 +4,10 @@
 		<RootNamespace>MobileJourneys</RootNamespace>
 		<AssemblyName>MobileJourneys</AssemblyName>
 		<IsPackable>false</IsPackable>
+		<!-- This is a library, not a test runner. `dotnet test` walks the slnx and tries
+		     to run every project; setting these to false makes it skip us. -->
+		<IsTestProject>false</IsTestProject>
+		<IsTestingPlatformApplication>false</IsTestingPlatformApplication>
 	</PropertyGroup>
 	<ItemGroup>
 		<PackageReference Include="Appium.WebDriver" />
