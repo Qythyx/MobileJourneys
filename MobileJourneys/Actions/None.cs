@@ -6,5 +6,6 @@ namespace MobileJourneys.Actions;
 /// </summary>
 public sealed record None() : JourneyAction
 {
+	/// <inheritdoc/>
 	public override void Execute(TestDriver driver) { }
 }

@@ -8,5 +8,6 @@ namespace MobileJourneys.Actions;
 /// <param name="ButtonLabel">The exact button text to tap.</param>
 public sealed record TapAlertButton(string ButtonLabel) : JourneyAction(ButtonLabel)
 {
+	/// <inheritdoc/>
 	public override void Execute(TestDriver driver) => driver.TapAlertButton(ButtonLabel);
 }

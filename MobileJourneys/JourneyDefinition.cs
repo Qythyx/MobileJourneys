@@ -17,6 +17,7 @@ public sealed record JourneyDefinition(
 	[CallerMemberName] string Name = ""
 )
 {
+	/// <summary>The initial-screen expectations. Validated to be non-empty at construction.</summary>
 	public Expectation[] InitialExpect { get; } =
 		InitialExpect.Length > 0
 			? InitialExpect
@@ -27,5 +28,6 @@ public sealed record JourneyDefinition(
 	/// </summary>
 	public string InitialName => InitialExpect[0].Label;
 
+	/// <inheritdoc/>
 	public override string ToString() => Name;
 }

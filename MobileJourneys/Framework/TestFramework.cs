@@ -7,30 +7,48 @@ using Microsoft.Testing.Platform.TestHost;
 
 namespace MobileJourneys.Framework;
 
+/// <summary>
+/// The Microsoft.Testing.Platform <see cref="ITestFramework"/> implementation. Discovers
+/// the cross-product of <see cref="FrameworkConfig.PlatformConfigs"/> and
+/// <see cref="FrameworkConfig.Journeys"/>, runs each platform group's tests concurrently,
+/// and publishes lifecycle events to MTP via <see cref="MtpReporter"/>.
+/// </summary>
+/// <param name="capabilities">MTP capabilities (unused but required by the contract).</param>
+/// <param name="serviceProvider">MTP service provider; used to read CLI options.</param>
+/// <param name="config">The framework configuration the consumer's Program.Main built.</param>
 public sealed class TestFramework(
 	ITestFrameworkCapabilities capabilities,
 	IServiceProvider serviceProvider,
 	FrameworkConfig config
 ) : ITestFramework, IDataProducer
 {
+	/// <inheritdoc/>
 	public string Uid => TestAssembly.Name;
 
-	public string Version => "1.0.0";
+	/// <inheritdoc/>
+	public string Version => TestAssembly.FrameworkVersion;
 
+	/// <inheritdoc/>
 	public string DisplayName => config.DisplayName;
 
+	/// <inheritdoc/>
 	public string Description => config.Description;
 
+	/// <inheritdoc/>
 	public Type[] DataTypesProduced => [typeof(TestNodeUpdateMessage)];
 
+	/// <inheritdoc/>
 	public Task<bool> IsEnabledAsync() => Task.FromResult(true);
 
+	/// <inheritdoc/>
 	public Task<CreateTestSessionResult> CreateTestSessionAsync(CreateTestSessionContext context) =>
 		Task.FromResult(new CreateTestSessionResult { IsSuccess = true });
 
+	/// <inheritdoc/>
 	public Task<CloseTestSessionResult> CloseTestSessionAsync(CloseTestSessionContext context) =>
 		Task.FromResult(new CloseTestSessionResult { IsSuccess = true });
 
+	/// <inheritdoc/>
 	public async Task ExecuteRequestAsync(ExecuteRequestContext context)
 	{
 		_ = capabilities;

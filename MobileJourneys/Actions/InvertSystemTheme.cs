@@ -6,6 +6,7 @@ namespace MobileJourneys.Actions;
 /// </summary>
 public sealed record InvertSystemTheme() : JourneyAction
 {
+	/// <inheritdoc/>
 	public override void Execute(TestDriver driver)
 	{
 		SimulatorHelper.SetSystemTheme(!driver.Config.IsLightTheme, driver.Config.Platform, driver.GetDeviceId());

@@ -8,6 +8,7 @@ namespace MobileJourneys.Expectations;
 /// <param name="ExpectedTexts">One or more text values the element may contain (any match succeeds).</param>
 public sealed record VisibleWithText(string AutomationId, params string[] ExpectedTexts) : Expectation(AutomationId)
 {
+	/// <inheritdoc/>
 	public override void Verify(TestDriver driver) =>
 		driver.FindElementWithText(AutomationId, ExpectedTexts, TimeSpan.FromSeconds(10));
 }

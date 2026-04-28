@@ -10,6 +10,14 @@ using Rectangle = System.Drawing.Rectangle;
 
 namespace MobileJourneys;
 
+/// <summary>
+/// High-level wrapper around <see cref="AppiumDriver"/> that powers journey actions and
+/// expectations: element finding (with retry), gestures (taps, swipes), keyboard,
+/// alerts, deep links, screenshot stability polling, and crash detection.
+/// </summary>
+/// <param name="app">The underlying Appium driver.</param>
+/// <param name="config">Platform fixture (drives platform-specific branches).</param>
+/// <param name="deepLinkScheme">URL scheme without "://" used by <see cref="ScrollToElement"/> and consumer-side notification actions.</param>
 public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string deepLinkScheme)
 {
 	private enum Phase
@@ -19,10 +27,27 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 		BannerStabilizing = 2,
 	}
 
+	/// <summary>
+	/// AutomationId the consumer's app should set on the content view immediately
+	/// below the notification banner. Used by the framework to mask out the banner
+	/// region when comparing screenshots.
+	/// </summary>
 	public const string AutomationIdBelowNotification = "ScreenBelowNotification";
+
+	/// <summary>The underlying Appium driver.</summary>
 	public AppiumDriver App { get; } = app;
+
+	/// <summary>The platform fixture this driver is bound to.</summary>
 	public PlatformConfig Config { get; } = config;
+
+	/// <summary>URL scheme used to open in-app deep links (without the "://" suffix).</summary>
 	public string DeepLinkScheme { get; } = deepLinkScheme;
+
+	/// <summary>
+	/// The current journey's environment. Populated by <c>JourneyRunner</c> before each
+	/// journey runs; consumer-side actions read this to derive fixture-aware behavior
+	/// (e.g., picking the right localized label).
+	/// </summary>
 	public IJourneyEnvironment CurrentJourneyEnv { get; set; } = null!;
 
 	private Rectangle[] SystemMasks =>
@@ -39,6 +64,7 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 	/// </summary>
 	private byte[]? _screenshotPngBytes;
 
+	/// <summary>Returns the device UDID/transport-ID this driver is connected to.</summary>
 	public string GetDeviceId()
 	{
 		var capabilityName = Config.Platform == TestPlatform.iOS ? "udid" : "deviceUDID";
@@ -48,6 +74,7 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 			);
 	}
 
+	/// <summary>Polls until the element with the given AutomationId is no longer present or the timeout elapses.</summary>
 	public void WaitForElementGone(string automationId, TimeSpan timeout)
 	{
 		var deadline = DateTime.UtcNow + timeout;
@@ -160,6 +187,7 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 			)
 		);
 
+	/// <summary>Sleeps for the given duration to let UI animations / async work settle.</summary>
 	public static void WaitForAppToSettle(int milliseconds) => Task.Delay(milliseconds).Wait();
 
 	/// <summary>
@@ -190,7 +218,7 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 		var windowSize = App.Manage().Window.Size;
 		var previousImage = _screenshotPngBytes is not null
 			? Image.Load<Rgb24>(_screenshotPngBytes)
-			: App.GetScreenshot().AsImage(false);
+			: App.GetScreenshot().AsImage();
 		var maskRegions = ScreenshotHelper.ScaleMaskRegions(
 			[.. maskElementIds.Select(id => GetElementRectangle(windowSize, id)).Concat(SystemMasks)],
 			windowSize,
@@ -224,7 +252,7 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 		var elapsed = stopwatch.Elapsed;
 		while (stopwatch.Elapsed.TotalMilliseconds < MaxWaitMs)
 		{
-			var screenshot = App.GetScreenshot().AsImage(false);
+			var screenshot = App.GetScreenshot().AsImage();
 			if ((stopwatch.Elapsed - elapsed).TotalMilliseconds < MinMsBetweenScreenshots)
 			{
 				screenshot.Dispose();
@@ -273,6 +301,7 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 		};
 	}
 
+	/// <summary>Performs a single-finger swipe from (startX, startY) to (endX, endY) in viewport coordinates.</summary>
 	public void SwipeScreen(int startX, int startY, int endX, int endY)
 	{
 		var finger = new PointerInputDevice(PointerKind.Touch, "finger");
@@ -288,10 +317,13 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 		App.PerformActions([sequence]);
 	}
 
+	/// <summary>Swipes left on the given scrollable element.</summary>
 	public void SwipeLeft(string onElementId) => SwipeOnElement(onElementId, "left");
 
+	/// <summary>Swipes right on the given scrollable element.</summary>
 	public void SwipeRight(string onElementId) => SwipeOnElement(onElementId, "right");
 
+	/// <summary>Dismisses the on-screen keyboard if present.</summary>
 	public void DismissKeyboard()
 	{
 		try
@@ -346,6 +378,7 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 		WaitForAppToSettle(500);
 	}
 
+	/// <summary>Opens an in-app deep link via mobile: deepLink (Android) or App.OpenUrl (iOS).</summary>
 	public void OpenDeepLink(string url)
 	{
 		if (Config.Platform == TestPlatform.Android)
@@ -390,6 +423,7 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 		SwipeScreen(startX, centerY, endX, centerY);
 	}
 
+	/// <summary>Dismisses any visible alert; no-op when none is shown.</summary>
 	public void DismissAlertIfPresent(TimeSpan? timeout = null)
 	{
 		try
@@ -465,6 +499,7 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 		WaitForAppToSettle(300);
 	}
 
+	/// <summary>Waits for a system alert to appear within the timeout.</summary>
 	public void WaitForAlert(TimeSpan timeout) =>
 		_ = new WebDriverWait(App, timeout).Until(driver =>
 		{
@@ -602,6 +637,7 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 		}
 	}
 
+	/// <summary>Selects the Nth item in the MAUI Picker with the given AutomationId. Throws on iOS due to dotnet/maui#28024.</summary>
 	public void SelectPickerItem(string automationId, int itemIndex)
 	{
 		if (Config.Platform == TestPlatform.iOS)

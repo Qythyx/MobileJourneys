@@ -10,6 +10,7 @@ namespace MobileJourneys.Actions;
 /// <param name="AutomationId">The element to tap.</param>
 public sealed record Tap(string AutomationId) : JourneyAction(AutomationId)
 {
+	/// <inheritdoc/>
 	public override void Execute(TestDriver driver)
 	{
 		for (var attempt = 0; attempt < 3; attempt++)

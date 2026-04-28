@@ -37,7 +37,10 @@ internal sealed class MtpReporter(
 		// See: dotnet/sdk PR #49806 (introduced the bug), testfx ExceptionFlattener.
 		TestNodeStateProperty state = result.Passed
 			? PassedTestNodeStateProperty.CachedInstance
-			: new FailedTestNodeStateProperty(result.Exception ?? new JourneyFailureException(result.Explanation), "");
+			: new FailedTestNodeStateProperty(
+				result.Exception ?? new InvalidOperationException(result.Explanation),
+				""
+			);
 		Publish(result.TestCase, state, result.Duration);
 	}
 

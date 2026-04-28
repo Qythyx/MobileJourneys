@@ -1,5 +1,5 @@
-using MobileJourneys.Framework;
 using Codeuctivity.ImageSharpCompare;
+using MobileJourneys.Framework;
 using OpenQA.Selenium.Appium;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
@@ -9,10 +9,18 @@ using Rectangle = System.Drawing.Rectangle;
 
 namespace MobileJourneys;
 
+/// <summary>
+/// Image capture, scaling, masking, and pixel-diff comparison for screenshot baselines.
+/// Uses SixLabors.ImageSharp for I/O and Codeuctivity.ImageSharpCompare for diffing.
+/// </summary>
 public static class ScreenshotHelper
 {
-	private const int MaxHeightPixels = 2000;
-
+	/// <summary>Captures a screenshot, scales it down to <see cref="PlatformConfig.MaxScreenshotHeight"/>, and writes it to the journey's directory.</summary>
+	/// <param name="driver">The Appium driver to capture from.</param>
+	/// <param name="config">Platform fixture (selects subdirectory and the max-height ceiling).</param>
+	/// <param name="journeyName">Subdirectory within the platform's screenshot directory.</param>
+	/// <param name="stepName">Filename (without extension) for the captured screenshot.</param>
+	/// <returns>Absolute path to the saved file.</returns>
 	public static string CaptureScreenshot(
 		AppiumDriver driver,
 		PlatformConfig config,
@@ -21,7 +29,7 @@ public static class ScreenshotHelper
 	)
 	{
 		using var image = Image.Load<Rgb24>(driver.GetScreenshot().AsByteArray);
-		image.ScaleToMax();
+		image.ScaleToMax(config.MaxScreenshotHeight);
 		var dir = GetScreenshotsDir(config, journeyName);
 		_ = Directory.CreateDirectory(dir);
 		var filePath = Path.Combine(dir, $"{stepName}.png");
@@ -51,7 +59,7 @@ public static class ScreenshotHelper
 		using (actual)
 		{
 			var sourceSize = new System.Drawing.Size(actual.Size.Width, actual.Size.Height);
-			actual.ScaleToMax();
+			actual.ScaleToMax(config.MaxScreenshotHeight);
 			var targetSize = new System.Drawing.Size(actual.Size.Width, actual.Size.Height);
 			maskRegions = ScaleMaskRegions(maskRegions, sourceSize, targetSize);
 
@@ -110,27 +118,19 @@ public static class ScreenshotHelper
 		}
 	}
 
-	internal static void ScaleToMax(this Image<Rgb24> image)
+	internal static void ScaleToMax(this Image<Rgb24> image, int maxHeight)
 	{
-		if (image.Height > MaxHeightPixels)
+		if (image.Height > maxHeight)
 		{
-			var scale = (double)MaxHeightPixels / image.Height;
-			image.Mutate(x => x.Resize((int)(image.Width * scale), MaxHeightPixels));
+			var scale = (double)maxHeight / image.Height;
+			image.Mutate(x => x.Resize((int)(image.Width * scale), maxHeight));
 		}
 	}
 
 	/// <summary>Decodes a PNG screenshot into a Image.</summary>
 	/// <param name="screenshot">The screenshot.</param>
-	/// <param name="scale">Whether to scale the image down to the maximum height.</param>
-	internal static Image<Rgb24> AsImage(this OpenQA.Selenium.Screenshot screenshot, bool scale)
-	{
-		var image = Image.Load<Rgb24>(screenshot.AsByteArray);
-		if (scale)
-		{
-			image.ScaleToMax();
-		}
-		return image;
-	}
+	internal static Image<Rgb24> AsImage(this OpenQA.Selenium.Screenshot screenshot) =>
+		Image.Load<Rgb24>(screenshot.AsByteArray);
 
 	/// <summary>Scales mask regions from one coordinate space to another.</summary>
 	/// <param name="regions">Mask regions in the <paramref name="from"/> coordinate space.</param>
@@ -294,11 +294,17 @@ public static class ScreenshotHelper
 		return mask;
 	}
 
+	/// <summary>Absolute path to the consumer's <c>Screenshots/</c> directory.</summary>
 	public static readonly string ScreenshotsRootDir = Path.Combine(TestAssembly.ProjectRootPath, "Screenshots");
 
+	/// <summary>Returns the platform-specific screenshot subdirectory for the given fixture.</summary>
+	/// <param name="config">Platform fixture identifying the subdirectory name.</param>
 	public static string GetScreenshotsDir(PlatformConfig config) =>
 		Path.Combine(ScreenshotsRootDir, config.DisplayName);
 
+	/// <summary>Returns the journey's directory inside the platform-specific screenshot subdirectory.</summary>
+	/// <param name="config">Platform fixture identifying the subdirectory name.</param>
+	/// <param name="journeyName">Subdirectory within the platform directory.</param>
 	public static string GetScreenshotsDir(PlatformConfig config, string journeyName) =>
 		Path.Combine(GetScreenshotsDir(config), journeyName);
 }

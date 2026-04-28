@@ -1,11 +1,12 @@
 namespace MobileJourneys.Actions;
 
 /// <summary>
-/// When OnElementId is provided, targets that scrollable element for more deterministic
-/// behavior (recommended for carousels). Otherwise falls back to a generic screen gesture.
+/// Swipes right on the element with the given AutomationId. Targets a specific scrollable
+/// element for deterministic gestures (recommended for carousels and lists).
 /// </summary>
-/// <param name="OnElementId">The ID of the element to swipe.</param>
-public sealed record SwipeRight(string OnElementId) : JourneyAction(OnElementId)
+/// <param name="AutomationId">The AutomationId of the element to swipe.</param>
+public sealed record SwipeRight(string AutomationId) : JourneyAction(AutomationId)
 {
-	public override void Execute(TestDriver driver) => driver.SwipeRight(OnElementId);
+	/// <inheritdoc/>
+	public override void Execute(TestDriver driver) => driver.SwipeRight(AutomationId);
 }

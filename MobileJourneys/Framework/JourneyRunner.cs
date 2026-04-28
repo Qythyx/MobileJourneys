@@ -10,7 +10,7 @@ internal static class JourneyRunner
 		var config = testCase.Config;
 		var deviceId = driver.GetDeviceId();
 		var stopwatch = Stopwatch.StartNew();
-		SimulatorHelper.SetSystemFontSize("large", "1.0", config.Platform, deviceId);
+		SimulatorHelper.SetSystemFontSize(SystemFontSize.Large, config.Platform, deviceId);
 		SimulatorHelper.SetSystemTheme(config.IsLightTheme, config.Platform, deviceId);
 
 		var totalSteps = journey.Steps.Length + 1;
@@ -19,9 +19,16 @@ internal static class JourneyRunner
 		driver.ClearAndroidLogcat();
 		AppLifecycle.RelaunchApp(driver.App, driver.Config, driver.CurrentJourneyEnv);
 
-		var steps = new List<(int Number, string Name, Action Execute, string[] MaskElements, bool PrefetchMasks)>
+		var steps = new List<(
+			int Number,
+			string Name,
+			Action Execute,
+			string[] MaskElements,
+			bool PrefetchMasks,
+			JourneyStep? Step
+		)>
 		{
-			(1, journey.InitialName, () => ProcessExpectations(driver, journey.InitialExpect), [], false),
+			(1, journey.InitialName, () => ProcessExpectations(driver, journey.InitialExpect), [], false, null),
 		};
 		for (var i = 0; i < journey.Steps.Length; i++)
 		{
@@ -36,12 +43,13 @@ internal static class JourneyRunner
 						ProcessExpectations(driver, step.Expect ?? []);
 					},
 					step.MaskElements ?? [],
-					step.PrefetchMasks
+					step.PrefetchMasks,
+					step
 				)
 			);
 		}
 
-		foreach (var (number, name, execute, maskElements, prefetchMasks) in steps)
+		foreach (var (number, name, execute, maskElements, prefetchMasks, journeyStep) in steps)
 		{
 			reporter.StepStarted(testCase, number, totalSteps, name);
 			var numberedStepName = $"{number:D2} {name}";
@@ -66,7 +74,7 @@ internal static class JourneyRunner
 						false,
 						stopwatch.Elapsed,
 						message,
-						new JourneyFailureException(message)
+						new JourneyFailureException(message, journey, journeyStep, number, totalSteps, name)
 					);
 				}
 			}
@@ -75,7 +83,13 @@ internal static class JourneyRunner
 				HandleStepFailure(driver, ex, numberedStepName, journey.Name);
 				var message = $"step {number}/{totalSteps}: {name} — {ex.Message}";
 				stopwatch.Stop();
-				return new JourneyResult(testCase, false, stopwatch.Elapsed, message, ex);
+				return new JourneyResult(
+					testCase,
+					false,
+					stopwatch.Elapsed,
+					message,
+					new JourneyFailureException(message, journey, journeyStep, number, totalSteps, name, ex)
+				);
 			}
 		}
 

@@ -5,5 +5,6 @@ namespace MobileJourneys.Actions;
 /// </summary>
 public sealed record DismissKeyboard() : JourneyAction
 {
+	/// <inheritdoc/>
 	public override void Execute(TestDriver driver) => driver.DismissKeyboard();
 }

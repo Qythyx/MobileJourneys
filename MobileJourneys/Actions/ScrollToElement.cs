@@ -7,5 +7,6 @@ namespace MobileJourneys.Actions;
 /// <param name="AutomationId">The ID of the element to scroll to.</param>
 public sealed record ScrollToElement(string AutomationId) : JourneyAction(AutomationId)
 {
+	/// <inheritdoc/>
 	public override void Execute(TestDriver driver) => driver.ScrollToElement(AutomationId);
 }

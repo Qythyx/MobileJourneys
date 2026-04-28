@@ -28,7 +28,10 @@ public abstract record PlatformConfig(
 	internal const int AvdLaunchTimeoutMs = 120_000;
 	internal const int AppWaitDurationMs = 30_000;
 
+	/// <summary>The mobile platform of this fixture.</summary>
 	public abstract TestPlatform Platform { get; }
+
+	/// <summary>The Appium automationName capability ("XCUITest" or "UiAutomator2").</summary>
 	public abstract string AutomationName { get; }
 
 	/// <summary>
@@ -37,8 +40,17 @@ public abstract record PlatformConfig(
 	/// </summary>
 	public abstract int ColorTolerance { get; }
 
+	/// <summary>
+	/// Maximum height (in pixels) screenshots are scaled down to before saving as a baseline
+	/// or comparing against one. Larger devices' raw screenshots are downscaled proportionally.
+	/// Override to trade off baseline file size and visual fidelity.
+	/// </summary>
+	public virtual int MaxScreenshotHeight => 2000;
+
+	/// <summary>Human-readable identifier used as the screenshot subdirectory name.</summary>
 	public string DisplayName => $"{Platform} · {PlatformVersion} · {DeviceName} · {(IsLightTheme ? "light" : "dark")}";
 
+	/// <inheritdoc/>
 	public sealed override string ToString() => DisplayName;
 
 	/// <summary>
@@ -96,8 +108,13 @@ public sealed record IosPlatformConfig(
 	string AppBinaryPath
 ) : PlatformConfig(PlatformVersion, DeviceName, IsLightTheme, AppIdentifier, AppBinaryPath)
 {
+	/// <inheritdoc/>
 	public override TestPlatform Platform => TestPlatform.iOS;
+
+	/// <inheritdoc/>
 	public override string AutomationName => "XCUITest";
+
+	/// <inheritdoc/>
 	public override int ColorTolerance => 3 * 2;
 
 	internal override void ConfigureAppiumOptions(AppiumOptions options)
@@ -130,10 +147,16 @@ public sealed record AndroidPlatformConfig(
 	string? MainActivity
 ) : PlatformConfig(PlatformVersion, DeviceName, IsLightTheme, AppIdentifier, AppBinaryPath)
 {
+	/// <inheritdoc/>
 	public override TestPlatform Platform => TestPlatform.Android;
+
+	/// <inheritdoc/>
 	public override string AutomationName => "UiAutomator2";
+
+	/// <inheritdoc/>
 	public override int ColorTolerance => 3 * 10;
 
+	/// <summary>The activity to launch on app start, falling back to <c>$"{AppIdentifier}.MainActivity"</c>.</summary>
 	public string ResolvedMainActivity => MainActivity ?? $"{AppIdentifier}.MainActivity";
 
 	internal override void ConfigureAppiumOptions(AppiumOptions options)

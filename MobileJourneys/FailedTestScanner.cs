@@ -1,9 +1,17 @@
 namespace MobileJourneys;
 
+/// <summary>
+/// Detects and cleans up failure artifacts left in the Screenshots directory by previous
+/// runs (<c>*.new.png</c>, <c>*_diff_*.png</c>, <c>*_FAIL_*.png</c>, <c>*.CRASH.txt</c>),
+/// and locates orphaned baselines whose journey/step no longer exists.
+/// </summary>
 public static class FailedTestScanner
 {
 	private static readonly string[] ResultFilePatterns = ["*.new.png", "*_diff_*.png", "*_FAIL_*.png", "*.CRASH.txt"];
 
+	/// <summary>Returns <c>true</c> if the journey's screenshot folder contains failure artifacts from a previous run.</summary>
+	/// <param name="config">Platform fixture identifying the screenshot subdirectory.</param>
+	/// <param name="journey">The journey to check.</param>
 	public static bool IsFailedJourney(PlatformConfig config, JourneyDefinition journey)
 	{
 		var journeyDir = ScreenshotHelper.GetScreenshotsDir(config, journey.Name);
@@ -11,6 +19,10 @@ public static class FailedTestScanner
 			&& ResultFilePatterns.Any(pat => Directory.GetFiles(journeyDir, pat).Length > 0);
 	}
 
+	/// <summary>Deletes failure artifacts for one specific step (matched by filename prefix).</summary>
+	/// <param name="config">Platform fixture identifying the screenshot subdirectory.</param>
+	/// <param name="journeyName">The journey name (subdirectory).</param>
+	/// <param name="filePrefix">Step filename prefix, e.g., <c>"02 Tap HamburgerMenu"</c>.</param>
 	public static void CleanupStepResults(PlatformConfig config, string journeyName, string filePrefix)
 	{
 		var journeyDir = ScreenshotHelper.GetScreenshotsDir(config, journeyName);
@@ -28,6 +40,9 @@ public static class FailedTestScanner
 		}
 	}
 
+	/// <summary>Deletes all failure artifacts for the journey.</summary>
+	/// <param name="config">Platform fixture identifying the screenshot subdirectory.</param>
+	/// <param name="journeyName">The journey name (subdirectory).</param>
 	public static void CleanupResults(PlatformConfig config, string journeyName)
 	{
 		var journeyDir = ScreenshotHelper.GetScreenshotsDir(config, journeyName);
