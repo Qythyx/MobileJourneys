@@ -4,7 +4,7 @@ using Microsoft.Testing.Platform.Extensions.CommandLine;
 
 namespace MobileUITests.Framework;
 
-internal sealed class CommandLineProvider(FrameworkConfig config) : ICommandLineOptionsProvider
+public sealed class CommandLineProvider(FrameworkConfig config) : ICommandLineOptionsProvider
 {
 	public const string FilterOption = "filter";
 	public const string RerunOption = "rerun";

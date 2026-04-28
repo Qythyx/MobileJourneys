@@ -2,7 +2,13 @@ using System.Reflection;
 
 namespace MobileUITests.Framework;
 
-internal static class TestAssembly
+/// <summary>
+/// Convenience accessors for assembly-level metadata the consumer test executable
+/// declares via <c>&lt;AssemblyMetadata&gt;</c> items in its csproj. Resolved against
+/// <see cref="Assembly.GetEntryAssembly"/>, which is the test executable when MTP runs
+/// the suite.
+/// </summary>
+public static class TestAssembly
 {
 	private static readonly Assembly EntryAssembly =
 		Assembly.GetEntryAssembly()
