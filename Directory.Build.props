@@ -7,11 +7,13 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<EnableNETAnalyzers>true</EnableNETAnalyzers>
 		<EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
-		<GenerateDocumentationFile>false</GenerateDocumentationFile>
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<AnalysisLevel>latest</AnalysisLevel>
 		<AnalysisMode>Recommended</AnalysisMode>
 		<ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
 		<TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-		<ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true' OR '$(TF_BUILD)' == 'true'">true</ContinuousIntegrationBuild>
+		<ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true' OR '$(TF_BUILD)' == 'true'"
+			>true</ContinuousIntegrationBuild
+		>
 	</PropertyGroup>
 </Project>
