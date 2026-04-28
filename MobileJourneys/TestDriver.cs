@@ -129,6 +129,10 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 				$"Element '{automationId}' {c.message(lastElement)} after {timeout.TotalSeconds}s"
 			);
 		}
+		catch (WebDriverTimeoutException ex)
+		{
+			throw new NoSuchElementException($"Element '{automationId}' not found after {timeout.TotalSeconds}s.", ex);
+		}
 	}
 
 	/// <summary>
@@ -432,23 +436,30 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 	/// <param name="buttonLabel">The exact text of the button to tap.</param>
 	public void TapAlertButton(string buttonLabel)
 	{
-		if (Config.Platform == TestPlatform.iOS)
+		try
 		{
-			App.FindElement(By.Name(buttonLabel)).Click();
-		}
-		else
-		{
-			// Android AlertDialog buttons don't have AccessibilityId. Find by text content.
-			// MaterialAlertDialog renders button text in uppercase via textAllCaps, so the
-			// @text attribute contains the uppercased form. Use translate() for a
-			// case-insensitive match so journey definitions can use the natural-case label.
-			var lower = buttonLabel.ToLowerInvariant();
-			App.FindElement(
-					By.XPath(
-						$"//android.widget.Button[translate(@text,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')='{lower}']"
+			if (Config.Platform == TestPlatform.iOS)
+			{
+				App.FindElement(By.Name(buttonLabel)).Click();
+			}
+			else
+			{
+				// Android AlertDialog buttons don't have AccessibilityId. Find by text content.
+				// MaterialAlertDialog renders button text in uppercase via textAllCaps, so the
+				// @text attribute contains the uppercased form. Use translate() for a
+				// case-insensitive match so journey definitions can use the natural-case label.
+				var lower = buttonLabel.ToLowerInvariant();
+				App.FindElement(
+						By.XPath(
+							$"//android.widget.Button[translate(@text,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')='{lower}']"
+						)
 					)
-				)
-				.Click();
+					.Click();
+			}
+		}
+		catch (NoSuchElementException ex)
+		{
+			throw new NoSuchElementException($"Alert button with label '{buttonLabel}' not found.", ex);
 		}
 
 		WaitForAppToSettle(300);

@@ -24,5 +24,5 @@ public sealed record JourneyStep(
 	/// Step name used in the baseline filename. Derived from the action, or from the first
 	/// expectation when the action is <see cref="None"/>.
 	/// </summary>
-	public string Name => Action is None && Expect is [var first, ..] ? first.Name : Action.Name;
+	public string Name => Action is None && Expect is [var first, ..] ? first.Label : Action.Label;
 }

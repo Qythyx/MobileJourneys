@@ -25,7 +25,7 @@ public sealed record JourneyDefinition(
 	/// <summary>
 	/// Step name for the initial screenshot, derived from the first expectation.
 	/// </summary>
-	public string InitialName => InitialExpect[0].Name;
+	public string InitialName => InitialExpect[0].Label;
 
 	public override string ToString() => Name;
 }

@@ -5,8 +5,8 @@ namespace MobileJourneys.Actions;
 /// <see cref="DismissAlert"/> which uses Selenium's abstract Accept/Dismiss (unreliable
 /// for two-button MAUI alerts), this finds and clicks the exact button element.
 /// </summary>
-/// <param name="Label">The exact button text to tap.</param>
-public sealed record TapAlertButton(string Label) : JourneyAction(Label)
+/// <param name="ButtonLabel">The exact button text to tap.</param>
+public sealed record TapAlertButton(string ButtonLabel) : JourneyAction(ButtonLabel)
 {
-	public override void Execute(TestDriver driver) => driver.TapAlertButton(Label);
+	public override void Execute(TestDriver driver) => driver.TapAlertButton(ButtonLabel);
 }

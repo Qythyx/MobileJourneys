@@ -4,25 +4,30 @@ namespace MobileJourneys;
 /// A typed expectation to verify after executing a journey action.
 /// Expectations are processed in array order; the sequence matters for readiness gates.
 /// </summary>
-/// <param name="Target">Optional identifier used to build the step name. When the target contains
+/// <param name="Target">Optional identifier used to build the step label. When the target contains
 /// underscores (e.g., "ActivityOverlay_Overlay"), only the last segment is used (e.g., "Overlay").</param>
 public abstract record Expectation(string? Target = null)
 {
 	/// <summary>
-	/// Step name derived from the concrete type and optional target.
+	/// Type-prefix used in <see cref="Label"/>. Defaults to the runtime type's simple name.
 	/// </summary>
-	public string Name
+	protected virtual string Name => GetType().Name;
+
+	/// <summary>
+	/// Step label derived from <see cref="Name"/> and optional <see cref="Target"/>.
+	/// </summary>
+	public string Label
 	{
 		get
 		{
 			if (Target is null)
 			{
-				return GetType().Name;
+				return Name;
 			}
 
 			var lastUnderscore = Target.LastIndexOf('_');
 			var shortId = lastUnderscore >= 0 ? Target[(lastUnderscore + 1)..] : Target;
-			return $"{GetType().Name} {shortId}";
+			return $"{Name} {shortId}";
 		}
 	}
 
