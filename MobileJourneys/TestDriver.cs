@@ -107,12 +107,8 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 	/// </param>
 	/// <returns>The found element.</returns>
 	/// <exception cref="TimeoutException">
-	/// Thrown when a <paramref name="condition"/> is supplied and its predicate never returns true
-	/// before the timeout; the exception message is built from <c>condition.message</c>.
-	/// </exception>
-	/// <exception cref="WebDriverTimeoutException">
-	/// Thrown when no <paramref name="condition"/> is supplied and the element cannot be found
-	/// before the timeout.
+	/// Thrown when the element is not found before the timeout, or when a
+	/// <paramref name="condition"/> is supplied and its predicate never returns true.
 	/// </exception>
 	public AppiumElement FindElement(
 		string automationId,
@@ -156,9 +152,9 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 				$"Element '{automationId}' {c.message(lastElement)} after {timeout.TotalSeconds}s"
 			);
 		}
-		catch (WebDriverTimeoutException ex)
+		catch (WebDriverTimeoutException)
 		{
-			throw new NoSuchElementException($"Element '{automationId}' not found after {timeout.TotalSeconds}s.", ex);
+			throw new TimeoutException($"Element '{automationId}' not found after {timeout.TotalSeconds}s.");
 		}
 	}
 
@@ -171,10 +167,8 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 	/// <param name="timeout">Maximum time to wait.</param>
 	/// <returns>The found element.</returns>
 	/// <exception cref="TimeoutException">
-	/// Thrown when the element is found but does not contain any expected text within the timeout.
-	/// </exception>
-	/// <exception cref="WebDriverTimeoutException">
-	/// Thrown when the element is never found within the timeout.
+	/// Thrown when the element is not found within the timeout, or is found but does not contain
+	/// any of the expected texts.
 	/// </exception>
 	public AppiumElement FindElementWithText(string automationId, string[] expectedTexts, TimeSpan timeout) =>
 		FindElement(
@@ -491,9 +485,9 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 					.Click();
 			}
 		}
-		catch (NoSuchElementException ex)
+		catch (NoSuchElementException)
 		{
-			throw new NoSuchElementException($"Alert button with label '{buttonLabel}' not found.", ex);
+			throw new InvalidOperationException($"Alert button with label '{buttonLabel}' not found.");
 		}
 
 		WaitForAppToSettle(300);

@@ -8,11 +8,15 @@
 		     to run every project; setting these to false makes it skip us. -->
 		<IsTestProject>false</IsTestProject>
 		<IsTestingPlatformApplication>false</IsTestingPlatformApplication>
+		<!-- MinVer derives Version / FileVersion / InformationalVersion from the latest
+		     git tag at build time. See CLAUDE.md "Versioning" for the release workflow. -->
+		<MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
 	</PropertyGroup>
 	<ItemGroup>
 		<PackageReference Include="Appium.WebDriver" />
 		<PackageReference Include="Codeuctivity.ImageSharpCompare" />
 		<PackageReference Include="Microsoft.Testing.Platform" />
+		<PackageReference Include="MinVer" PrivateAssets="All" />
 		<PackageReference Include="SixLabors.ImageSharp" />
 	</ItemGroup>
 	<ItemGroup>

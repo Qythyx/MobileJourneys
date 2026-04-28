@@ -1,8 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
 using OpenQA.Selenium.Appium;
-using OpenQA.Selenium.Appium.Android;
-using OpenQA.Selenium.Appium.iOS;
 
 namespace MobileJourneys;
 
@@ -16,12 +14,18 @@ namespace MobileJourneys;
 /// <param name="IsLightTheme">When <c>true</c>, the system theme is forced to light before each journey.</param>
 /// <param name="AppIdentifier">Bundle ID (iOS) or package name (Android), e.g., "jp.beercats.beerbox".</param>
 /// <param name="AppBinaryPath">Absolute path to the .app bundle (iOS) or signed .apk (Android).</param>
+/// <param name="MaxScreenshotHeight">
+/// Maximum height (in pixels) screenshots are scaled down to before saving as a baseline
+/// or comparing against one. Larger devices' raw screenshots are downscaled proportionally.
+/// Choose to trade off baseline file size and visual fidelity (e.g., 2000).
+/// </param>
 public abstract record PlatformConfig(
 	string PlatformVersion,
 	string DeviceName,
 	bool IsLightTheme,
 	string AppIdentifier,
-	string AppBinaryPath
+	string AppBinaryPath,
+	int MaxScreenshotHeight
 )
 {
 	internal const int SimulatorStartupTimeoutMs = 180_000;
@@ -39,13 +43,6 @@ public abstract record PlatformConfig(
 	/// The number is the sum of the delta for each component, R, G, and B.
 	/// </summary>
 	public abstract int ColorTolerance { get; }
-
-	/// <summary>
-	/// Maximum height (in pixels) screenshots are scaled down to before saving as a baseline
-	/// or comparing against one. Larger devices' raw screenshots are downscaled proportionally.
-	/// Override to trade off baseline file size and visual fidelity.
-	/// </summary>
-	public virtual int MaxScreenshotHeight => 2000;
 
 	/// <summary>Human-readable identifier used as the screenshot subdirectory name.</summary>
 	public string DisplayName => $"{Platform} · {PlatformVersion} · {DeviceName} · {(IsLightTheme ? "light" : "dark")}";
@@ -95,80 +92,4 @@ public abstract record PlatformConfig(
 		listener.Stop();
 		return port;
 	}
-}
-
-/// <summary>
-/// iOS simulator fixture (XCUITest).
-/// </summary>
-public sealed record IosPlatformConfig(
-	string PlatformVersion,
-	string DeviceName,
-	bool IsLightTheme,
-	string AppIdentifier,
-	string AppBinaryPath
-) : PlatformConfig(PlatformVersion, DeviceName, IsLightTheme, AppIdentifier, AppBinaryPath)
-{
-	/// <inheritdoc/>
-	public override TestPlatform Platform => TestPlatform.iOS;
-
-	/// <inheritdoc/>
-	public override string AutomationName => "XCUITest";
-
-	/// <inheritdoc/>
-	public override int ColorTolerance => 3 * 2;
-
-	internal override void ConfigureAppiumOptions(AppiumOptions options)
-	{
-		options.AddAdditionalAppiumOption("simulatorStartupTimeout", SimulatorStartupTimeoutMs);
-		options.AddAdditionalAppiumOption("wdaLocalPort", FindFreePort());
-		options.AddAdditionalAppiumOption("mjpegServerPort", FindFreePort());
-	}
-
-	internal override AppiumDriver CreateDriver(AppiumOptions options) => new IOSDriver(options);
-}
-
-/// <summary>
-/// Android emulator fixture (UiAutomator2).
-/// </summary>
-/// <param name="PlatformVersion">The Android version, e.g., "15".</param>
-/// <param name="DeviceName">The emulator's display name (purely cosmetic for IDE/test reporting).</param>
-/// <param name="AvdName">The Android Virtual Device name (e.g., "Pixel_8_API35").</param>
-/// <param name="IsLightTheme">When <c>true</c>, the system theme is forced to light before each journey.</param>
-/// <param name="AppIdentifier">Package name (e.g., "jp.beercats.beerbox").</param>
-/// <param name="AppBinaryPath">Absolute path to the signed .apk.</param>
-/// <param name="MainActivity">Optional. Defaults to <c>$"{AppIdentifier}.MainActivity"</c>.</param>
-public sealed record AndroidPlatformConfig(
-	string PlatformVersion,
-	string DeviceName,
-	string AvdName,
-	bool IsLightTheme,
-	string AppIdentifier,
-	string AppBinaryPath,
-	string? MainActivity
-) : PlatformConfig(PlatformVersion, DeviceName, IsLightTheme, AppIdentifier, AppBinaryPath)
-{
-	/// <inheritdoc/>
-	public override TestPlatform Platform => TestPlatform.Android;
-
-	/// <inheritdoc/>
-	public override string AutomationName => "UiAutomator2";
-
-	/// <inheritdoc/>
-	public override int ColorTolerance => 3 * 10;
-
-	/// <summary>The activity to launch on app start, falling back to <c>$"{AppIdentifier}.MainActivity"</c>.</summary>
-	public string ResolvedMainActivity => MainActivity ?? $"{AppIdentifier}.MainActivity";
-
-	internal override void ConfigureAppiumOptions(AppiumOptions options)
-	{
-		options.AddAdditionalAppiumOption("appPackage", AppIdentifier);
-		options.AddAdditionalAppiumOption("appActivity", ResolvedMainActivity);
-		options.AddAdditionalAppiumOption("appWaitDuration", AppWaitDurationMs);
-		options.AddAdditionalAppiumOption("autoGrantPermissions", true);
-		options.AddAdditionalAppiumOption("enforceAppInstall", true);
-		options.AddAdditionalAppiumOption("avd", AvdName);
-		options.AddAdditionalAppiumOption("avdLaunchTimeout", AvdLaunchTimeoutMs);
-	}
-
-	internal override AppiumDriver CreateDriver(AppiumOptions options) => new AndroidDriver(options);
 }

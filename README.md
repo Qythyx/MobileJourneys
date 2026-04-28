@@ -101,7 +101,8 @@ public static class MyAppPlatforms
             DeviceName: "iPhone 17 Pro",
             IsLightTheme: true,
             AppIdentifier: AppId,
-            AppBinaryPath: Path.Combine(TestAssembly.RepoRoot, "src/MyApp.app")),
+            AppBinaryPath: Path.Combine(TestAssembly.RepoRoot, "src/MyApp.app"),
+            MaxScreenshotHeight: 2000),
         new AndroidPlatformConfig(
             PlatformVersion: "15",
             DeviceName: "Pixel 8",
@@ -109,7 +110,8 @@ public static class MyAppPlatforms
             IsLightTheme: true,
             AppIdentifier: AppId,
             AppBinaryPath: Path.Combine(TestAssembly.RepoRoot, "src/MyApp-Signed.apk"),
-            MainActivity: null),
+            MainActivity: null,
+            MaxScreenshotHeight: 2000),
     ];
 }
 ```

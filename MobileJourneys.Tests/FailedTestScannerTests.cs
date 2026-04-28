@@ -38,7 +38,7 @@ public sealed class FailedTestScannerTests
 	}
 
 	private static IosPlatformConfig BuildConfig(string deviceName) =>
-		new("26.2", deviceName, IsLightTheme: true, "com.example.app", "/unused");
+		new("26.2", deviceName, IsLightTheme: true, "com.example.app", "/unused", 2000);
 
 	private static JourneyDefinition BuildJourney(string name) =>
 		new(new TestJourneyEnvironment(), [new TestExpectation()], [], name);
