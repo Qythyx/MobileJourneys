@@ -96,4 +96,41 @@ public sealed class PlatformConfigTests
 		var locator = AndroidDark.GetAlertButtonLocator("a'b\"c").ToString();
 		_ = locator.Should().Contain("concat(");
 	}
+
+	[Test]
+	public void ResolveAppBinaryPathReturnsPathWhenBinaryExists()
+	{
+		// Use the test assembly itself as a stand-in "existing binary".
+		var existing = typeof(PlatformConfigTests).Assembly.Location;
+		var config = AndroidDark with { AppBinaryPath = existing };
+
+		_ = config.ResolveAppBinaryPath().Should().Be(existing);
+	}
+
+	[Test]
+	public void ResolveAppBinaryPathThrowsWithPathAndPlatformWhenAndroidBinaryMissing()
+	{
+		// Lock in the user-facing message — both the bad path and the platform name must
+		// appear so consumers can diagnose typos / forgotten rebuilds without a debugger.
+		var config = AndroidDark with
+		{
+			AppBinaryPath = "/does/not/exist/Signed.apk",
+		};
+		Action act = () => config.ResolveAppBinaryPath();
+
+		var ex = act.Should().Throw<FileNotFoundException>().Which;
+		_ = ex.Message.Should().Contain("/does/not/exist/Signed.apk");
+		_ = ex.Message.Should().Contain("Android");
+	}
+
+	[Test]
+	public void ResolveAppBinaryPathThrowsWithPathAndPlatformWhenIosBinaryMissing()
+	{
+		var config = IosLight with { AppBinaryPath = "/does/not/exist/MyApp.app" };
+		Action act = () => config.ResolveAppBinaryPath();
+
+		var ex = act.Should().Throw<FileNotFoundException>().Which;
+		_ = ex.Message.Should().Contain("/does/not/exist/MyApp.app");
+		_ = ex.Message.Should().Contain("iOS");
+	}
 }

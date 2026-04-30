@@ -4,7 +4,12 @@ namespace MobileJourneys.Framework;
 
 internal static class JourneyRunner
 {
-	public static async Task<JourneyResult> RunAsync(TestDriver driver, TestCase testCase, MtpReporter reporter)
+	public static async Task<JourneyResult> RunAsync(
+		TestDriver driver,
+		TestCase testCase,
+		MtpReporter reporter,
+		ScreenshotManager manager
+	)
 	{
 		var journey = testCase.Journey;
 		var config = testCase.Config;
@@ -52,10 +57,10 @@ internal static class JourneyRunner
 		foreach (var (number, name, execute, maskElements, prefetchMasks, journeyStep) in steps)
 		{
 			await reporter.StepStartedAsync(testCase, number, totalSteps, name);
-			var numberedStepName = $"{number:D2} {name}";
+			var numberedStepName = JourneyDefinition.FormatStepName(number, name);
 			try
 			{
-				FailedTestScanner.CleanupStepResults(driver.Config, journey.Name, numberedStepName);
+				manager.DeleteFailureArtifactsForStep(new(driver.Config, journey.Name, numberedStepName));
 				var stepResult = driver.DoActionAndCompareWithBaseline(
 					execute,
 					journey.Name,
@@ -67,7 +72,7 @@ internal static class JourneyRunner
 				{
 					var message =
 						$"step {number}/{totalSteps}: {name} — screenshots differ {stepResult.PixelDiffPercentage:F2}%\n"
-						+ $"  {(stepResult.ScreenshotDir is null ? "" : new Uri(stepResult.ScreenshotDir).AbsoluteUri)}";
+						+ $"  {stepResult.ReportPath ?? ""}";
 					stopwatch.Stop();
 					return new JourneyResult(
 						testCase,
@@ -80,7 +85,7 @@ internal static class JourneyRunner
 			}
 			catch (Exception ex)
 			{
-				HandleStepFailure(driver, ex, numberedStepName, journey.Name);
+				HandleStepFailure(driver, manager, ex, numberedStepName, journey.Name);
 				var message = $"step {number}/{totalSteps}: {name} — {ex.Message}";
 				stopwatch.Stop();
 				return new JourneyResult(
@@ -93,7 +98,7 @@ internal static class JourneyRunner
 			}
 		}
 
-		FailedTestScanner.CleanupResults(driver.Config, journey.Name);
+		manager.DeleteAllFailureArtifacts(driver.Config, journey);
 		stopwatch.Stop();
 		return new JourneyResult(testCase, true, stopwatch.Elapsed, string.Empty, null);
 	}
@@ -106,16 +111,20 @@ internal static class JourneyRunner
 		}
 	}
 
-	private static void HandleStepFailure(TestDriver driver, Exception ex, string filePrefix, string journeyName)
+	private static void HandleStepFailure(
+		TestDriver driver,
+		ScreenshotManager manager,
+		Exception ex,
+		string filePrefix,
+		string journeyName
+	)
 	{
+		var key = new TestStep(driver.Config, journeyName, filePrefix);
 		var appCrashed = driver.IsAppCrashed();
 		if (appCrashed)
 		{
 			var exceptionLog = driver.CaptureDeviceCrashLog();
-			_ = ScreenshotHelper.CaptureScreenshot(driver.App, driver.Config, journeyName, $"{filePrefix}_FAIL_CRASH");
-
-			var logDir = ScreenshotHelper.GetScreenshotsDir(driver.Config, journeyName);
-			_ = Directory.CreateDirectory(logDir);
+			_ = manager.CaptureFailScreenshot(driver.App, key, "CRASH");
 
 			var logContent =
 				exceptionLog
@@ -128,18 +137,13 @@ internal static class JourneyRunner
 					+ "- logcat: no relevant crash output found\n"
 					+ $"- Original exception: {ex.GetType().Name}: {ex.Message}"
 				);
-			File.WriteAllText(Path.Combine(logDir, $"{filePrefix}.CRASH.txt"), logContent);
+			manager.WriteCrashLog(key, logContent);
 		}
 		else
 		{
 			var sanitized = new string([.. ex.Message.Where(c => !Path.GetInvalidFileNameChars().Contains(c))]);
 			sanitized = sanitized.Length > 80 ? sanitized[..80] : sanitized;
-			_ = ScreenshotHelper.CaptureScreenshot(
-				driver.App,
-				driver.Config,
-				journeyName,
-				$"{filePrefix}_FAIL_{sanitized}"
-			);
+			_ = manager.CaptureFailScreenshot(driver.App, key, sanitized);
 		}
 	}
 }

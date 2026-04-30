@@ -52,10 +52,10 @@ public abstract record PlatformConfig(
 	public sealed override string ToString() => DisplayName;
 
 	/// <summary>
-	/// Builds an Appium driver and wraps it in a <see cref="TestDriver"/> tied to this fixture.
+	/// Builds and starts an Appium driver bound to this fixture. The framework wraps the
+	/// returned driver in a <see cref="TestDriver"/>; consumers do not call this directly.
 	/// </summary>
-	/// <param name="deepLinkScheme">URL scheme used by driver helpers for in-app deep links (e.g., "beerbox").</param>
-	public TestDriver GetTestDriver(string deepLinkScheme)
+	internal AppiumDriver CreateAppiumDriver()
 	{
 		var options = new AppiumOptions
 		{
@@ -68,10 +68,10 @@ public abstract record PlatformConfig(
 
 		ConfigureAppiumOptions(options);
 		options.AddAdditionalAppiumOption("newCommandTimeout", 120);
-		return new TestDriver(CreateDriver(options), this, deepLinkScheme);
+		return CreateDriver(options);
 	}
 
-	private string ResolveAppBinaryPath() =>
+	internal string ResolveAppBinaryPath() =>
 		Path.Exists(AppBinaryPath)
 			? AppBinaryPath
 			: throw new FileNotFoundException(

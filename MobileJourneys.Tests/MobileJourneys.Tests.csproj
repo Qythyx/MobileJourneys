@@ -7,7 +7,7 @@
 	</PropertyGroup>
 	<!-- TestAssembly resolves these from Assembly.GetEntryAssembly() at module load. The
 	     unit tests don't actually use ProjectDir/RepoRoot, but FailedTestScanner reads
-	     ScreenshotHelper.ScreenshotsRootDir which reads ProjectDir, so the metadata must
+	     ScreenshotManager.ScreenshotsRootDir which reads ProjectDir, so the metadata must
 	     exist or the cctor throws. -->
 	<ItemGroup>
 		<AssemblyMetadata Include="ProjectDir" Value="$(MSBuildProjectDirectory)" />

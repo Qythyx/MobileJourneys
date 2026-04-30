@@ -11,15 +11,7 @@ public sealed class FrameworkConfigTests
 	{
 		var platform = new IosPlatformConfig("26.2", "iPhone", true, "com.example.app", "/path/app", 2000);
 		var journey = new JourneyDefinition(new TestEnv(), [new TestExpectation()], [], "TestJourney");
-
-		var config = new FrameworkConfig(
-			DisplayName: "Display",
-			Description: "Desc",
-			TestNodeNamespace: "Foo.Bar",
-			DeepLinkScheme: "scheme",
-			PlatformConfigs: [platform],
-			Journeys: [journey]
-		);
+		var config = new FrameworkConfig("Display", "Desc", "Foo.Bar", "scheme", [platform], [journey]);
 
 		_ = config.DisplayName.Should().Be("Display");
 		_ = config.Description.Should().Be("Desc");

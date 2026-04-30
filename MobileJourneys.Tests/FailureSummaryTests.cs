@@ -5,10 +5,9 @@ using NUnit.Framework;
 namespace MobileJourneys.Tests;
 
 /// <summary>
-/// Covers the failure-aggregation half of <see cref="FailureSummary"/>. The Print path
-/// runs at <c>AppDomain.ProcessExit</c> and isn't unit-testable in-process — but
-/// RecordFailure is the load-bearing entry point that <see cref="Framework.MtpReporter"/>
-/// calls, and it must aggregate by config.
+/// Covers <see cref="FailureSummary"/>. RecordFailure is the load-bearing entry point that
+/// <see cref="Framework.MtpReporter"/> calls; Print emits the end-of-run banner that
+/// summarizes failures grouped by fixture.
 /// </summary>
 [TestFixture]
 [NonParallelizable]
@@ -93,5 +92,80 @@ public sealed class FailureSummaryTests
 		_ = snapshot.Should().HaveCount(2);
 		_ = snapshot[IosFixture.ToString()].Should().BeEquivalentTo(["Login"]);
 		_ = snapshot[AndroidFixture.ToString()].Should().BeEquivalentTo(["Login"]);
+	}
+
+	[Test]
+	public void PrintWritesNothingWhenNoFailuresRecorded()
+	{
+		using var sw = new StringWriter();
+
+		FailureSummary.Print(sw);
+
+		_ = sw.ToString().Should().BeEmpty();
+	}
+
+	[Test]
+	public void PrintBannerIncludesTotalFailureCount()
+	{
+		FailureSummary.RecordFailure(MakeCase(IosFixture, "Login"));
+		FailureSummary.RecordFailure(MakeCase(IosFixture, "Logout"));
+		FailureSummary.RecordFailure(MakeCase(AndroidFixture, "Login"));
+		using var sw = new StringWriter();
+
+		FailureSummary.Print(sw);
+
+		_ = sw.ToString().Should().Contain("FAILED JOURNEYS (3)");
+	}
+
+	[Test]
+	public void PrintGroupsJourneysUnderTheirConfigName()
+	{
+		FailureSummary.RecordFailure(MakeCase(IosFixture, "Login"));
+		FailureSummary.RecordFailure(MakeCase(IosFixture, "Logout"));
+		using var sw = new StringWriter();
+
+		FailureSummary.Print(sw);
+
+		var output = sw.ToString();
+		_ = output.Should().Contain(IosFixture.ToString());
+		_ = output.Should().Contain("    - Login");
+		_ = output.Should().Contain("    - Logout");
+	}
+
+	[Test]
+	public void PrintSortsConfigsAlphabetically()
+	{
+		// Insertion order is iOS first, but Android sorts before iOS — verify the banner
+		// reflects sort order, not insertion order, so reports are stable across runs.
+		FailureSummary.RecordFailure(MakeCase(IosFixture, "Login"));
+		FailureSummary.RecordFailure(MakeCase(AndroidFixture, "Login"));
+		using var sw = new StringWriter();
+
+		FailureSummary.Print(sw);
+
+		var output = sw.ToString();
+		var androidIdx = output.IndexOf(AndroidFixture.ToString(), StringComparison.Ordinal);
+		var iosIdx = output.IndexOf(IosFixture.ToString(), StringComparison.Ordinal);
+		_ = androidIdx.Should().BeGreaterThanOrEqualTo(0);
+		_ = iosIdx.Should().BeGreaterThanOrEqualTo(0);
+		_ = androidIdx.Should().BeLessThan(iosIdx);
+	}
+
+	[Test]
+	public void PrintSortsJourneysAlphabeticallyWithinAConfig()
+	{
+		FailureSummary.RecordFailure(MakeCase(IosFixture, "Zeta"));
+		FailureSummary.RecordFailure(MakeCase(IosFixture, "Alpha"));
+		FailureSummary.RecordFailure(MakeCase(IosFixture, "Mu"));
+		using var sw = new StringWriter();
+
+		FailureSummary.Print(sw);
+
+		var output = sw.ToString();
+		var alphaIdx = output.IndexOf("- Alpha", StringComparison.Ordinal);
+		var muIdx = output.IndexOf("- Mu", StringComparison.Ordinal);
+		var zetaIdx = output.IndexOf("- Zeta", StringComparison.Ordinal);
+		_ = alphaIdx.Should().BeLessThan(muIdx);
+		_ = muIdx.Should().BeLessThan(zetaIdx);
 	}
 }

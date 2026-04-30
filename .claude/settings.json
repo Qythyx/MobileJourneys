@@ -1,21 +1,28 @@
 {
-	"permissions": {
-		"allow": [
-			"Bash(dotnet build *)",
-			"Bash(dotnet test *)",
-			"WebSearch",
-			"Bash(dotnet clean *)",
-			"WebFetch(domain:)",
-			"Bash(./scripts/coverage.sh)",
-			"WebFetch(domain:github.com)",
-			"WebFetch(domain:raw.githubusercontent.com)",
-			"WebFetch(domain:xunit.net)",
-			"Bash(dotnet reportgenerator *)"
-		],
-		"additionalDirectories": [
-			"/tmp",
-			"/private/tmp",
-			"/Users/rainer/Projects/MobileJourneys/TestResults"
-		]
-	}
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build *)",
+      "Bash(dotnet test *)",
+      "WebSearch",
+      "Bash(dotnet clean *)",
+      "WebFetch(domain:)",
+      "Bash(./scripts/coverage.sh)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:xunit.net)",
+      "Bash(dotnet reportgenerator *)",
+      "Bash(git commit -m ' *)",
+      "Bash(gh api *)",
+      "Bash(grep -E \"FilesystemScreenshotStorage|InMemoryScreenshotStorage|ImageHelpers|ScreenshotManager$|MobileJourneys.ScreenshotManager \" /Users/rainer/Projects/MobileJourneys/coverage/SummaryGithub.md)",
+      "Bash(gh pr *)",
+      "Bash(git -C /Users/rainer/Projects/MobileJourneys mv MobileJourneys/StepKey.cs MobileJourneys/TestStep.cs)"
+    ],
+    "additionalDirectories": [
+      "/tmp",
+      "/private/tmp",
+      "/Users/rainer/Projects/MobileJourneys/TestResults",
+      "/Users/rainer/.claude/projects/-Users-rainer-Projects-MobileJourneys",
+      "/Users/rainer/Projects/MobileJourneys.Tests"
+    ]
+  }
 }

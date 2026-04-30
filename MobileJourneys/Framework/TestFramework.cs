@@ -93,13 +93,14 @@ public sealed class TestFramework(
 		// instead of producing cryptic Appium errors mid-session.
 		DependencyChecker.Verify(config);
 
+		var manager = new ScreenshotManager(config.Storage);
 		var options = serviceProvider.GetCommandLineOptions();
 		var filters = options.TryGetOptionArgumentList(CommandLineProvider.FilterOption, out var values) ? values : [];
 		var rerun = options.IsOptionSet(CommandLineProvider.RerunOption);
 		var selected = TestCases
 			.Where(tc =>
 				(filters.Length == 0 || filters.All(f => tc.Uid.Contains(f, StringComparison.OrdinalIgnoreCase)))
-				&& (!rerun || FailedTestScanner.IsFailedJourney(tc.Config, tc.Journey))
+				&& (!rerun || manager.HasFailureArtifacts(tc.Config, tc.Journey))
 			)
 			.ToList();
 
@@ -128,7 +129,12 @@ public sealed class TestFramework(
 					Task.Run(
 						async () =>
 						{
-							var driver = group.Key.GetTestDriver(config.DeepLinkScheme);
+							var driver = new TestDriver(
+								group.Key.CreateAppiumDriver(),
+								group.Key,
+								config.DeepLinkScheme,
+								manager
+							);
 							var cases = (IReadOnlyList<TestCase>)[.. group];
 							if (driver.IsAppCrashed())
 							{
@@ -150,7 +156,7 @@ public sealed class TestFramework(
 								await PublishDiscoveredAsync(context, sessionUid, testCase);
 							}
 
-							await RunTestCasesAsync(driver, cases, reporter, context.CancellationToken);
+							await RunTestCasesAsync(driver, cases, reporter, manager, context.CancellationToken);
 						},
 						context.CancellationToken
 					)
@@ -162,6 +168,7 @@ public sealed class TestFramework(
 		TestDriver driver,
 		IReadOnlyList<TestCase> cases,
 		MtpReporter reporter,
+		ScreenshotManager manager,
 		CancellationToken cancellationToken
 	)
 	{
@@ -181,7 +188,7 @@ public sealed class TestFramework(
 				await reporter.JourneyStartedAsync(testCase);
 				try
 				{
-					var result = await JourneyRunner.RunAsync(driver, testCase, reporter);
+					var result = await JourneyRunner.RunAsync(driver, testCase, reporter, manager);
 					await reporter.JourneyCompletedAsync(result);
 				}
 				catch when (cancellationToken.IsCancellationRequested)

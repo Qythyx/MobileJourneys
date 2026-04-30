@@ -283,7 +283,7 @@ public sealed record AndroidPlatformConfig(
 		return ProcessRunner.RunWithResult(AdbPath, args);
 	}
 
-	private static double ToAndroidFontScale(SystemFontSize size) =>
+	internal static double ToAndroidFontScale(SystemFontSize size) =>
 		size switch
 		{
 			SystemFontSize.ExtraSmall => 0.82,

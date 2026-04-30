@@ -6,6 +6,8 @@ and
 Tests are written as **journeys** — declarative sequences of `Action` and `Expectation` records —
 and verified against per-platform PNG screenshot baselines.
 
+[![CI](https://github.com/Qythyx/MobileJourneys/actions/workflows/ci.yml/badge.svg)](https://github.com/Qythyx/MobileJourneys/actions/workflows/ci.yml)
+
 ## What you get
 
 - A small DSL (`JourneyAction`, `Expectation`, `JourneyStep`, `JourneyDefinition`) for expressing
@@ -141,15 +143,17 @@ internal static class Program
     public static async Task<int> Main(string[] args)
     {
         var config = new FrameworkConfig(
-            DisplayName: "MyApp UI Tests",
-            Description: "UI test runner for MyApp.",
-            TestNodeNamespace: "MyApp.UITests.Journeys",
-            DeepLinkScheme: "myapp",
-            PlatformConfigs: MyAppPlatforms.All,
-            Journeys: [.. Journeys.All]);
+            "MyApp UI Tests",
+            "UI test runner for MyApp.",
+            "MyApp.UITests.Journeys",
+            "myapp",
+            MyAppPlatforms.All,
+            [.. Journeys.All]
+        );
 
         if (args.Contains($"--{CommandLineProvider.ListExtraneousOption}") ||
-            args.Contains($"--{CommandLineProvider.DeleteExtraneousOption}"))
+            args.Contains($"--{CommandLineProvider.DeleteExtraneousOption}")
+        )
         {
             var deleteMode = args.Contains($"--{CommandLineProvider.DeleteExtraneousOption}");
             return CheckExtraneousFiles(config, deleteMode);
@@ -162,20 +166,26 @@ internal static class Program
         builder.CommandLine.AddProvider(() => new CommandLineProvider(config));
         _ = builder.RegisterTestFramework(
             _ => new TestFrameworkCapabilities(),
-            (caps, sp) => new TestFramework(caps, sp, config));
+            (caps, sp) => new TestFramework(caps, sp, config)
+        );
         using var app = await builder.BuildAsync();
         return await app.RunAsync();
     }
 
     private static int CheckExtraneousFiles(FrameworkConfig config, bool delete)
     {
-        var paths = FailedTestScanner.FindExtraneousScreenshots(config, delete);
+        var storage = config.Storage ?? FilesystemScreenshotStorage.Default();
+        var paths = storage.FindExtraneous(config, j => j.ExpectedStepNames(), delete);
         Console.WriteLine($"{(delete ? "Deleted" : "Found")} {paths.Count} extraneous file(s).");
         foreach (var p in paths) Console.WriteLine($"  {p}");
         return delete ? 0 : (paths.Count == 0 ? 0 : 1);
     }
 }
 ```
+
+`ScreenshotManager` is an instance class that consumes a `ScreenshotStorage`. The default is
+`FilesystemScreenshotStorage` rooted at the test project's `Screenshots/` directory; override via
+`FrameworkConfig { Storage = … }` to swap in an alternative backend.
 
 ### 6. Required csproj bits
 
@@ -222,9 +232,11 @@ dotnet run --project test/MyApp.UITests -p:RunUITests=true -- --delete-extraneou
 
 Baselines live under
 `<consumer-project>/Screenshots/<PlatformConfig.DisplayName>/<JourneyName>/<NN> <StepLabel>.png`.
-The first run for a new step produces the baseline; subsequent runs compare. Failure artifacts
-(`*.new.png`, `*_diff_*.png`, `*_FAIL_*.png`, `*.CRASH.txt`) land alongside the baseline and are
-auto-cleaned when the step next passes.
+The first run for a new step produces the baseline; subsequent runs compare. Failure artifacts (the
+actual capture for a mismatch, the diff visualization, FAIL screenshots from exceptions, and crash
+logs) land alongside the baseline and are auto-cleaned when the step next passes. Filename layout is
+owned by the storage backend; with the default `FilesystemScreenshotStorage` they appear as
+`<step>.new.png`, `<step>_diff_<pct>%.png`, `<step>_FAIL_<reason>.png`, and `<step>.CRASH.txt`.
 
 ## Custom actions and expectations
 
@@ -260,7 +272,8 @@ dotnet test
 
 ### Code coverage
 
-Coverage is collected by [Microsoft.Testing.Extensions.CodeCoverage](https://learn.microsoft.com/dotnet/core/testing/microsoft-testing-platform-code-coverage)
+Coverage is collected by
+[Microsoft.Testing.Extensions.CodeCoverage](https://learn.microsoft.com/dotnet/core/testing/microsoft-testing-platform-code-coverage)
 (the MTP-native collector — `coverlet.collector` is not compatible with MTP) and rendered to HTML by
 [ReportGenerator](https://github.com/danielpalme/ReportGenerator), pinned as a local
 `dotnet-tools.json` tool.

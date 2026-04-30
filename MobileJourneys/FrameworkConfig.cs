@@ -20,4 +20,16 @@ public sealed record FrameworkConfig(
 	string DeepLinkScheme,
 	IReadOnlyList<PlatformConfig> PlatformConfigs,
 	IReadOnlyList<JourneyDefinition> Journeys
-);
+)
+{
+	/// <summary>
+	/// Optional storage backend for screenshots and journey artifacts. Defaults to a
+	/// <see cref="FilesystemScreenshotStorage"/> rooted at the consumer test project's
+	/// <c>Screenshots/</c> directory when <c>null</c>.
+	/// </summary>
+	// public ScreenshotStorage Storage => field ??= storage ?? FilesystemScreenshotStorage.Default();
+	public ScreenshotStorage Storage { get; init; } = FilesystemScreenshotStorage.Default();
+
+	public List<string> FindExtraneous(FrameworkConfig config, bool deleteExtraneous) =>
+		Storage.FindExtraneous(config, (journey) => journey.ExpectedStepNames(), deleteExtraneous);
+}

@@ -28,6 +28,19 @@ public sealed record JourneyDefinition(
 	/// </summary>
 	public string InitialName => InitialExpect[0].Label;
 
+	/// <summary>Formats a baseline filename stem from a 1-based step number and a name.</summary>
+	public static string FormatStepName(int number, string name) => $"{number:D2} {name}";
+
+	/// <summary>Yields the baseline filename stems (without extension) for every step in this journey, in order.</summary>
+	public IEnumerable<string> ExpectedStepNames()
+	{
+		yield return FormatStepName(1, InitialName);
+		for (var i = 0; i < Steps.Length; i++)
+		{
+			yield return FormatStepName(i + 2, Steps[i].Name);
+		}
+	}
+
 	/// <inheritdoc/>
 	public override string ToString() => Name;
 }

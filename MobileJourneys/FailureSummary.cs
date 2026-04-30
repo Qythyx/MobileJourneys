@@ -9,7 +9,7 @@ internal static class FailureSummary
 {
 	private static readonly ConcurrentDictionary<string, ConcurrentBag<string>> Failures = new(StringComparer.Ordinal);
 
-	static FailureSummary() => AppDomain.CurrentDomain.ProcessExit += (_, _) => Print();
+	static FailureSummary() => AppDomain.CurrentDomain.ProcessExit += (_, _) => Print(Console.Error);
 
 	internal static void RecordFailure(TestCase testCase) =>
 		Failures.GetOrAdd(testCase.Config.ToString(), _ => []).Add(testCase.Journey.Name);
@@ -19,7 +19,7 @@ internal static class FailureSummary
 
 	internal static void ResetForTest() => Failures.Clear();
 
-	private static void Print()
+	internal static void Print(TextWriter writer)
 	{
 		if (Failures.IsEmpty)
 		{
@@ -51,6 +51,6 @@ internal static class FailureSummary
 		}
 		_ = builder.AppendLine("======================================").AppendLine(" ");
 
-		Console.Error.Write(builder);
+		writer.Write(builder);
 	}
 }

@@ -18,7 +18,13 @@ namespace MobileJourneys;
 /// <param name="app">The underlying Appium driver.</param>
 /// <param name="config">Platform fixture (drives platform-specific branches).</param>
 /// <param name="deepLinkScheme">URL scheme without "://" used by <see cref="ScrollToElement"/> and consumer-side notification actions.</param>
-public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string deepLinkScheme)
+/// <param name="screenshotManager">Instance used for baseline capture and comparison.</param>
+public sealed class TestDriver(
+	AppiumDriver app,
+	PlatformConfig config,
+	string deepLinkScheme,
+	ScreenshotManager screenshotManager
+)
 {
 	private enum Phase
 	{
@@ -221,7 +227,7 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 		var previousImage = _screenshotPngBytes is not null
 			? Image.Load<Rgb24>(_screenshotPngBytes)
 			: App.GetScreenshot().AsImage();
-		var maskRegions = ScreenshotHelper.ScaleMaskRegions(
+		var maskRegions = ImageHelpers.ScaleMaskRegions(
 			[.. maskElementIds.Select(id => GetElementRectangle(windowSize, id)).Concat(SystemMasks)],
 			windowSize,
 			new System.Drawing.Size(previousImage.Width, previousImage.Height)
@@ -237,11 +243,9 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 		if (_screenshotPngBytes is not null)
 		{
 			_screenshotPngBytes = null;
-			return ScreenshotHelper.CompareWithBaselineAndDispose(
+			return screenshotManager.CompareWithBaselineAndDispose(
 				previousImage,
-				Config,
-				journeyName,
-				stepName,
+				new(Config, journeyName, stepName),
 				maskRegions
 			);
 		}
@@ -262,14 +266,12 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 				continue;
 			}
 			elapsed = stopwatch.Elapsed;
-			if (ScreenshotHelper.AreImagesStable(screenshot, previousImage, maskRegions))
+			if (ImageHelpers.AreImagesEqual(screenshot, previousImage, maskRegions))
 			{
 				previousImage.Dispose();
-				return ScreenshotHelper.CompareWithBaselineAndDispose(
+				return screenshotManager.CompareWithBaselineAndDispose(
 					screenshot,
-					Config,
-					journeyName,
-					stepName,
+					new(Config, journeyName, stepName),
 					maskRegions
 				);
 			}
@@ -457,7 +459,7 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 			var fullBytes = CaptureDeviceScreenshotBytes();
 			var currentImage = CropToTop(fullBytes, BannerHeight);
 			var currentMinute = DateTime.Now.Minute;
-			var identical = ScreenshotHelper.AreImagesStable(currentImage, previousImage, []);
+			var identical = ImageHelpers.AreImagesEqual(currentImage, previousImage, []);
 
 			switch (phase)
 			{

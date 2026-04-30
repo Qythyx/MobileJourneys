@@ -104,11 +104,11 @@ public sealed record IosPlatformConfig(
 			.RunWithResult("xcrun", ["simctl", "get_app_container", deviceId, AppIdentifier, "data"])
 			?.Output?.Trim();
 
-		if (string.IsNullOrWhiteSpace(containerPath))
-		{
-			return null;
-		}
+		return string.IsNullOrWhiteSpace(containerPath) ? null : ReadCrashLogAt(containerPath);
+	}
 
+	internal static string? ReadCrashLogAt(string containerPath)
+	{
 		// The app writes crash logs to Path.GetTempPath() which maps to tmp/ on iOS.
 		var crashLogPath = Path.Combine(containerPath, "tmp", "crash.log");
 		if (!File.Exists(crashLogPath))
@@ -169,7 +169,7 @@ public sealed record IosPlatformConfig(
 		driver.DismissAlertIfPresent(TimeSpan.FromSeconds(5));
 	}
 
-	private static string ToIosContentSize(SystemFontSize size) =>
+	internal static string ToIosContentSize(SystemFontSize size) =>
 		size switch
 		{
 			SystemFontSize.ExtraSmall => "extra-small",
