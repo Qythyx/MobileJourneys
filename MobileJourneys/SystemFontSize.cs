@@ -11,7 +11,8 @@ namespace MobileJourneys;
 /// Largest) varies across versions. The Android values our mapping uses
 /// (0.82, 0.88, 0.94, 1.0, 1.15, 1.30, … through 2.5 for accessibility) are picked to
 /// approximate the equivalent iOS categories — they aren't an Android standard.
-/// See <see cref="SimulatorHelper.SetSystemFontSize"/> for the exact mapping.
+/// See the platform-specific <c>SetSystemFontSize</c> overrides on <see cref="PlatformConfig"/>
+/// for the exact mapping.
 /// </remarks>
 public enum SystemFontSize
 {

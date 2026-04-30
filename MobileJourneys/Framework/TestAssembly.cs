@@ -41,7 +41,7 @@ public static class TestAssembly
 	public static readonly string FrameworkVersion =
 		typeof(TestAssembly).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
 		?? typeof(TestAssembly).Assembly.GetName().Version?.ToString()
-		?? "0.0.0";
+		?? throw new InvalidOperationException("No assembly version found");
 
 	private static string GetMetadata(string key) =>
 		EntryAssembly.GetCustomAttributes<AssemblyMetadataAttribute>().First(a => a.Key == key).Value!;

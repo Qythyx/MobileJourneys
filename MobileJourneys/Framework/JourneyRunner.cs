@@ -4,20 +4,20 @@ namespace MobileJourneys.Framework;
 
 internal static class JourneyRunner
 {
-	public static JourneyResult Run(TestDriver driver, TestCase testCase, MtpReporter reporter)
+	public static async Task<JourneyResult> RunAsync(TestDriver driver, TestCase testCase, MtpReporter reporter)
 	{
 		var journey = testCase.Journey;
 		var config = testCase.Config;
 		var deviceId = driver.GetDeviceId();
 		var stopwatch = Stopwatch.StartNew();
-		SimulatorHelper.SetSystemFontSize(SystemFontSize.Large, config.Platform, deviceId);
-		SimulatorHelper.SetSystemTheme(config.IsLightTheme, config.Platform, deviceId);
+		config.SetSystemFontSize(deviceId, SystemFontSize.Large);
+		config.SetSystemTheme(deviceId, config.IsLightTheme);
 
 		var totalSteps = journey.Steps.Length + 1;
 
 		driver.CurrentJourneyEnv = journey.Scenario.ForFixture(config);
-		driver.ClearAndroidLogcat();
-		AppLifecycle.RelaunchApp(driver.App, driver.Config, driver.CurrentJourneyEnv);
+		driver.ClearAppLogs();
+		driver.RelaunchApp(driver.CurrentJourneyEnv);
 
 		var steps = new List<(
 			int Number,
@@ -51,7 +51,7 @@ internal static class JourneyRunner
 
 		foreach (var (number, name, execute, maskElements, prefetchMasks, journeyStep) in steps)
 		{
-			reporter.StepStarted(testCase, number, totalSteps, name);
+			await reporter.StepStartedAsync(testCase, number, totalSteps, name);
 			var numberedStepName = $"{number:D2} {name}";
 			try
 			{
@@ -111,7 +111,7 @@ internal static class JourneyRunner
 		var appCrashed = driver.IsAppCrashed();
 		if (appCrashed)
 		{
-			var exceptionLog = driver.CaptureDeviceCrashLog(appCrashed);
+			var exceptionLog = driver.CaptureDeviceCrashLog();
 			_ = ScreenshotHelper.CaptureScreenshot(driver.App, driver.Config, journeyName, $"{filePrefix}_FAIL_CRASH");
 
 			var logDir = ScreenshotHelper.GetScreenshotsDir(driver.Config, journeyName);

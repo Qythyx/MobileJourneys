@@ -58,7 +58,7 @@ public sealed class FailedTestScannerTests
 	}
 
 	[Test]
-	public void IsFailedJourney_ReturnsFalse_WhenJourneyDirDoesNotExist()
+	public void IsFailedJourneyReturnsFalseWhenJourneyDirDoesNotExist()
 	{
 		// The framework's IsFailedJourney looks under ScreenshotHelper's resolved root.
 		// Use a guaranteed-unique journey name so the lookup misses regardless of
@@ -66,24 +66,24 @@ public sealed class FailedTestScannerTests
 		var config = BuildConfig("NonexistentDevice");
 		var journey = BuildJourney($"Nonexistent_{Guid.NewGuid():N}");
 
-		FailedTestScanner.IsFailedJourney(config, journey).Should().BeFalse();
+		_ = FailedTestScanner.IsFailedJourney(config, journey).Should().BeFalse();
 	}
 
 	[Test]
-	public void CleanupStepResults_NoOps_WhenJourneyDirDoesNotExist()
+	public void CleanupStepResultsNoOpsWhenJourneyDirDoesNotExist()
 	{
 		var config = BuildConfig("NonexistentDevice");
 
 		Action act = () => FailedTestScanner.CleanupStepResults(config, "NonexistentJourney", "01 SomeStep");
-		act.Should().NotThrow();
+		_ = act.Should().NotThrow();
 	}
 
 	[Test]
-	public void CleanupResults_NoOps_WhenJourneyDirDoesNotExist()
+	public void CleanupResultsNoOpsWhenJourneyDirDoesNotExist()
 	{
 		var config = BuildConfig("NonexistentDevice");
 
 		Action act = () => FailedTestScanner.CleanupResults(config, "NonexistentJourney");
-		act.Should().NotThrow();
+		_ = act.Should().NotThrow();
 	}
 }

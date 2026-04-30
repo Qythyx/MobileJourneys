@@ -1,34 +1,33 @@
 # MobileJourneys
 
-A reusable .NET 10 UI-test framework for iOS and Android apps, built on
-[Appium](https://appium.io/) and [Microsoft.Testing.Platform](https://learn.microsoft.com/dotnet/core/testing/microsoft-testing-platform-intro).
-Tests are written as **journeys** — declarative sequences of `Action` and `Expectation`
-records — and verified against per-platform PNG screenshot baselines.
+A reusable .NET 10 UI-test framework for iOS and Android apps, built on [Appium](https://appium.io/)
+and
+[Microsoft.Testing.Platform](https://learn.microsoft.com/dotnet/core/testing/microsoft-testing-platform-intro).
+Tests are written as **journeys** — declarative sequences of `Action` and `Expectation` records —
+and verified against per-platform PNG screenshot baselines.
 
 ## What you get
 
-- A small DSL (`JourneyAction`, `Expectation`, `JourneyStep`, `JourneyDefinition`) for
-  expressing app flows declaratively.
-- Built-in actions: `Tap`, `TypeText`, `SwipeLeft`/`Right`, `ScrollToElement`,
-  `DismissAlert`, `DismissKeyboard`, `TapAlertButton`, `TapNotification`,
-  `InvertSystemTheme`, `SetSystemFontSize`, `None`.
+- A small DSL (`JourneyAction`, `Expectation`, `JourneyStep`, `JourneyDefinition`) for expressing
+  app flows declaratively.
+- Built-in actions: `Tap`, `TypeText`, `SwipeLeft`/`Right`, `ScrollToElement`, `DismissAlert`,
+  `DismissKeyboard`, `TapAlertButton`, `TapNotification`, `InvertSystemTheme`, `SetSystemFontSize`,
+  `None`.
 - Built-in expectations: `Visible`, `Hidden`, `VisibleWithText`, `AlertAppears`,
   `WaitForNotification`.
-- An Appium-driven `TestDriver` with element-finding (with stale-element retry),
-  gestures, alerts, deep links, hardware-keyboard control, and crash detection.
-- Screenshot-baseline comparison via `SixLabors.ImageSharp` +
-  `Codeuctivity.ImageSharpCompare` with maskable regions for animated UI elements.
-- A custom MTP `TestFramework` that runs the cross-product of platform fixtures and
-  journeys, with `--filter`, `--rerun`, `--list-extraneous`, `--delete-extraneous`
-  CLI flags.
+- An Appium-driven `TestDriver` with element-finding (with stale-element retry), gestures, alerts,
+  deep links, hardware-keyboard control, and crash detection.
+- Screenshot-baseline comparison via `SixLabors.ImageSharp` + `Codeuctivity.ImageSharpCompare` with
+  maskable regions for animated UI elements.
+- A custom MTP `TestFramework` that runs the cross-product of platform fixtures and journeys, with
+  `--filter`, `--rerun`, `--list-extraneous`, `--delete-extraneous` CLI flags.
 
 ## External dependencies
 
-Beyond the .NET SDK, MobileJourneys drives real simulators/emulators via several
-external tools. **`DependencyChecker.Verify(config)` runs at the start of every
-test session** and fails fast (with an install hint) if any required tool is
-missing — only the platforms you've configured in `FrameworkConfig.PlatformConfigs`
-are checked.
+Beyond the .NET SDK, MobileJourneys drives real simulators/emulators via several external tools.
+**`DependencyChecker.Verify(config)` runs at the start of every test session** and fails fast (with
+an install hint) if any required tool is missing — only the platforms you've configured in
+`FrameworkConfig.PlatformConfigs` are checked.
 
 | Tool                                | Used for                                                   | When required                                | Install                                                                                                                                            |
 | ----------------------------------- | ---------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -37,8 +36,8 @@ are checked.
 | Android SDK platform-tools (`adb`)  | Android emulator control, theme/font, logcat               | If any `AndroidPlatformConfig` is configured | Android Studio → SDK Manager → "Android SDK Platform-Tools", or [standalone download](https://developer.android.com/tools/releases/platform-tools) |
 | `ANDROID_HOME` environment variable | Resolves `$ANDROID_HOME/platform-tools/adb`                | If any `AndroidPlatformConfig` is configured | `export ANDROID_HOME=$HOME/Library/Android/sdk` (typical macOS path)                                                                               |
 
-A simulator/emulator must be **booted before the test session starts** (the
-framework attaches via Appium; it does not boot devices itself). On macOS:
+A simulator/emulator must be **booted before the test session starts** (the framework attaches via
+Appium; it does not boot devices itself). On macOS:
 
 ```bash
 xcrun simctl list devices       # list simulators
@@ -48,13 +47,13 @@ emulator -avd Pixel_8_API35     # Android (in a separate terminal)
 
 ## Quick start
 
-The framework is consumed by an MTP-based test executable that supplies its own
-journeys, platform fixtures, and per-app mock state.
+The framework is consumed by an MTP-based test executable that supplies its own journeys, platform
+fixtures, and per-app mock state.
 
 ### 1. Reference the project
 
-The framework currently ships as source — reference it via `<ProjectReference>` to a
-sibling checkout. NuGet packaging is on the roadmap.
+The framework currently ships as source — reference it via `<ProjectReference>` to a sibling
+checkout. NuGet packaging is on the roadmap.
 
 ```xml
 <ProjectReference Include="../../../MobileJourneys/MobileJourneys/MobileJourneys.csproj" />
@@ -62,10 +61,9 @@ sibling checkout. NuGet packaging is on the roadmap.
 
 ### 2. Implement `IJourneyEnvironment`
 
-Define a record that captures your app's mock state (the fields each journey can
-override) and converts them to environment variables your app's mock service reads.
-`ForFixture` lets you specialize the environment per-platform fixture (e.g., pin
-language to match the fixture's theme).
+Define a record that captures your app's mock state (the fields each journey can override) and
+converts them to environment variables your app's mock service reads. `ForFixture` lets you
+specialize the environment per-platform fixture (e.g., pin language to match the fixture's theme).
 
 ```csharp
 public record MyAppEnvironment : IJourneyEnvironment
@@ -157,7 +155,7 @@ internal static class Program
             return CheckExtraneousFiles(config, deleteMode);
         }
 
-        var builder = await TestApplication.CreateBuilderAsync(args).ConfigureAwait(false);
+        var builder = await TestApplication.CreateBuilderAsync(args);
 #if RUN_UI_TESTS
         builder.AddSelfRegisteredExtensions(args);
 #endif
@@ -165,8 +163,8 @@ internal static class Program
         _ = builder.RegisterTestFramework(
             _ => new TestFrameworkCapabilities(),
             (caps, sp) => new TestFramework(caps, sp, config));
-        using var app = await builder.BuildAsync().ConfigureAwait(false);
-        return await app.RunAsync().ConfigureAwait(false);
+        using var app = await builder.BuildAsync();
+        return await app.RunAsync();
     }
 
     private static int CheckExtraneousFiles(FrameworkConfig config, bool delete)
@@ -222,16 +220,17 @@ dotnet run --project test/MyApp.UITests -p:RunUITests=true -- --delete-extraneou
 
 ## Screenshots
 
-Baselines live under `<consumer-project>/Screenshots/<PlatformConfig.DisplayName>/<JourneyName>/<NN> <StepLabel>.png`.
-The first run for a new step produces the baseline; subsequent runs compare. Failure
-artifacts (`*.new.png`, `*_diff_*.png`, `*_FAIL_*.png`, `*.CRASH.txt`) land alongside
-the baseline and are auto-cleaned when the step next passes.
+Baselines live under
+`<consumer-project>/Screenshots/<PlatformConfig.DisplayName>/<JourneyName>/<NN> <StepLabel>.png`.
+The first run for a new step produces the baseline; subsequent runs compare. Failure artifacts
+(`*.new.png`, `*_diff_*.png`, `*_FAIL_*.png`, `*.CRASH.txt`) land alongside the baseline and are
+auto-cleaned when the step next passes.
 
 ## Custom actions and expectations
 
-Subclass `JourneyAction` (override `Execute(TestDriver)`) or `Expectation`
-(override `Verify(TestDriver)`). Override the protected `Name` property if you
-want a wrapper class to share its parent's baseline filename:
+Subclass `JourneyAction` (override `Execute(TestDriver)`) or `Expectation` (override
+`Verify(TestDriver)`). Override the protected `Name` property if you want a wrapper class to share
+its parent's baseline filename:
 
 ```csharp
 public sealed record TapLocalizedAlert(string English, string Japanese) : JourneyAction(English)
@@ -244,10 +243,9 @@ public sealed record TapLocalizedAlert(string English, string Japanese) : Journe
 
 ## Worked example
 
-The Beerbox app (`~/Projects/beerbox`) is the original consumer this framework
-was extracted from — see `test/app/Beerbox.App.UITests/` there for a complete
-production example: `BeerboxPlatforms.cs`, `MockEnvironment.cs`, the 6
-Beerbox-specific actions, and 32 journeys.
+The Beerbox app (`~/Projects/beerbox`) is the original consumer this framework was extracted from —
+see `test/app/Beerbox.App.UITests/` there for a complete production example: `BeerboxPlatforms.cs`,
+`MockEnvironment.cs`, the 6 Beerbox-specific actions, and 32 journeys.
 
 ## Status
 

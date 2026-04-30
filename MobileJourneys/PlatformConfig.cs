@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using OpenQA.Selenium;
 using OpenQA.Selenium.Appium;
 
 namespace MobileJourneys;
@@ -67,9 +68,7 @@ public abstract record PlatformConfig(
 
 		ConfigureAppiumOptions(options);
 		options.AddAdditionalAppiumOption("newCommandTimeout", 120);
-
-		var app = CreateDriver(options);
-		return new TestDriver(app, this, deepLinkScheme);
+		return new TestDriver(CreateDriver(options), this, deepLinkScheme);
 	}
 
 	private string ResolveAppBinaryPath() =>
@@ -83,6 +82,60 @@ public abstract record PlatformConfig(
 	internal abstract void ConfigureAppiumOptions(AppiumOptions options);
 
 	internal abstract AppiumDriver CreateDriver(AppiumOptions options);
+
+	// --- App lifecycle ---
+
+	internal abstract void LaunchApp(AppiumDriver driver, IJourneyEnvironment environment);
+
+	internal abstract void TerminateApp(AppiumDriver driver);
+
+	internal abstract long QueryAppState(AppiumDriver driver);
+
+	// --- Driver capabilities / Appium scripting ---
+
+	internal abstract string DeviceIdCapabilityName { get; }
+
+	internal abstract void OpenDeepLink(AppiumDriver driver, string url);
+
+	internal abstract void PressHomeButton(AppiumDriver driver);
+
+	// --- Keyboard / alerts ---
+
+	internal virtual void DismissKeyboard(AppiumDriver driver) => driver.HideKeyboard();
+
+	internal abstract void DismissDefaultAlert(IAlert alert);
+
+	internal abstract By GetAlertButtonLocator(string buttonLabel);
+
+	// --- Crash logs / device logs ---
+
+	internal abstract string? ReadCrashLog(string deviceId);
+
+	internal virtual void ClearAppLogs(string deviceId) { }
+
+	// --- Screenshots / system UI ---
+
+	internal abstract void CaptureDeviceScreenshot(string deviceId, string outPath);
+
+	internal abstract int GetStatusBarHeight(AppiumDriver driver);
+
+	internal abstract int GetHomeIndicatorHeight(AppiumDriver driver);
+
+	internal abstract int NotificationBannerMaskHeight { get; }
+
+	internal abstract int NotificationBannerTapYOffset { get; }
+
+	// --- System state setup ---
+
+	internal abstract void SetSystemTheme(string deviceId, bool isLightTheme);
+
+	internal abstract void SetSystemFontSize(string deviceId, SystemFontSize size);
+
+	internal virtual void OnBeforeTests(TestDriver driver, string deviceId) { }
+
+	// --- Dependency verification (called once at session start by DependencyChecker) ---
+
+	internal abstract void VerifyDependencies();
 
 	internal static int FindFreePort()
 	{

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text;
+using MobileJourneys.Framework;
 
 namespace MobileJourneys;
 
@@ -10,8 +11,13 @@ internal static class FailureSummary
 
 	static FailureSummary() => AppDomain.CurrentDomain.ProcessExit += (_, _) => Print();
 
-	internal static void RecordFailure(string config, string journeyName) =>
-		Failures.GetOrAdd(config, _ => []).Add(journeyName);
+	internal static void RecordFailure(TestCase testCase) =>
+		Failures.GetOrAdd(testCase.Config.ToString(), _ => []).Add(testCase.Journey.Name);
+
+	internal static IReadOnlyDictionary<string, IReadOnlyCollection<string>> SnapshotForTest() =>
+		Failures.ToDictionary(kv => kv.Key, kv => (IReadOnlyCollection<string>)[.. kv.Value]);
+
+	internal static void ResetForTest() => Failures.Clear();
 
 	private static void Print()
 	{

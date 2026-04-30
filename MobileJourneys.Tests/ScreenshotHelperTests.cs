@@ -11,94 +11,94 @@ namespace MobileJourneys.Tests;
 public sealed class ScreenshotHelperTests
 {
 	[Test]
-	public void ScaleToMax_DownscalesProportionally_WhenImageExceedsMaxHeight()
+	public void ScaleToMaxDownscalesProportionallyWhenImageExceedsMaxHeight()
 	{
 		using var image = new Image<Rgb24>(2000, 4000);
 
 		image.ScaleToMax(maxHeight: 1000);
 
-		image.Height.Should().Be(1000);
-		image.Width.Should().Be(500);
+		_ = image.Height.Should().Be(1000);
+		_ = image.Width.Should().Be(500);
 	}
 
 	[Test]
-	public void ScaleToMax_LeavesImageUntouched_WhenAlreadyUnderMaxHeight()
+	public void ScaleToMaxLeavesImageUntouchedWhenAlreadyUnderMaxHeight()
 	{
 		using var image = new Image<Rgb24>(800, 600);
 
 		image.ScaleToMax(maxHeight: 1000);
 
-		image.Width.Should().Be(800);
-		image.Height.Should().Be(600);
+		_ = image.Width.Should().Be(800);
+		_ = image.Height.Should().Be(600);
 	}
 
 	[Test]
-	public void ScaleToMax_LeavesImageUntouched_WhenExactlyAtMaxHeight()
+	public void ScaleToMaxLeavesImageUntouchedWhenExactlyAtMaxHeight()
 	{
 		using var image = new Image<Rgb24>(500, 1000);
 
 		image.ScaleToMax(maxHeight: 1000);
 
-		image.Width.Should().Be(500);
-		image.Height.Should().Be(1000);
+		_ = image.Width.Should().Be(500);
+		_ = image.Height.Should().Be(1000);
 	}
 
 	[Test]
-	public void ScaleMaskRegions_ScalesAllFourBoundsProportionally()
+	public void ScaleMaskRegionsScalesAllFourBoundsProportionally()
 	{
 		var regions = new[] { new Rectangle(100, 200, 300, 400) };
 
 		var scaled = ScreenshotHelper.ScaleMaskRegions(regions, from: new Size(1000, 2000), to: new Size(500, 1000));
 
-		scaled.Should().ContainSingle();
+		_ = scaled.Should().ContainSingle();
 		var r = scaled[0];
-		r.X.Should().Be(50);
-		r.Y.Should().Be(100);
-		r.Width.Should().Be(150);
-		r.Height.Should().Be(200);
+		_ = r.X.Should().Be(50);
+		_ = r.Y.Should().Be(100);
+		_ = r.Width.Should().Be(150);
+		_ = r.Height.Should().Be(200);
 	}
 
 	[Test]
-	public void ScaleMaskRegions_ReturnsInputUnchanged_WhenNoRegions()
+	public void ScaleMaskRegionsReturnsInputUnchangedWhenNoRegions()
 	{
 		var regions = Array.Empty<Rectangle>();
 
 		var scaled = ScreenshotHelper.ScaleMaskRegions(regions, from: new Size(100, 100), to: new Size(50, 50));
 
-		scaled.Should().BeSameAs(regions);
+		_ = scaled.Should().BeSameAs(regions);
 	}
 
 	[Test]
-	public void ScaleMaskRegions_ReturnsInputUnchanged_WhenSourceWidthIsZero()
+	public void ScaleMaskRegionsReturnsInputUnchangedWhenSourceWidthIsZero()
 	{
 		// Defensive case: from-size of (0, …) would div-by-zero; method bails out.
 		var regions = new[] { new Rectangle(10, 10, 20, 20) };
 
 		var scaled = ScreenshotHelper.ScaleMaskRegions(regions, from: new Size(0, 100), to: new Size(50, 50));
 
-		scaled.Should().BeSameAs(regions);
+		_ = scaled.Should().BeSameAs(regions);
 	}
 
 	[Test]
-	public void AreImagesStable_ReturnsTrue_ForIdenticalImages()
+	public void AreImagesStableReturnsTrueForIdenticalImages()
 	{
 		using var a = new Image<Rgb24>(100, 100, new Rgb24(255, 0, 0));
 		using var b = new Image<Rgb24>(100, 100, new Rgb24(255, 0, 0));
 
-		ScreenshotHelper.AreImagesStable(a, b, []).Should().BeTrue();
+		_ = ScreenshotHelper.AreImagesStable(a, b, []).Should().BeTrue();
 	}
 
 	[Test]
-	public void AreImagesStable_ReturnsFalse_ForDifferentImages_WithoutMask()
+	public void AreImagesStableReturnsFalseForDifferentImagesWithoutMask()
 	{
 		using var a = new Image<Rgb24>(100, 100, new Rgb24(255, 0, 0));
 		using var b = new Image<Rgb24>(100, 100, new Rgb24(0, 255, 0));
 
-		ScreenshotHelper.AreImagesStable(a, b, []).Should().BeFalse();
+		_ = ScreenshotHelper.AreImagesStable(a, b, []).Should().BeFalse();
 	}
 
 	[Test]
-	public void AreImagesStable_ReturnsTrue_WhenDifferenceIsEntirelyInsideMask()
+	public void AreImagesStableReturnsTrueWhenDifferenceIsEntirelyInsideMask()
 	{
 		using var a = new Image<Rgb24>(100, 100, new Rgb24(255, 0, 0));
 		using var b = new Image<Rgb24>(100, 100, new Rgb24(255, 0, 0));
@@ -118,11 +118,11 @@ public sealed class ScreenshotHelperTests
 
 		var mask = new[] { new Rectangle(10, 10, 10, 10) };
 
-		ScreenshotHelper.AreImagesStable(a, b, mask).Should().BeTrue();
+		_ = ScreenshotHelper.AreImagesStable(a, b, mask).Should().BeTrue();
 	}
 
 	[Test]
-	public void AreImagesStable_ReturnsFalse_WhenDifferenceIsOutsideMask()
+	public void AreImagesStableReturnsFalseWhenDifferenceIsOutsideMask()
 	{
 		using var a = new Image<Rgb24>(100, 100, new Rgb24(255, 0, 0));
 		using var b = new Image<Rgb24>(100, 100, new Rgb24(255, 0, 0));
@@ -132,15 +132,16 @@ public sealed class ScreenshotHelperTests
 
 		var mask = new[] { new Rectangle(10, 10, 10, 10) };
 
-		ScreenshotHelper.AreImagesStable(a, b, mask).Should().BeFalse();
+		_ = ScreenshotHelper.AreImagesStable(a, b, mask).Should().BeFalse();
 	}
 
 	[Test]
-	public void AreImagesStable_ReturnsFalse_WhenDimensionsDiffer()
+	public void AreImagesStableThrowsArgumentExceptionWhenDimensionsDiffer()
 	{
 		using var a = new Image<Rgb24>(100, 100, new Rgb24(255, 0, 0));
 		using var b = new Image<Rgb24>(101, 100, new Rgb24(255, 0, 0));
 
-		ScreenshotHelper.AreImagesStable(a, b, []).Should().BeFalse();
+		Action act = () => ScreenshotHelper.AreImagesStable(a, b, []);
+		_ = act.Should().Throw<ArgumentException>().WithMessage("*same size*");
 	}
 }

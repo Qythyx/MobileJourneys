@@ -22,6 +22,5 @@
 		<OutputType>Exe</OutputType>
 		<TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
 		<EnableNUnitRunner>true</EnableNUnitRunner>
-		<GenerateDocumentationFile>false</GenerateDocumentationFile>
 	</PropertyGroup>
 </Project>

@@ -13,7 +13,7 @@ namespace MobileJourneys.Tests;
 public sealed class DependencyCheckerTests
 {
 	[Test]
-	public void Verify_WithEmptyPlatforms_StillChecksAppium()
+	public void VerifyWithEmptyPlatformsStillChecksAppium()
 	{
 		// Even with no platforms, Appium is required to start the local server.
 		// On a dev machine with appium installed this passes; otherwise it throws
@@ -35,12 +35,12 @@ public sealed class DependencyCheckerTests
 		}
 		catch (InvalidOperationException ex)
 		{
-			ex.Message.Should().Contain("appium", "the failure message must mention which dep is missing");
+			_ = ex.Message.Should().Contain("appium", "the failure message must mention which dep is missing");
 		}
 	}
 
 	[Test]
-	public void Verify_AndroidFixture_FailsWithHelpfulMessage_WhenAndroidHomeUnset()
+	public void VerifyAndroidFixtureFailsWithHelpfulMessageWhenAndroidHomeUnset()
 	{
 		// Save and clear ANDROID_HOME so the Android branch hits its missing-env-var error.
 		var saved = Environment.GetEnvironmentVariable("ANDROID_HOME");
@@ -63,7 +63,7 @@ public sealed class DependencyCheckerTests
 			// Either Appium check fails first (host without appium) or Android check fails;
 			// either way the message must be actionable.
 			var ex = act.Should().Throw<InvalidOperationException>().Which;
-			ex.Message.Should().ContainAny("ANDROID_HOME", "appium");
+			_ = ex.Message.Should().ContainAny("ANDROID_HOME", "appium");
 		}
 		finally
 		{

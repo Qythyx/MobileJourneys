@@ -4,6 +4,8 @@ using Microsoft.Testing.Platform.Extensions.TestFramework;
 using Microsoft.Testing.Platform.Requests;
 using Microsoft.Testing.Platform.Services;
 using Microsoft.Testing.Platform.TestHost;
+using OpenQA.Selenium.Appium.Service;
+using OpenQA.Selenium.Appium.Service.Options;
 
 namespace MobileJourneys.Framework;
 
@@ -22,6 +24,10 @@ public sealed class TestFramework(
 	FrameworkConfig config
 ) : ITestFramework, IDataProducer
 {
+	private const string AppiumHostAddress = "127.0.0.1";
+
+	private const int AppiumHostPort = 4723;
+
 	/// <inheritdoc/>
 	public string Uid => TestAssembly.Name;
 
@@ -59,12 +65,12 @@ public sealed class TestFramework(
 			case DiscoverTestExecutionRequest:
 				foreach (var testCase in TestCases)
 				{
-					await PublishDiscoveredAsync(context, sessionUid, testCase).ConfigureAwait(false);
+					await PublishDiscoveredAsync(context, sessionUid, testCase);
 				}
 				break;
 
 			case RunTestExecutionRequest:
-				await RunAsync(context, sessionUid).ConfigureAwait(false);
+				await RunAsync(context, sessionUid);
 				break;
 		}
 
@@ -101,76 +107,58 @@ public sealed class TestFramework(
 		var skipped = TestCases.Count - selected.Count;
 		if (skipped > 0)
 		{
-			reporter.TestsSkipped("Skipped UI tests due to filters or rerun", $"Skipped {skipped} tests");
+			await reporter.TestsSkippedAsync("Skipped UI tests due to filters or rerun", $"Skipped {skipped} tests");
 		}
-
 		if (selected.Count == 0)
 		{
 			return;
 		}
 
-		AppiumServerHelper.StartAppiumLocalServer();
+		using var appiumService = new AppiumServiceBuilder()
+			.WithIPAddress(AppiumHostAddress)
+			.UsingPort(AppiumHostPort)
+			.WithArguments(new OptionCollector().AddArguments(new("--allow-insecure", "*:adb_shell")))
+			.Build();
+		appiumService.Start();
 
-		var groups = selected
-			.GroupBy(tc => tc.Config)
-			.Select(group =>
-				(new Lazy<TestDriver>(() => group.Key.GetTestDriver(config.DeepLinkScheme)), group.AsEnumerable())
-			)
-			.Where(tuple =>
-			{
-				var (lazyDriver, testCases) = tuple;
-				try
-				{
-					var driver = lazyDriver.Value;
-					if (driver.IsAppCrashed())
-					{
-						var crashLog = driver.CaptureDeviceCrashLog(appCrashed: true) ?? "No crash log available.";
-						reporter.TestsSkipped(
-							$"Skipped UI tests for {driver.Config}",
-							$"Skipped {testCases.Count()} tests because app crashed on startup. "
-								+ (
-									crashLog.Contains("No assemblies found")
-										? "Rebuild with -p:EmbedAssemblies=true to embed assemblies into the APK."
-										: $"Crash log:\n{crashLog}"
-								)
-						);
-						return false;
-					}
-				}
-				catch when (context.CancellationToken.IsCancellationRequested)
-				{
-					return false;
-				}
-				return testCases.Any();
-			})
-			.ToList();
+		await Task.WhenAll(
+			selected
+				.GroupBy(tc => tc.Config)
+				.Select(group =>
+					Task.Run(
+						async () =>
+						{
+							var driver = group.Key.GetTestDriver(config.DeepLinkScheme);
+							var cases = (IReadOnlyList<TestCase>)[.. group];
+							if (driver.IsAppCrashed())
+							{
+								var crashLog = driver.CaptureDeviceCrashLog() ?? "No crash log available.";
+								await reporter.TestsSkippedAsync(
+									$"Skipped UI tests for {driver.Config}",
+									$"Skipped {cases.Count} tests because app crashed on startup. "
+										+ (
+											crashLog.Contains("No assemblies found")
+												? "Rebuild with -p:EmbedAssemblies=true to embed assemblies into the APK."
+												: $"Crash log:\n{crashLog}"
+										)
+								);
+								return;
+							}
 
-		// Pre-publish every selected test as Discovered so MTP's terminal reporter knows
-		// the total count before any InProgress/Passed updates arrive.
-		foreach (var testCase in groups.SelectMany(g => g.Item2))
-		{
-			await PublishDiscoveredAsync(context, sessionUid, testCase).ConfigureAwait(false);
-		}
+							foreach (var testCase in cases)
+							{
+								await PublishDiscoveredAsync(context, sessionUid, testCase);
+							}
 
-		try
-		{
-			// Each worker's body is synchronous (driver creation + JourneyRunner.Run block).
-			// Task.Run hands each off to the threadpool so the platforms actually run concurrently.
-			var tasks = groups.Select(group =>
-				Task.Run(
-					() => RunTestCases(group.Item1.Value, [.. group.Item2], reporter, context.CancellationToken),
-					context.CancellationToken
+							await RunTestCasesAsync(driver, cases, reporter, context.CancellationToken);
+						},
+						context.CancellationToken
+					)
 				)
-			);
-			await Task.WhenAll(tasks).ConfigureAwait(false);
-		}
-		finally
-		{
-			AppiumServerHelper.DisposeAppiumLocalServer();
-		}
+		);
 	}
 
-	private static void RunTestCases(
+	private static async Task RunTestCasesAsync(
 		TestDriver driver,
 		IReadOnlyList<TestCase> cases,
 		MtpReporter reporter,
@@ -182,11 +170,7 @@ public sealed class TestFramework(
 		try
 		{
 			var deviceId = driver.GetDeviceId();
-			if (config.Platform == TestPlatform.iOS)
-			{
-				SimulatorHelper.EnableiOSHardwareKeyboard(deviceId);
-				driver.DismissAlertIfPresent(TimeSpan.FromSeconds(5));
-			}
+			config.OnBeforeTests(driver, deviceId);
 
 			foreach (var testCase in cases)
 			{
@@ -194,10 +178,11 @@ public sealed class TestFramework(
 				{
 					return;
 				}
-				reporter.JourneyStarted(testCase);
+				await reporter.JourneyStartedAsync(testCase);
 				try
 				{
-					reporter.JourneyCompleted(JourneyRunner.Run(driver, testCase, reporter));
+					var result = await JourneyRunner.RunAsync(driver, testCase, reporter);
+					await reporter.JourneyCompletedAsync(result);
 				}
 				catch when (cancellationToken.IsCancellationRequested)
 				{
@@ -209,7 +194,9 @@ public sealed class TestFramework(
 					// must fail the journey rather than escape to the runtime — an unhandled
 					// exception here would SIGABRT the test process and skip the finally
 					// block that disposes the Appium server, orphaning its child process.
-					reporter.JourneyCompleted(new JourneyResult(testCase, false, TimeSpan.Zero, ex.Message, ex));
+					await reporter.JourneyCompletedAsync(
+						new JourneyResult(testCase, false, TimeSpan.Zero, ex.Message, ex)
+					);
 				}
 			}
 		}

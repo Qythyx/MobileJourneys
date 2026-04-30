@@ -7,7 +7,7 @@ namespace MobileJourneys.Tests;
 public sealed class FrameworkConfigTests
 {
 	[Test]
-	public void FrameworkConfig_PreservesAllConstructorArguments()
+	public void FrameworkConfigPreservesAllConstructorArguments()
 	{
 		var platform = new IosPlatformConfig("26.2", "iPhone", true, "com.example.app", "/path/app", 2000);
 		var journey = new JourneyDefinition(new TestEnv(), [new TestExpectation()], [], "TestJourney");
@@ -21,26 +21,26 @@ public sealed class FrameworkConfigTests
 			Journeys: [journey]
 		);
 
-		config.DisplayName.Should().Be("Display");
-		config.Description.Should().Be("Desc");
-		config.TestNodeNamespace.Should().Be("Foo.Bar");
-		config.DeepLinkScheme.Should().Be("scheme");
-		config.PlatformConfigs.Should().ContainSingle().Which.Should().BeSameAs(platform);
-		config.Journeys.Should().ContainSingle().Which.Should().BeSameAs(journey);
+		_ = config.DisplayName.Should().Be("Display");
+		_ = config.Description.Should().Be("Desc");
+		_ = config.TestNodeNamespace.Should().Be("Foo.Bar");
+		_ = config.DeepLinkScheme.Should().Be("scheme");
+		_ = config.PlatformConfigs.Should().ContainSingle().Which.Should().BeSameAs(platform);
+		_ = config.Journeys.Should().ContainSingle().Which.Should().BeSameAs(journey);
 	}
 
 	[Test]
-	public void JourneyDefinition_ThrowsWhenInitialExpectIsEmpty()
+	public void JourneyDefinitionThrowsWhenInitialExpectIsEmpty()
 	{
-		Action ctor = () => new JourneyDefinition(new TestEnv(), [], [], "j");
-		ctor.Should().Throw<ArgumentException>().WithParameterName("InitialExpect");
+		Action ctor = () => _ = new JourneyDefinition(new TestEnv(), [], [], "j");
+		_ = ctor.Should().Throw<ArgumentException>().WithParameterName("InitialExpect");
 	}
 
 	[Test]
-	public void JourneyDefinition_InitialName_DerivesFromFirstExpectationLabel()
+	public void JourneyDefinitionInitialNameDerivesFromFirstExpectationLabel()
 	{
 		var journey = new JourneyDefinition(new TestEnv(), [new TestExpectation("MyTarget")], [], "j");
-		journey.InitialName.Should().Be("TestExpectation MyTarget");
+		_ = journey.InitialName.Should().Be("TestExpectation MyTarget");
 	}
 
 	private sealed record TestEnv : IJourneyEnvironment

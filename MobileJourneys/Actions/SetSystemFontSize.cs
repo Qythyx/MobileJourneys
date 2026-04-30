@@ -10,7 +10,7 @@ public sealed record SetSystemFontSize(SystemFontSize Size) : JourneyAction(Size
 	/// <inheritdoc/>
 	public override void Execute(TestDriver driver)
 	{
-		SimulatorHelper.SetSystemFontSize(Size, driver.Config.Platform, driver.GetDeviceId());
+		driver.Config.SetSystemFontSize(driver.GetDeviceId(), Size);
 		TestDriver.WaitForAppToSettle(500);
 	}
 }

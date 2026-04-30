@@ -27,52 +27,73 @@ public sealed class PlatformConfigTests
 	);
 
 	[Test]
-	public void IosPlatformConfig_Reports_IosPlatformAndXCUITest()
+	public void IosPlatformConfigReportsIosPlatformAndXCUITest()
 	{
-		IosLight.Platform.Should().Be(TestPlatform.iOS);
-		IosLight.AutomationName.Should().Be("XCUITest");
+		_ = IosLight.Platform.Should().Be(TestPlatform.iOS);
+		_ = IosLight.AutomationName.Should().Be("XCUITest");
 	}
 
 	[Test]
-	public void AndroidPlatformConfig_Reports_AndroidPlatformAndUiAutomator2()
+	public void AndroidPlatformConfigReportsAndroidPlatformAndUiAutomator2()
 	{
-		AndroidDark.Platform.Should().Be(TestPlatform.Android);
-		AndroidDark.AutomationName.Should().Be("UiAutomator2");
+		_ = AndroidDark.Platform.Should().Be(TestPlatform.Android);
+		_ = AndroidDark.AutomationName.Should().Be("UiAutomator2");
 	}
 
 	[Test]
-	public void DisplayName_FormatsAllFiveDimensions() =>
+	public void DisplayNameFormatsAllFiveDimensions() =>
 		IosLight.DisplayName.Should().Be("iOS · 26.2 · iPhone 17 Pro · light");
 
 	[Test]
-	public void DisplayName_DarkThemeAppearsAsDark() =>
+	public void DisplayNameDarkThemeAppearsAsDark() =>
 		AndroidDark.DisplayName.Should().Be("Android · 15 · Small Phone · dark");
 
 	[Test]
-	public void ToString_EqualsDisplayName() => IosLight.ToString().Should().Be(IosLight.DisplayName);
+	public void ToStringEqualsDisplayName() => IosLight.ToString().Should().Be(IosLight.DisplayName);
 
 	[Test]
-	public void ColorTolerance_IsHigherForAndroidThanIos() =>
+	public void ColorToleranceIsHigherForAndroidThanIos() =>
 		// Higher Android tolerance compensates for emulator rendering differences.
 		AndroidDark.ColorTolerance.Should().BeGreaterThan(IosLight.ColorTolerance);
 
 	[Test]
-	public void MaxScreenshotHeight_IsAvailableOnBothPlatforms()
+	public void MaxScreenshotHeightIsAvailableOnBothPlatforms()
 	{
-		IosLight.MaxScreenshotHeight.Should().Be(2000);
-		AndroidDark.MaxScreenshotHeight.Should().Be(2000);
+		_ = IosLight.MaxScreenshotHeight.Should().Be(2000);
+		_ = AndroidDark.MaxScreenshotHeight.Should().Be(2000);
 	}
 
 	[Test]
-	public void ResolvedMainActivity_FallsBackToAppIdentifierDotMainActivity()
-	{
-		AndroidDark.ResolvedMainActivity.Should().Be("com.example.app.MainActivity");
-	}
+	public void ResolvedMainActivityFallsBackToAppIdentifierDotMainActivity() =>
+		_ = AndroidDark.ResolvedMainActivity.Should().Be("com.example.app.MainActivity");
 
 	[Test]
-	public void ResolvedMainActivity_UsesExplicitOverrideWhenProvided()
+	public void ResolvedMainActivityUsesExplicitOverrideWhenProvided()
 	{
 		var withCustomActivity = AndroidDark with { MainActivity = "com.example.app.SomeOtherActivity" };
-		withCustomActivity.ResolvedMainActivity.Should().Be("com.example.app.SomeOtherActivity");
+		_ = withCustomActivity.ResolvedMainActivity.Should().Be("com.example.app.SomeOtherActivity");
+	}
+
+	[Test]
+	public void GetAlertButtonLocatorNoQuotesUsesSingleQuotedLiteral()
+	{
+		var locator = AndroidDark.GetAlertButtonLocator("OK").ToString();
+		_ = locator.Should().Contain("='ok'");
+	}
+
+	[Test]
+	public void GetAlertButtonLocatorLabelWithApostropheUsesDoubleQuotedLiteral()
+	{
+		// "Don't" lowercases to "don't" — the apostrophe used to break the single-quoted XPath.
+		var locator = AndroidDark.GetAlertButtonLocator("Don't").ToString();
+		_ = locator.Should().Contain("=\"don't\"");
+	}
+
+	[Test]
+	public void GetAlertButtonLocatorLabelWithBothQuotesUsesConcatExpression()
+	{
+		// Pathological label containing both ' and " forces concat() escaping.
+		var locator = AndroidDark.GetAlertButtonLocator("a'b\"c").ToString();
+		_ = locator.Should().Contain("concat(");
 	}
 }

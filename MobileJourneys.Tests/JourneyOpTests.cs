@@ -14,34 +14,34 @@ public sealed class JourneyOpTests
 	}
 
 	[Test]
-	public void Label_WithNullTarget_ReturnsName() => new TestOp().Label.Should().Be("TestOp");
+	public void LabelWithNullTargetReturnsName() => new TestOp().Label.Should().Be("TestOp");
 
 	[Test]
-	public void Label_WithSimpleTarget_AppendsTargetToName() =>
+	public void LabelWithSimpleTargetAppendsTargetToName() =>
 		new TestOp("HamburgerMenu").Label.Should().Be("TestOp HamburgerMenu");
 
 	[Test]
-	public void Label_WithUnderscoredTarget_KeepsOnlyLastSegment() =>
+	public void LabelWithUnderscoredTargetKeepsOnlyLastSegment() =>
 		new TestOp("TitleView_HamburgerMenu").Label.Should().Be("TestOp HamburgerMenu");
 
 	[Test]
-	public void Label_WithMultipleUnderscores_KeepsOnlyTheLastSegment() =>
+	public void LabelWithMultipleUnderscoresKeepsOnlyTheLastSegment() =>
 		new TestOp("Foo_Bar_Baz").Label.Should().Be("TestOp Baz");
 
 	[Test]
-	public void Label_WithFilenameInvalidChars_ReplacesWithUnderscores()
+	public void LabelWithFilenameInvalidCharsReplacesWithUnderscores()
 	{
 		// Target contains slash and colon which are invalid on most filesystems.
 		var op = new TestOp("Login / Create Account");
-		op.Label.Should().NotContain("/");
-		op.Label.Should().Be("TestOp Login _ Create Account");
+		_ = op.Label.Should().NotContain("/");
+		_ = op.Label.Should().Be("TestOp Login _ Create Account");
 	}
 
 	[Test]
-	public void Label_WhenNameIsOverridden_UsesOverride() =>
+	public void LabelWhenNameIsOverriddenUsesOverride() =>
 		new OverridingOp("Target").Label.Should().Be("ParentName Target");
 
 	[Test]
-	public void Label_WhenNameIsOverriddenAndTargetIsNull_ReturnsOverride() =>
+	public void LabelWhenNameIsOverriddenAndTargetIsNullReturnsOverride() =>
 		new OverridingOp().Label.Should().Be("ParentName");
 }

@@ -67,11 +67,19 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 	/// <summary>Returns the device UDID/transport-ID this driver is connected to.</summary>
 	public string GetDeviceId()
 	{
-		var capabilityName = Config.Platform == TestPlatform.iOS ? "udid" : "deviceUDID";
+		var capabilityName = Config.DeviceIdCapabilityName;
 		return App.Capabilities.GetCapability(capabilityName)?.ToString()
 			?? throw new InvalidOperationException(
 				$"Could not get device ID from driver capability '{capabilityName}'"
 			);
+	}
+
+	/// <summary>Terminates the app and relaunches it with fresh environment variables.</summary>
+	/// <param name="environment">Per-journey mock state to pass as env vars.</param>
+	public void RelaunchApp(IJourneyEnvironment environment)
+	{
+		Config.TerminateApp(App);
+		Config.LaunchApp(App, environment);
 	}
 
 	/// <summary>Polls until the element with the given AutomationId is no longer present or the timeout elapses.</summary>
@@ -83,7 +91,7 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 			try
 			{
 				_ = App.FindElement(MobileBy.Id(automationId));
-				Task.Delay(250).Wait();
+				Thread.Sleep(250);
 			}
 			catch (NoSuchElementException)
 			{
@@ -276,12 +284,11 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 
 	private Rectangle GetElementRectangle(System.Drawing.Size windowSize, string automationId)
 	{
-		// approximate height
-		var notificationHeight = Config.Platform == TestPlatform.Android ? 350 : 110;
+		var notificationHeight = Config.NotificationBannerMaskHeight;
 
-		// extend 1 pixel to account for rounding during resizing
+		// extend 2 pixel to account for rounding during resizing
 		static Rectangle GetBounds(AppiumElement ele) =>
-			new(ele.Location.X - 1, ele.Location.Y - 1, ele.Size.Width + 2, ele.Size.Height + 2);
+			new(ele.Location.X - 2, ele.Location.Y - 2, ele.Size.Width + 4, ele.Size.Height + 4);
 
 		return automationId switch
 		{
@@ -318,46 +325,7 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 	public void SwipeRight(string onElementId) => SwipeOnElement(onElementId, "right");
 
 	/// <summary>Dismisses the on-screen keyboard if present.</summary>
-	public void DismissKeyboard()
-	{
-		try
-		{
-			App.HideKeyboard();
-		}
-		catch
-		{
-			/* HideKeyboard may not be supported */
-		}
-
-		// HideKeyboard() is unreliable on iOS 26+ — it may silently fail
-		// or throw. Try the MAUI Done button (input accessory toolbar added by
-		// MauiDoneAccessoryView for Editor/Picker controls) first, then fall
-		// back to the keyboard Return key for Entry controls.
-		if (Config.Platform == TestPlatform.iOS)
-		{
-			// Try the MAUI Done button in the input accessory toolbar (added by
-			// MauiDoneAccessoryView for Editor/Picker controls). Match by structure
-			// rather than name since the button label is localized.
-			try
-			{
-				App.FindElement(By.XPath("//XCUIElementTypeToolbar//XCUIElementTypeButton")).Click();
-				return;
-			}
-			catch
-			{
-				/* no toolbar button — not an Editor/Picker, or keyboard not visible */
-			}
-
-			try
-			{
-				App.FindElement(By.XPath("//XCUIElementTypeKeyboard//XCUIElementTypeButton[@name='Return']")).Click();
-			}
-			catch
-			{
-				/* keyboard may not be visible */
-			}
-		}
-	}
+	public void DismissKeyboard() => Config.DismissKeyboard(App);
 
 	/// <summary>
 	/// Scrolls to an element using a deep link to the app's <c>ScrollView.ScrollToAsync</c>,
@@ -373,22 +341,7 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 	}
 
 	/// <summary>Opens an in-app deep link via mobile: deepLink (Android) or App.OpenUrl (iOS).</summary>
-	public void OpenDeepLink(string url)
-	{
-		if (Config.Platform == TestPlatform.Android)
-		{
-			_ = App.ExecuteScript(
-				"mobile: deepLink",
-				new Dictionary<string, object> { ["url"] = url, ["package"] = Config.AppIdentifier }
-			);
-		}
-		else
-		{
-			// iOS has no mobile: deepLink command. Navigate to the URL directly — XCUITest
-			// delivers custom URL schemes to the foreground app without a system confirmation dialog.
-			App.Navigate().GoToUrl(url);
-		}
-	}
+	public void OpenDeepLink(string url) => Config.OpenDeepLink(App, url);
 
 	private void SwipeOnElement(string automationId, string direction)
 	{
@@ -435,17 +388,7 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 				}
 			});
 
-			var alert = App.SwitchTo().Alert();
-			if (Config.Platform == TestPlatform.iOS)
-			{
-				// On iOS XCUITest with MAUI, Accept() maps to the cancel button
-				// of a two-button DisplayAlert (the one that does nothing).
-				alert.Accept();
-			}
-			else
-			{
-				alert.Dismiss();
-			}
+			Config.DismissDefaultAlert(App.SwitchTo().Alert());
 
 			// Allow the alert dismissal animation to complete before the next action.
 			WaitForAppToSettle(300);
@@ -466,24 +409,7 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 	{
 		try
 		{
-			if (Config.Platform == TestPlatform.iOS)
-			{
-				App.FindElement(By.Name(buttonLabel)).Click();
-			}
-			else
-			{
-				// Android AlertDialog buttons don't have AccessibilityId. Find by text content.
-				// MaterialAlertDialog renders button text in uppercase via textAllCaps, so the
-				// @text attribute contains the uppercased form. Use translate() for a
-				// case-insensitive match so journey definitions can use the natural-case label.
-				var lower = buttonLabel.ToLowerInvariant();
-				App.FindElement(
-						By.XPath(
-							$"//android.widget.Button[translate(@text,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')='{lower}']"
-						)
-					)
-					.Click();
-			}
+			App.FindElement(Config.GetAlertButtonLocator(buttonLabel)).Click();
 		}
 		catch (NoSuchElementException)
 		{
@@ -611,67 +537,13 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 		var tmpPath = Path.Combine(Path.GetTempPath(), $"device_screenshot_{Guid.NewGuid():N}.png");
 		try
 		{
-			if (Config.Platform == TestPlatform.iOS)
-			{
-				_ = RunShellCommand("xcrun", $"simctl io {GetDeviceId()} screenshot {tmpPath}");
-			}
-			else
-			{
-				const string DeviceTmp = "/data/local/tmp/test_screenshot.png";
-				_ = RunAdbCommand($"shell screencap -p {DeviceTmp}");
-				_ = RunAdbCommand($"pull {DeviceTmp} {tmpPath}");
-				_ = RunAdbCommand($"shell rm {DeviceTmp}");
-			}
-
+			Config.CaptureDeviceScreenshot(GetDeviceId(), tmpPath);
 			return File.ReadAllBytes(tmpPath);
 		}
 		finally
 		{
 			File.Delete(tmpPath);
 		}
-	}
-
-	/// <summary>Selects the Nth item in the MAUI Picker with the given AutomationId. Throws on iOS due to dotnet/maui#28024.</summary>
-	public void SelectPickerItem(string automationId, int itemIndex)
-	{
-		if (Config.Platform == TestPlatform.iOS)
-		{
-			// MAUI Picker on iOS can't be opened via any Appium XCUITest method — element.Click(),
-			// mobile:tap, mobile:tapWithNumberOfTaps, mobile:touchAndHold, and W3C Actions API all
-			// fail to trigger the UITapGestureRecognizer on the Picker's UITextField
-			// (https://github.com/dotnet/maui/issues/28024). Use platform-specific workarounds
-			// (e.g., MOCK_THEME env var) instead of this method for iOS picker interaction.
-			throw new NotSupportedException(
-				"MAUI Picker cannot be opened via Appium on iOS (dotnet/maui#28024). "
-					+ "Use a platform-specific workaround instead."
-			);
-		}
-
-		SelectPickerItemAndroid(automationId, itemIndex);
-	}
-
-	private void SelectPickerItemAndroid(string automationId, int itemIndex)
-	{
-		FindElement(automationId, TimeSpan.FromSeconds(5)).Click();
-		WaitForAppToSettle(500);
-
-		// Android MAUI Picker: opens an AlertDialog with CheckedTextView radio button items.
-		// Wait for the dialog to appear before looking for items.
-		var wait = new WebDriverWait(App, TimeSpan.FromSeconds(5));
-		wait.IgnoreExceptionTypes(typeof(NoSuchElementException));
-		_ = wait.Until(d => d.FindElements(MobileBy.ClassName("android.widget.CheckedTextView")).Count > 0);
-
-		var items = App.FindElements(MobileBy.ClassName("android.widget.CheckedTextView"));
-		if (itemIndex >= items.Count)
-		{
-			throw new ArgumentOutOfRangeException(
-				nameof(itemIndex),
-				itemIndex,
-				$"Picker item index out of range (found {items.Count} items)"
-			);
-		}
-
-		items[itemIndex].Click();
 	}
 
 	/// <summary>
@@ -682,14 +554,8 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 	{
 		try
 		{
-			var paramName = Config.Platform == TestPlatform.iOS ? "bundleId" : "appId";
-			var result = App.ExecuteScript(
-				"mobile: queryAppState",
-				new Dictionary<string, object> { [paramName] = Config.AppIdentifier }
-			);
-
 			// queryAppState returns: 0 = not installed, 1 = not running, 3 = background, 4 = foreground
-			return result is long state && state <= 1;
+			return Config.QueryAppState(App) <= 1;
 		}
 		catch
 		{
@@ -704,158 +570,18 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 	/// file in its cache directory. On Android, falls back to logcat if the crash log
 	/// file is unavailable. Returns null if no crash log exists.
 	/// </summary>
-	/// <param name="appCrashed">True if the app crashed; otherwise false.</param>
-	public string? CaptureDeviceCrashLog(bool appCrashed = false) =>
-		Config.Platform == TestPlatform.Android ? ReadAndroidCrashLog(appCrashed) : ReadIosCrashLog();
-
-	private string? ReadAndroidCrashLog(bool appCrashed)
-	{
-		// The app's private data dir (/data/data/<package>/) is only accessible via run-as.
-		// Must specify -s <device> because multiple emulators may be running.
-		const string crashLog = "crash.log";
-		var package = Config.AppIdentifier;
-
-		// When the app crashed, it may still be writing the log file. Retry a few times.
-		var maxAttempts = appCrashed ? 3 : 1;
-		for (var attempt = 0; attempt < maxAttempts; attempt++)
-		{
-			if (attempt > 0)
-			{
-				Task.Delay(500).Wait();
-			}
-
-			var result = RunAdbCommandFull($"shell run-as {package} cat cache/{crashLog}");
-			if (result is null)
-			{
-				continue;
-			}
-
-			if (
-				!string.IsNullOrWhiteSpace(result.Output)
-				&& !result.Output.Contains("No such file", StringComparison.Ordinal)
-			)
-			{
-				_ = RunAdbCommand($"shell run-as {package} rm cache/{crashLog}");
-				return result.Output.Trim();
-			}
-		}
-
-		// crash.log not available — fall back to logcat for the crash stack trace.
-		var logcat = CaptureAndroidLogcat();
-		return logcat is not null ? $"[from logcat — crash.log was not available]\n{logcat}" : null;
-	}
+	public string? CaptureDeviceCrashLog() => Config.ReadCrashLog(GetDeviceId());
 
 	/// <summary>
-	/// Clears the Android logcat buffer so that subsequent captures only contain
-	/// entries from the current app launch. No-op on iOS.
+	/// Clears the device's app log buffer so subsequent captures only contain entries from
+	/// the current app launch. Maps to <c>adb logcat -c</c> on Android; no-op on iOS.
 	/// </summary>
-	public void ClearAndroidLogcat()
-	{
-		if (Config.Platform == TestPlatform.Android)
-		{
-			_ = RunAdbCommand("logcat -c");
-		}
-	}
-
-	/// <summary>
-	/// Captures recent crash-related output from Android logcat as a fallback when
-	/// the app's crash.log file is not available.
-	/// </summary>
-	private string? CaptureAndroidLogcat()
-	{
-		// AndroidRuntime:E  — fatal Java/Kotlin exception stack traces
-		// MonoUnhandled:E   — .NET unhandled exception output
-		// DOTNET:E          — .NET runtime error output
-		// monodroid:F       — native startup failures (e.g. Fast Deployment missing assemblies)
-		// DEBUG:F           — native crash abort messages with stack traces
-		// Logcat is cleared before each app launch, so -t is not needed — all entries
-		// in the buffer are from the current launch attempt.
-		var result = RunAdbCommand("logcat -d AndroidRuntime:E MonoUnhandled:E DOTNET:E monodroid:F DEBUG:F *:S");
-
-		return string.IsNullOrWhiteSpace(result) ? null : result.Trim();
-	}
-
-	private string? RunAdbCommand(string arguments)
-	{
-		var adb = $"{Environment.GetEnvironmentVariable("ANDROID_HOME")}/platform-tools/adb";
-		return RunShellCommand(adb, $"-s {GetDeviceId()} {arguments}")?.Output;
-	}
-
-	private ShellResult? RunAdbCommandFull(string arguments)
-	{
-		var adb = $"{Environment.GetEnvironmentVariable("ANDROID_HOME")}/platform-tools/adb";
-		return RunShellCommand(adb, $"-s {GetDeviceId()} {arguments}");
-	}
-
-	private string? ReadIosCrashLog()
-	{
-		// Get the app's data container path on the iOS simulator
-		var deviceId = GetDeviceId();
-		var containerPath = RunShellCommand("xcrun", $"simctl get_app_container {deviceId} {Config.AppIdentifier} data")
-			?.Output?.Trim();
-
-		if (string.IsNullOrWhiteSpace(containerPath))
-		{
-			return null;
-		}
-
-		// The app writes crash logs to Path.GetTempPath() which maps to tmp/ on iOS.
-		var crashLogPath = Path.Combine(containerPath, "tmp", "crash.log");
-		if (!File.Exists(crashLogPath))
-		{
-			return null;
-		}
-
-		var content = File.ReadAllText(crashLogPath);
-		File.Delete(crashLogPath);
-		return string.IsNullOrWhiteSpace(content) ? null : content.Trim();
-	}
-
-	private sealed record ShellResult(string Output, string Error, int ExitCode);
-
-	private static ShellResult? RunShellCommand(string command, string arguments)
-	{
-		try
-		{
-			using var process = new System.Diagnostics.Process();
-			process.StartInfo = new System.Diagnostics.ProcessStartInfo
-			{
-				FileName = command,
-				Arguments = arguments,
-				RedirectStandardOutput = true,
-				RedirectStandardError = true,
-				UseShellExecute = false,
-				CreateNoWindow = true,
-			};
-			if (process.Start())
-			{
-				var output = process.StandardOutput.ReadToEnd();
-				var error = process.StandardError.ReadToEnd();
-				_ = process.WaitForExit(5000);
-				return new ShellResult(output, error, process.ExitCode);
-			}
-
-			return new ShellResult("", $"Process '{command} {arguments}' failed to start", -1);
-		}
-		catch (Exception ex)
-		{
-			return new ShellResult("", $"Exception running '{command} {arguments}': {ex.Message}", -1);
-		}
-	}
+	public void ClearAppLogs() => Config.ClearAppLogs(GetDeviceId());
 
 	/// <summary>
 	/// Queries the device's status bar height via the Appium driver.
 	/// </summary>
-	private Rectangle GetStatusBarMask()
-	{
-		var height = Config.Platform switch
-		{
-			TestPlatform.iOS => App.GetDict("mobile: deviceScreenInfo").GetDict("statusBarSize").GetInt("height"),
-			TestPlatform.Android => App.GetDict("mobile: getSystemBars").GetDict("statusBar").GetInt("height"),
-			_ => 0,
-		};
-		return new(0, 0, App.Manage().Window.Size.Width, height);
-	}
+	private Rectangle GetStatusBarMask() => new(0, 0, App.Manage().Window.Size.Width, Config.GetStatusBarHeight(App));
 
 	/// <summary>
 	/// Queries the device's home indicator / navigation bar height via the Appium driver.
@@ -863,12 +589,7 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 	private Rectangle GetHomeIndicatorMask()
 	{
 		var windowSize = App.Manage().Window.Size;
-		var height = Config.Platform switch
-		{
-			TestPlatform.iOS => 34, // Can't probe it from Appium
-			TestPlatform.Android => App.GetDict("mobile: getSystemBars").GetDict("navigationBar").GetInt("height"),
-			_ => 0,
-		};
+		var height = Config.GetHomeIndicatorHeight(App);
 		return new(0, windowSize.Height - height, windowSize.Width, height);
 	}
 
@@ -876,8 +597,20 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 	/// Sends a simulated push notification to an iOS simulator via <c>xcrun simctl push</c>.
 	/// </summary>
 	/// <param name="payloadFilePath">Absolute path to the APNS JSON payload file.</param>
-	public void SendIosSimulatorPush(string payloadFilePath) =>
-		_ = RunShellCommand("xcrun", $"simctl push {GetDeviceId()} {Config.AppIdentifier} {payloadFilePath}");
+	public void SendIosSimulatorPush(string payloadFilePath)
+	{
+		var result = ProcessRunner.RunWithResult(
+			"xcrun",
+			["simctl", "push", GetDeviceId(), Config.AppIdentifier, payloadFilePath]
+		);
+		if (result is null || result.ExitCode != 0)
+		{
+			var detail = result?.Error.Trim() ?? "no result";
+			throw new InvalidOperationException(
+				$"`xcrun simctl push` failed for '{payloadFilePath}' (exit {result?.ExitCode ?? -1}): {detail}"
+			);
+		}
+	}
 
 	/// <summary>
 	/// Taps the notification banner at the top of the screen. The banner must be visible
@@ -888,7 +621,7 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 	{
 		var size = App.Manage().Window.Size;
 		var finger = new PointerInputDevice(PointerKind.Touch, "finger");
-		var yOffset = Config.Platform == TestPlatform.Android ? 200 : 100;
+		var yOffset = Config.NotificationBannerTapYOffset;
 		var sequence = new ActionSequence(finger, 0)
 			.AddAction(finger.CreatePointerMove(CoordinateOrigin.Viewport, size.Width / 2, yOffset, TimeSpan.Zero))
 			.AddAction(finger.CreatePointerDown(MouseButton.Left))
@@ -901,10 +634,7 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, string d
 	/// </summary>
 	public void PressHomeButton()
 	{
-		_ =
-			Config.Platform == TestPlatform.iOS
-				? App.ExecuteScript("mobile: pressButton", new Dictionary<string, object> { ["name"] = "home" })
-				: App.ExecuteScript("mobile: pressKey", new Dictionary<string, object> { ["keycode"] = 3 });
+		Config.PressHomeButton(App);
 		WaitForAppToSettle(500);
 	}
 }

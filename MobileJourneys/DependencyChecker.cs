@@ -1,6 +1,3 @@
-using System.ComponentModel;
-using System.Diagnostics;
-
 namespace MobileJourneys;
 
 /// <summary>
@@ -31,96 +28,38 @@ public static class DependencyChecker
 			"Install Appium 2.x: `npm install -g appium` (and ensure node/npm are on PATH)."
 		);
 
-		var platforms = new HashSet<TestPlatform>(config.PlatformConfigs.Select(p => p.Platform));
-
-		if (platforms.Contains(TestPlatform.iOS))
+		foreach (var platformConfig in config.PlatformConfigs.GroupBy(p => p.Platform).Select(g => g.First()))
 		{
-			RequireBinary("xcrun", "--version", "Install Xcode command-line tools: `xcode-select --install`.");
-		}
-
-		if (platforms.Contains(TestPlatform.Android))
-		{
-			VerifyAndroidPlatformTools();
+			platformConfig.VerifyDependencies();
 		}
 	}
 
-	private static void VerifyAndroidPlatformTools()
+	internal static void RequireBinary(string binary, string args, string installHint)
 	{
-		var androidHome = Environment.GetEnvironmentVariable("ANDROID_HOME");
-		if (string.IsNullOrEmpty(androidHome))
-		{
-			throw new InvalidOperationException(
-				"ANDROID_HOME environment variable is not set. Install the Android SDK "
-					+ "(e.g., via Android Studio) and export ANDROID_HOME to the SDK directory "
-					+ "(typically `$HOME/Library/Android/sdk` on macOS)."
-			);
-		}
-
-		var adbPath = Path.Combine(androidHome, "platform-tools", "adb");
-		if (!File.Exists(adbPath))
-		{
-			throw new InvalidOperationException(
-				$"adb not found at '{adbPath}'. Install platform-tools via Android Studio's "
-					+ "SDK Manager, or download standalone from "
-					+ "https://developer.android.com/tools/releases/platform-tools."
-			);
-		}
-
-		RequireBinary(
-			adbPath,
-			"--version",
-			$"adb at '{adbPath}' is present but failed to run. Reinstall Android platform-tools."
-		);
-	}
-
-	private static void RequireBinary(string binary, string args, string installHint)
-	{
-		Process? process = null;
-		try
-		{
-			process = Process.Start(
-				new ProcessStartInfo
-				{
-					FileName = binary,
-					Arguments = args,
-					RedirectStandardOutput = true,
-					RedirectStandardError = true,
-					UseShellExecute = false,
-				}
-			);
-		}
-		catch (Win32Exception ex)
-		{
-			throw new InvalidOperationException(
-				$"Required dependency '{binary}' not found on PATH.\n  {installHint}",
-				ex
-			);
-		}
-
-		if (process is null)
+		var argList = args.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+		var result = ProcessRunner.RunWithResult(binary, argList, (int)ProbeTimeout.TotalSeconds);
+		if (result is null)
 		{
 			throw new InvalidOperationException($"Failed to start '{binary}'.\n  {installHint}");
 		}
 
-		using (process)
+		switch (result.Status)
 		{
-			if (!process.WaitForExit(ProbeTimeout))
-			{
-				process.Kill(entireProcessTree: true);
+			case ProcessRunner.ShellResultStatus.FailedToStart:
 				throw new InvalidOperationException(
-					$"`{binary} {args}` did not exit within {ProbeTimeout.TotalSeconds:F0}s.\n" + $"  {installHint}"
+					$"Required dependency '{binary}' not found on PATH.\n  {installHint}"
 				);
-			}
-
-			if (process.ExitCode != 0)
-			{
-				var stderr = process.StandardError.ReadToEnd().Trim();
+			case ProcessRunner.ShellResultStatus.TimedOut:
 				throw new InvalidOperationException(
-					$"`{binary} {args}` exited with code {process.ExitCode}.\n"
+					$"`{binary} {args}` did not exit within {ProbeTimeout.TotalSeconds:F0}s.\n  {installHint}"
+				);
+			case ProcessRunner.ShellResultStatus.Completed when result.ExitCode != 0:
+				var stderr = result.Error.Trim();
+				throw new InvalidOperationException(
+					$"`{binary} {args}` exited with code {result.ExitCode}.\n"
 						+ (string.IsNullOrEmpty(stderr) ? string.Empty : $"  stderr: {stderr}\n")
 						+ $"  {installHint}"
 				);
-			}
 		}
 	}
 }

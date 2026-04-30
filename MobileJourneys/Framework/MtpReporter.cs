@@ -20,14 +20,21 @@ internal sealed class MtpReporter(
 	string testNodeNamespace
 )
 {
-	public void JourneyStarted(TestCase testCase) => Publish(testCase, InProgressTestNodeStateProperty.CachedInstance);
+	public Task JourneyStartedAsync(TestCase testCase) =>
+		PublishAsync(testCase, InProgressTestNodeStateProperty.CachedInstance);
 
-	public void StepStarted(TestCase testCase, int stepNumber, int totalSteps, string stepName) =>
-		Publish(testCase, new InProgressTestNodeStateProperty($"Step {stepNumber}/{totalSteps}: {stepName}\n"));
+	public Task StepStartedAsync(TestCase testCase, int stepNumber, int totalSteps, string stepName) =>
+		PublishAsync(testCase, new InProgressTestNodeStateProperty($"Step {stepNumber}/{totalSteps}: {stepName}\n"));
 
-	public void JourneyCompleted(JourneyResult result)
+	public Task JourneyCompletedAsync(JourneyResult result)
 	{
-		// Pass explanation = "" (empty, NOT null). The FailedTestNodeStateProperty ctor does
+		if (!result.Passed)
+		{
+			FailureSummary.RecordFailure(result.TestCase);
+		}
+
+		// When there's a real exception, pass explanation = "" (empty, NOT null). The
+		// FailedTestNodeStateProperty(Exception, string) ctor does
 		// `base(explanation ?? exception.Message)` — null falls back to exception.Message,
 		// which populates the IPC `reason` slot. `dotnet test`'s out-of-process reporter
 		// (SDK-forked TerminalTestReporter) then renders `reason` AND `exceptions[0].ErrorMessage`,
@@ -35,26 +42,27 @@ internal sealed class MtpReporter(
 		// as "", the SDK skips the `informativeMessage` render (`!IsNullOrEmpty` check), and
 		// ExceptionFlattener falls back to exception.Message for the remaining single render.
 		// See: dotnet/sdk PR #49806 (introduced the bug), testfx ExceptionFlattener.
-		TestNodeStateProperty state = result.Passed
-			? PassedTestNodeStateProperty.CachedInstance
-			: new FailedTestNodeStateProperty(
-				result.Exception ?? new InvalidOperationException(result.Explanation),
-				""
-			);
-		Publish(result.TestCase, state, result.Duration);
+		//
+		// When there's no exception (e.g., a synthesized failure), use the explanation-only
+		// ctor so the reporter doesn't show a fake "InvalidOperationException" type.
+		TestNodeStateProperty state =
+			result.Passed ? PassedTestNodeStateProperty.CachedInstance
+			: result.Exception is { } exception ? new FailedTestNodeStateProperty(exception, "")
+			: new FailedTestNodeStateProperty(result.Explanation);
+		return PublishAsync(result.TestCase, state, result.Duration);
 	}
 
-	public void JourneySkipped(TestCase testCase, string explanation) =>
-		Publish(testCase, new SkippedTestNodeStateProperty(explanation));
+	public Task JourneySkippedAsync(TestCase testCase, string explanation) =>
+		PublishAsync(testCase, new SkippedTestNodeStateProperty(explanation));
 
-	public void TestsSkipped(string uid, string explanation)
+	public Task TestsSkippedAsync(string uid, string explanation)
 	{
 		var node = new TestNode { Uid = uid, DisplayName = uid };
 		node.Properties.Add(new SkippedTestNodeStateProperty(explanation));
-		messageBus.PublishAsync(producer, new TestNodeUpdateMessage(sessionUid, node)).GetAwaiter().GetResult();
+		return messageBus.PublishAsync(producer, new TestNodeUpdateMessage(sessionUid, node));
 	}
 
-	private void Publish(TestCase testCase, IProperty property, TimeSpan? duration = null)
+	private Task PublishAsync(TestCase testCase, IProperty property, TimeSpan? duration = null)
 	{
 		var node = TestNodeFactory.Create(testCase, testNodeNamespace);
 		node.Properties.Add(property);
@@ -64,6 +72,6 @@ internal sealed class MtpReporter(
 			var start = end - d;
 			node.Properties.Add(new TimingProperty(new TimingInfo(start, end, d)));
 		}
-		messageBus.PublishAsync(producer, new TestNodeUpdateMessage(sessionUid, node)).GetAwaiter().GetResult();
+		return messageBus.PublishAsync(producer, new TestNodeUpdateMessage(sessionUid, node));
 	}
 }

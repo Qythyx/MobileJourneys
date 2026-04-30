@@ -150,8 +150,8 @@ public static class ScreenshotHelper
 			.. regions.Select(r => new Rectangle(
 				(int)(r.X * scaleX),
 				(int)(r.Y * scaleY),
-				(int)(r.Width * scaleX),
-				(int)(r.Height * scaleY)
+				(int)Math.Ceiling(r.Width * scaleX),
+				(int)Math.Ceiling(r.Height * scaleY)
 			)),
 		];
 	}
@@ -181,7 +181,7 @@ public static class ScreenshotHelper
 
 		if (a.Width != b.Width || a.Height != b.Height)
 		{
-			return false;
+			throw new ArgumentException("Images must be the same size");
 		}
 
 		var bytesPerPixel = a.PixelType.BitsPerPixel / 8;
