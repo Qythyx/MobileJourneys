@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # MinVer needs full history + tags to derive the version
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Restore tools
+        run: dotnet tool restore
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Test with coverage
+        run: |
+          dotnet test \
+            --no-build \
+            --configuration Release \
+            --results-directory TestResults \
+            --coverage \
+            --coverage-output-format cobertura
+
+      - name: Generate coverage report
+        run: |
+          dotnet reportgenerator \
+            "-reports:TestResults/**/*.cobertura.xml" \
+            "-targetdir:coverage" \
+            "-reporttypes:HtmlInline;Cobertura;MarkdownSummaryGithub"
+
+      - name: Publish coverage summary to job page
+        if: always()
+        run: cat coverage/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage
+          retention-days: 14

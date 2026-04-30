@@ -247,6 +247,38 @@ The Beerbox app (`~/Projects/beerbox`) is the original consumer this framework w
 see `test/app/Beerbox.App.UITests/` there for a complete production example: `BeerboxPlatforms.cs`,
 `MockEnvironment.cs`, the 6 Beerbox-specific actions, and 32 journeys.
 
+## Development
+
+### Running the unit tests
+
+The unit test suite (`MobileJourneys.Tests`) is plain NUnit on top of Microsoft.Testing.Platform —
+no simulators or external tools are required to run it.
+
+```bash
+dotnet test
+```
+
+### Code coverage
+
+Coverage is collected by [Microsoft.Testing.Extensions.CodeCoverage](https://learn.microsoft.com/dotnet/core/testing/microsoft-testing-platform-code-coverage)
+(the MTP-native collector — `coverlet.collector` is not compatible with MTP) and rendered to HTML by
+[ReportGenerator](https://github.com/danielpalme/ReportGenerator), pinned as a local
+`dotnet-tools.json` tool.
+
+```bash
+./scripts/coverage.sh
+```
+
+This restores the local tools, runs the tests with coverage, generates an HTML report at
+`coverage/index.html`, and opens it on macOS. Test assemblies are excluded by default (MTP sets
+`IncludeTestAssembly=false`) and the underlying tool honors `[ExcludeFromCodeCoverage]` without
+extra config. Add a `coverage.runsettings` file (`<Configuration><CodeCoverage>...`) and pass it via
+`--coverage-settings` if you ever need finer-grained exclusions.
+
+CI runs the same flow on every push and PR ([.github/workflows/ci.yml](.github/workflows/ci.yml)),
+publishes a coverage summary to the GitHub Actions job page, and uploads the full HTML report as a
+build artifact (`coverage-report`).
+
 ## Status
 
 - v0: ProjectReference-only consumption from sibling repos.

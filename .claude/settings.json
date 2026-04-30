@@ -1,11 +1,21 @@
 {
-  "permissions": {
-    "allow": [
-      "Bash(dotnet build *)",
-      "Bash(dotnet test *)",
-      "WebSearch",
-      "Bash(dotnet clean *)",
-      "WebFetch(domain:)"
-    ]
-  }
+	"permissions": {
+		"allow": [
+			"Bash(dotnet build *)",
+			"Bash(dotnet test *)",
+			"WebSearch",
+			"Bash(dotnet clean *)",
+			"WebFetch(domain:)",
+			"Bash(./scripts/coverage.sh)",
+			"WebFetch(domain:github.com)",
+			"WebFetch(domain:raw.githubusercontent.com)",
+			"WebFetch(domain:xunit.net)",
+			"Bash(dotnet reportgenerator *)"
+		],
+		"additionalDirectories": [
+			"/tmp",
+			"/private/tmp",
+			"/Users/rainer/Projects/MobileJourneys/TestResults"
+		]
+	}
 }
