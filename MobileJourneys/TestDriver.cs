@@ -89,7 +89,7 @@ public sealed class TestDriver(
 	}
 
 	/// <summary>Polls until the element with the given AutomationId is no longer present or the timeout elapses.</summary>
-	public void WaitForElementGone(string automationId, TimeSpan timeout)
+	public void WaitForElementNotFound(string automationId, TimeSpan timeout)
 	{
 		var deadline = DateTime.UtcNow + timeout;
 		while (DateTime.UtcNow < deadline)

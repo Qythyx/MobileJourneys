@@ -14,15 +14,15 @@ public sealed class JourneyStepTests
 
 	[Test]
 	public void NameWithNonNoneActionAndExpectationsStillReturnsActionLabel() =>
-		new JourneyStep(new Tap("HamburgerMenu"), [new Visible("Drawer")]).Name.Should().Be("Tap HamburgerMenu");
+		new JourneyStep(new Tap("HamburgerMenu"), [new Found("Drawer")]).Name.Should().Be("Tap HamburgerMenu");
 
 	[Test]
 	public void NameWithNoneActionAndOneExpectationReturnsExpectationLabel() =>
-		new JourneyStep(new None(), [new Visible("Drawer")]).Name.Should().Be("Visible Drawer");
+		new JourneyStep(new None(), [new Found("Drawer")]).Name.Should().Be("Found Drawer");
 
 	[Test]
 	public void NameWithNoneActionAndMultipleExpectationsReturnsFirstExpectationLabel() =>
-		new JourneyStep(new None(), [new Visible("Drawer"), new Hidden("Spinner")]).Name.Should().Be("Visible Drawer");
+		new JourneyStep(new None(), [new Found("Drawer"), new NotFound("Spinner")]).Name.Should().Be("Found Drawer");
 
 	[Test]
 	public void NameWithNoneActionAndNullExpectReturnsActionLabel() =>

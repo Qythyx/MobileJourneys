@@ -15,7 +15,7 @@ and verified against per-platform PNG screenshot baselines.
 - Built-in actions: `Tap`, `TypeText`, `SwipeLeft`/`Right`, `ScrollToElement`, `DismissAlert`,
   `DismissKeyboard`, `TapAlertButton`, `TapNotification`, `InvertSystemTheme`, `SetSystemFontSize`,
   `None`.
-- Built-in expectations: `Visible`, `Hidden`, `VisibleWithText`, `AlertAppears`,
+- Built-in expectations: `Found`, `NotFound`, `FoundWithText`, `AlertFound`,
   `WaitForNotification`.
 - An Appium-driven `TestDriver` with element-finding (with stale-element retry), gestures, alerts,
   deep links, hardware-keyboard control, and crash detection.
@@ -123,12 +123,12 @@ public static class Journeys
 {
     public static readonly JourneyDefinition Login = new(
         new MyAppEnvironment { LoggedIn = false },
-        [new Visible("LoginButton")],
+        [new Found("LoginButton")],
         [
-            new(new Tap("LoginButton"), [new Visible("EmailField")]),
+            new(new Tap("LoginButton"), [new Found("EmailField")]),
             new(new TypeText("EmailField", "test@example.com")),
             new(new TypeText("PasswordField", "hunter2")),
-            new(new Tap("SubmitButton"), [new Visible("HomeScreen")]),
+            new(new Tap("SubmitButton"), [new Found("HomeScreen")]),
         ]);
 
     public static IEnumerable<JourneyDefinition> All => [Login /*, …*/];
