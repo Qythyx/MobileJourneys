@@ -30,6 +30,11 @@ public sealed record IosPlatformConfig(
 		options.AddAdditionalAppiumOption("simulatorStartupTimeout", SimulatorStartupTimeoutMs);
 		options.AddAdditionalAppiumOption("wdaLocalPort", FindFreePort());
 		options.AddAdditionalAppiumOption("mjpegServerPort", FindFreePort());
+		// Letters per second cap for XCUITest typing. Default is 60 (~17ms/key), which can drop
+		// or duplicate characters; lowering to 10 (~100ms/key) gives the iOS keyboard time to
+		// register each tap. (Appium's docs say "per minute" but the underlying WDA API
+		// fb_typeText:frequency: is per second.)
+		options.AddAdditionalAppiumOption("appium:maxTypingFrequency", 10);
 	}
 
 	internal override AppiumDriver CreateDriver(AppiumOptions options) => new IOSDriver(options);
