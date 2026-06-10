@@ -54,6 +54,9 @@ internal static class JourneyRunner
 			);
 		}
 
+		// Run every step even after one fails, collecting all failures, so a single run surfaces
+		// every issue in the journey instead of only the first.
+		var failures = new List<JourneyFailureException>();
 		foreach (var (number, name, execute, maskElements, prefetchMasks, journeyStep) in steps)
 		{
 			await reporter.StepStartedAsync(testCase, number, totalSteps, name);
@@ -73,34 +76,47 @@ internal static class JourneyRunner
 					var message =
 						$"step {number}/{totalSteps}: {name} — screenshots differ {stepResult.PixelDiffPercentage:F2}%\n"
 						+ $"  {stepResult.ReportPath ?? ""}";
-					stopwatch.Stop();
-					return new JourneyResult(
-						testCase,
-						false,
-						stopwatch.Elapsed,
-						message,
-						new JourneyFailureException(message, journey, journeyStep, number, totalSteps, name)
-					);
+					failures.Add(new JourneyFailureException(message, journey, journeyStep, number, totalSteps, name));
 				}
 			}
 			catch (Exception ex)
 			{
 				HandleStepFailure(driver, manager, ex, numberedStepName, journey.Name);
 				var message = $"step {number}/{totalSteps}: {name} — {ex.Message}";
-				stopwatch.Stop();
-				return new JourneyResult(
-					testCase,
-					false,
-					stopwatch.Elapsed,
-					message,
-					new JourneyFailureException(message, journey, journeyStep, number, totalSteps, name, ex)
-				);
+				failures.Add(new JourneyFailureException(message, journey, journeyStep, number, totalSteps, name, ex));
 			}
 		}
 
-		manager.DeleteAllFailureArtifacts(driver.Config, journey);
 		stopwatch.Stop();
-		return new JourneyResult(testCase, true, stopwatch.Elapsed, string.Empty, null);
+
+		if (failures.Count == 0)
+		{
+			return new JourneyResult(testCase, true, stopwatch.Elapsed, string.Empty, null);
+		}
+
+		if (failures.Count == 1)
+		{
+			var failure = failures[0];
+			return new JourneyResult(testCase, false, stopwatch.Elapsed, failure.Message, failure);
+		}
+
+		var summary = BuildFailureSummary(failures, totalSteps);
+		var firstFailure = failures[0];
+		var aggregate = new JourneyFailureException(
+			summary,
+			journey,
+			firstFailure.Step,
+			firstFailure.StepNumber,
+			totalSteps,
+			firstFailure.StepName
+		);
+		return new JourneyResult(testCase, false, stopwatch.Elapsed, summary, aggregate);
+	}
+
+	private static string BuildFailureSummary(List<JourneyFailureException> failures, int totalSteps)
+	{
+		var details = string.Join("\n", failures.Select(f => $"  • {f.Message}"));
+		return $"{failures.Count} of {totalSteps} steps failed:\n{details}";
 	}
 
 	private static void ProcessExpectations(TestDriver driver, Expectation[] expectations)
