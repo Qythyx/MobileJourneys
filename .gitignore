@@ -263,3 +263,5 @@ docs/superpowers/
 
 # Claude per-machine settings overrides (the shared baseline lives in .claude/settings.json)
 .claude/settings.local.json
+
+sixlabors.lic
