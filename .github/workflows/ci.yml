@@ -8,6 +8,11 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # SixLabors.ImageSharp v4 enforces a build-time license. MSBuild reads this
+    # environment variable as the $(SixLaborsLicenseKey) property, so it applies to
+    # both the build and test steps. Set the SIXLABORS_LICENSE_KEY repository secret.
+    env:
+      SixLaborsLicenseKey: ${{ secrets.SIXLABORS_LICENSE_KEY }}
     steps:
       - uses: actions/checkout@v6
         with:
