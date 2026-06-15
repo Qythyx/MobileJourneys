@@ -11,36 +11,46 @@ namespace MobileJourneys.Tests;
 public sealed class ScreenshotManagerTests
 {
 	[Test]
-	public void ScaleToMaxDownscalesProportionallyWhenImageExceedsMaxHeight()
+	public void ScaleMaskRegionsExpandsToFullyContainRegionWhenScalingRoundsFractionally()
 	{
-		using var image = new Image<Rgb24>(2000, 4000);
+		// Scaling 10→6 (×0.6): source pixel [1, 2) maps to target range [0.6, 1.2), touching
+		// target pixel index 1. Flooring the origin and ceiling the size independently would yield
+		// X=0, W=1 — covering only pixel 0 and leaving pixel 1 outside the mask.
+		var regions = new[] { new Rectangle(1, 1, 1, 1) };
 
-		image.ScaleToMax(maxHeight: 1000);
+		var scaled = ImageHelpers.ScaleMaskRegions(regions, from: new Size(10, 10), to: new Size(6, 6));
 
-		_ = image.Height.Should().Be(1000);
-		_ = image.Width.Should().Be(500);
+		var r = scaled[0];
+		_ = r.X.Should().BeLessThanOrEqualTo(0);
+		_ = r.Y.Should().BeLessThanOrEqualTo(0);
+		_ = (r.X + r.Width).Should().BeGreaterThanOrEqualTo(2);
+		_ = (r.Y + r.Height).Should().BeGreaterThanOrEqualTo(2);
 	}
 
 	[Test]
-	public void ScaleToMaxLeavesImageUntouchedWhenAlreadyUnderMaxHeight()
+	public void SetAndGetMaskMetadataRoundTripsThroughPng()
 	{
-		using var image = new Image<Rgb24>(800, 600);
+		var regions = new[] { new Rectangle(10, 20, 30, 40), new Rectangle(5, 6, 7, 8) };
 
-		image.ScaleToMax(maxHeight: 1000);
+		using var image = new Image<Rgb24>(50, 50);
+		ImageHelpers.SetMaskMetadata(image, regions);
 
-		_ = image.Width.Should().Be(800);
-		_ = image.Height.Should().Be(600);
+		using var stream = new MemoryStream();
+		image.SaveAsPng(stream);
+		using var reloaded = Image.Load(stream.ToArray());
+
+		_ = ImageHelpers.GetMaskMetadata(reloaded).Should().Equal(regions);
 	}
 
 	[Test]
-	public void ScaleToMaxLeavesImageUntouchedWhenExactlyAtMaxHeight()
+	public void GetMaskMetadataReturnsEmptyWhenChunkAbsent()
 	{
-		using var image = new Image<Rgb24>(500, 1000);
+		using var image = new Image<Rgb24>(10, 10);
+		using var stream = new MemoryStream();
+		image.SaveAsPng(stream);
+		using var reloaded = Image.Load(stream.ToArray());
 
-		image.ScaleToMax(maxHeight: 1000);
-
-		_ = image.Width.Should().Be(500);
-		_ = image.Height.Should().Be(1000);
+		_ = ImageHelpers.GetMaskMetadata(reloaded).Should().BeEmpty();
 	}
 
 	[Test]
@@ -148,7 +158,7 @@ public sealed class ScreenshotManagerTests
 	// --- CompareWithBaselineAndDispose (instance API) ---
 
 	private static IosPlatformConfig BuildConfig() =>
-		new("26.2", "iPhone", IsLightTheme: true, "com.example.app", "/unused", MaxScreenshotHeight: 100);
+		new("26.2", "iPhone", IsLightTheme: true, "com.example.app", "/unused");
 
 	[Test]
 	public void CompareWithBaselineAndDisposeWritesBaselineWhenAbsent()
@@ -222,4 +232,61 @@ public sealed class ScreenshotManagerTests
 		_ = result.PixelDiffPercentage.Should().Be(1);
 		_ = storage.ListAllFiles(config, "Journey").Should().ContainSingle().Which.Should().Be("01 Step.png");
 	}
+
+	[Test]
+	public void CompareWithBaselineAndDisposeMasksBaselineContentWiderThanTheLiveMask()
+	{
+		var storage = new InMemoryScreenshotStorage();
+		var manager = new ScreenshotManager(storage);
+		var config = BuildConfig();
+		var key = new TestStep(config, "Journey", "01 Step");
+
+		// Seed a baseline (green with a red stripe at x∈[20,40)) whose stored mask is a wide
+		// band x∈[10,40) — simulating a run where the dynamic element's content was wide.
+		var baseline = new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0));
+		PaintColumns(baseline, fromX: 20, toX: 40, new Rgb24(255, 0, 0));
+		_ = manager.CompareWithBaselineAndDispose(baseline, key, [new Rectangle(10, 0, 30, 100)]);
+
+		// A later run: plain green, so it differs from the baseline only at x∈[20,40) — outside
+		// the narrower live mask x∈[10,20) but inside the baseline's stored mask. The union keeps
+		// it masked, so the comparison passes.
+		var actual = new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0));
+		var result = manager.CompareWithBaselineAndDispose(actual, key, [new Rectangle(10, 0, 10, 100)]);
+
+		_ = result.Passed.Should().BeTrue();
+	}
+
+	[Test]
+	public void CompareWithBaselineAndDisposeFailsWhenLiveMaskTooNarrowAndBaselineStoredNoMask()
+	{
+		var storage = new InMemoryScreenshotStorage();
+		var manager = new ScreenshotManager(storage);
+		var config = BuildConfig();
+		var key = new TestStep(config, "Journey", "01 Step");
+
+		// Same scenario, but the baseline carries no stored mask (older baseline / no masking on
+		// the seeding run). Without a baseline mask to union, the narrow live mask can't cover the
+		// baseline's wider content, so the difference is detected — documents the fallback.
+		var baseline = new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0));
+		PaintColumns(baseline, fromX: 20, toX: 40, new Rgb24(255, 0, 0));
+		_ = manager.CompareWithBaselineAndDispose(baseline, key, []);
+
+		var actual = new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0));
+		var result = manager.CompareWithBaselineAndDispose(actual, key, [new Rectangle(10, 0, 10, 100)]);
+
+		_ = result.Passed.Should().BeFalse();
+	}
+
+	private static void PaintColumns(Image<Rgb24> image, int fromX, int toX, Rgb24 color) =>
+		image.ProcessPixelRows(accessor =>
+		{
+			for (var y = 0; y < accessor.Height; y++)
+			{
+				var row = accessor.GetRowSpan(y);
+				for (var x = fromX; x < toX; x++)
+				{
+					row[x] = color;
+				}
+			}
+		});
 }

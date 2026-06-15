@@ -288,9 +288,8 @@ public sealed class TestDriver(
 	{
 		var notificationHeight = Config.NotificationBannerMaskHeight;
 
-		// extend 2 pixel to account for rounding during resizing
 		static Rectangle GetBounds(AppiumElement ele) =>
-			new(ele.Location.X - 2, ele.Location.Y - 2, ele.Size.Width + 4, ele.Size.Height + 4);
+			new(ele.Location.X, ele.Location.Y, ele.Size.Width, ele.Size.Height);
 
 		return automationId switch
 		{

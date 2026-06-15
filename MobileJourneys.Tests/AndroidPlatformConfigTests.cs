@@ -14,8 +14,7 @@ public sealed class AndroidPlatformConfigTests
 		IsLightTheme: true,
 		"com.example.app",
 		"/path/app.apk",
-		null,
-		MaxScreenshotHeight: 2000
+		null
 	);
 
 	[TestCase(SystemFontSize.ExtraSmall, 0.82)]

@@ -15,7 +15,7 @@ namespace MobileJourneys;
 /// <param name="storage">Where baselines and failure artifacts are read/written.</param>
 public sealed class ScreenshotManager(ScreenshotStorage storage)
 {
-	/// <summary>Captures a FAIL screenshot (taken when a step throws), scales it to <see cref="PlatformConfig.MaxScreenshotHeight"/>, and persists it via <see cref="ScreenshotStorage.WriteFailScreenshot"/>.</summary>
+	/// <summary>Captures a FAIL screenshot (taken when a step throws) at full resolution and persists it via <see cref="ScreenshotStorage.WriteFailScreenshot"/>.</summary>
 	/// <param name="driver">The Appium driver to capture from.</param>
 	/// <param name="testStep">Identifies the step the FAIL screenshot belongs to.</param>
 	/// <param name="suffix">Suffix appended after <c>_FAIL_</c> (e.g., <c>"CRASH"</c> or a sanitized exception message). The caller is responsible for sanitizing the suffix for filename use.</param>
@@ -23,18 +23,17 @@ public sealed class ScreenshotManager(ScreenshotStorage storage)
 	public string CaptureFailScreenshot(AppiumDriver driver, TestStep testStep, string suffix)
 	{
 		using var image = Image.Load<Rgb24>(driver.GetScreenshot().AsByteArray);
-		image.ScaleToMax(testStep.Config.MaxScreenshotHeight);
 		storage.WriteFailScreenshot(testStep, suffix, ToPngBytes(image));
 		return storage.GetReportPath(testStep.Config, testStep.JourneyName);
 	}
 
 	/// <summary>
-	/// Scales an image down and compares it against a baseline. Accepts an unscaled
-	/// (full-resolution) image and mask regions in the image's pixel coordinates.
-	/// Both image and mask regions are scaled down proportionally for baseline comparison,
-	/// and the image is disposed.
+	/// Compares an image against a baseline at full resolution and disposes it. Mask regions are
+	/// in the image's pixel coordinates. When a baseline is first written, the mask regions are
+	/// stored in the baseline PNG's metadata; on later comparisons they are unioned with the live
+	/// regions so content that shifts size between runs stays masked in both images.
 	/// </summary>
-	/// <param name="actual">The unscaled screenshot image at full device resolution.</param>
+	/// <param name="actual">The screenshot image at full device resolution.</param>
 	/// <param name="testStep">Identifies the step whose baseline the image is compared against.</param>
 	/// <param name="maskRegions">Regions to exclude from comparison, in the image's pixel coordinates.</param>
 	public ScreenshotComparisonResult CompareWithBaselineAndDispose(
@@ -45,13 +44,9 @@ public sealed class ScreenshotManager(ScreenshotStorage storage)
 	{
 		using (actual)
 		{
-			var sourceSize = new System.Drawing.Size(actual.Size.Width, actual.Size.Height);
-			actual.ScaleToMax(testStep.Config.MaxScreenshotHeight);
-			var targetSize = new System.Drawing.Size(actual.Size.Width, actual.Size.Height);
-			maskRegions = ImageHelpers.ScaleMaskRegions(maskRegions, sourceSize, targetSize);
-
 			if (!storage.BaselineExists(testStep))
 			{
+				ImageHelpers.SetMaskMetadata(actual, maskRegions);
 				storage.WriteBaseline(testStep, ToPngBytes(actual));
 				return new(true, 0, null);
 			}
@@ -63,10 +58,16 @@ public sealed class ScreenshotManager(ScreenshotStorage storage)
 				return new(false, 1, null);
 			}
 
+			// The live mask comes from the actual image; union it with the baseline's own mask
+			// (stored when the baseline was written) so content that differs in size between the
+			// two images stays masked in both.
+			var baselineMasks = ImageHelpers.GetMaskMetadata(baseline);
+			var effectiveMasks = baselineMasks.Length > 0 ? [.. maskRegions, .. baselineMasks] : maskRegions;
+
 			ICompareResult diff;
-			if (maskRegions is { Length: > 0 })
+			if (effectiveMasks is { Length: > 0 })
 			{
-				using var mask = ImageHelpers.CreateExclusionMask(actual.Width, actual.Height, maskRegions);
+				using var mask = ImageHelpers.CreateExclusionMask(actual.Width, actual.Height, effectiveMasks);
 				diff = ImageSharpCompare.CalcDiff(
 					actual,
 					baseline,
@@ -93,7 +94,7 @@ public sealed class ScreenshotManager(ScreenshotStorage storage)
 					baseline,
 					pixelColorShiftTolerance: testStep.Config.ColorTolerance
 				);
-				ImageHelpers.RecolorDiff(diffImage, maskRegions);
+				ImageHelpers.RecolorDiff(diffImage, effectiveMasks);
 				storage.WriteDiffImage(testStep, diff.PixelErrorPercentage, ToPngBytes((Image<Rgb24>)diffImage));
 			}
 

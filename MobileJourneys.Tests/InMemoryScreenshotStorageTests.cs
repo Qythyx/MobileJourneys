@@ -18,7 +18,7 @@ public sealed class InMemoryScreenshotStorageTests
 	public void SetUp()
 	{
 		_storage = new();
-		_config = new("26.2", "iPhone", IsLightTheme: true, "com.example.app", "/unused", 2000);
+		_config = new("26.2", "iPhone", IsLightTheme: true, "com.example.app", "/unused");
 	}
 
 	private TestStep K(string journey, string step) => new(_config, journey, step);
@@ -165,5 +165,4 @@ public sealed class InMemoryScreenshotStorageTests
 
 		_ = _storage.ListAllFiles(_config, "Journey").Should().BeEquivalentTo(["01 Step.png", "02 Step.png"]);
 	}
-
 }

@@ -11,8 +11,7 @@ public sealed class PlatformConfigTests
 		"iPhone 17 Pro",
 		IsLightTheme: true,
 		"com.example.app",
-		"/path/to/app.app",
-		MaxScreenshotHeight: 2000
+		"/path/to/app.app"
 	);
 
 	private static readonly AndroidPlatformConfig AndroidDark = new(
@@ -22,8 +21,7 @@ public sealed class PlatformConfigTests
 		IsLightTheme: false,
 		"com.example.app",
 		"/path/Signed.apk",
-		null,
-		MaxScreenshotHeight: 2000
+		null
 	);
 
 	[Test]
@@ -55,13 +53,6 @@ public sealed class PlatformConfigTests
 	public void ColorToleranceIsHigherForAndroidThanIos() =>
 		// Higher Android tolerance compensates for emulator rendering differences.
 		AndroidDark.ColorTolerance.Should().BeGreaterThan(IosLight.ColorTolerance);
-
-	[Test]
-	public void MaxScreenshotHeightIsAvailableOnBothPlatforms()
-	{
-		_ = IosLight.MaxScreenshotHeight.Should().Be(2000);
-		_ = AndroidDark.MaxScreenshotHeight.Should().Be(2000);
-	}
 
 	[Test]
 	public void ResolvedMainActivityFallsBackToAppIdentifierDotMainActivity() =>
