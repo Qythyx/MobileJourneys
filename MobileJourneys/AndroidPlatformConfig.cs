@@ -15,7 +15,6 @@ namespace MobileJourneys;
 /// <param name="AppIdentifier">Package name (e.g., "jp.beercats.beerbox").</param>
 /// <param name="AppBinaryPath">Absolute path to the signed .apk.</param>
 /// <param name="MainActivity">Optional. Defaults to <c>$"{AppIdentifier}.MainActivity"</c>.</param>
-/// <param name="MaxScreenshotHeight">See <see cref="PlatformConfig.MaxScreenshotHeight"/>.</param>
 public sealed record AndroidPlatformConfig(
 	string PlatformVersion,
 	string DeviceName,
@@ -23,9 +22,8 @@ public sealed record AndroidPlatformConfig(
 	bool IsLightTheme,
 	string AppIdentifier,
 	string AppBinaryPath,
-	string? MainActivity,
-	int MaxScreenshotHeight
-) : PlatformConfig(PlatformVersion, DeviceName, IsLightTheme, AppIdentifier, AppBinaryPath, MaxScreenshotHeight)
+	string? MainActivity
+) : PlatformConfig(PlatformVersion, DeviceName, IsLightTheme, AppIdentifier, AppBinaryPath)
 {
 	/// <inheritdoc/>
 	public override TestPlatform Platform => TestPlatform.Android;

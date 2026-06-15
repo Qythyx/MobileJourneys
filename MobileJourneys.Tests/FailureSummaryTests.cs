@@ -28,8 +28,7 @@ public sealed class FailureSummaryTests
 		"iPhone 16",
 		IsLightTheme: true,
 		"com.example.app",
-		"/path/to/app.app",
-		MaxScreenshotHeight: 2000
+		"/path/to/app.app"
 	);
 
 	private static readonly AndroidPlatformConfig AndroidFixture = new(
@@ -39,8 +38,7 @@ public sealed class FailureSummaryTests
 		IsLightTheme: false,
 		"com.example.app",
 		"/path/to/app.apk",
-		null,
-		MaxScreenshotHeight: 2000
+		null
 	);
 
 	private sealed record TestEnv : IJourneyEnvironment

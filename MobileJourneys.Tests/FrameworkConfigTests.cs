@@ -9,7 +9,7 @@ public sealed class FrameworkConfigTests
 	[Test]
 	public void FrameworkConfigPreservesAllConstructorArguments()
 	{
-		var platform = new IosPlatformConfig("26.2", "iPhone", true, "com.example.app", "/path/app", 2000);
+		var platform = new IosPlatformConfig("26.2", "iPhone", true, "com.example.app", "/path/app");
 		var journey = new JourneyDefinition(new TestEnv(), [new TestExpectation()], [], "TestJourney");
 		var config = new FrameworkConfig("Display", "Desc", "Foo.Bar", "scheme", [platform], [journey]);
 

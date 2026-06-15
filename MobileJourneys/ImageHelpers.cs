@@ -1,6 +1,7 @@
+using System.Text.Json;
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Png.Chunks;
 using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
 using Image = SixLabors.ImageSharp.Image;
 using Rectangle = System.Drawing.Rectangle;
 
@@ -8,20 +9,17 @@ namespace MobileJourneys;
 
 /// <summary>
 /// Pure image-processing utilities used by <see cref="ScreenshotManager"/> and
-/// <see cref="TestDriver"/>: scaling, mask-region transforms, masked pixel comparison,
-/// diff-image recoloring, and exclusion-mask generation. Lives in a static class so
-/// extension methods (<see cref="ScaleToMax"/>, <see cref="AsImage"/>) work.
+/// <see cref="TestDriver"/>: mask-region transforms, mask metadata, masked pixel
+/// comparison, diff-image recoloring, and exclusion-mask generation. Lives in a static
+/// class so the extension method <see cref="AsImage"/> works.
 /// </summary>
 internal static class ImageHelpers
 {
-	internal static void ScaleToMax(this Image<Rgb24> image, int maxHeight)
-	{
-		if (image.Height > maxHeight)
-		{
-			var scale = (double)maxHeight / image.Height;
-			image.Mutate(x => x.Resize((int)(image.Width * scale), maxHeight));
-		}
-	}
+	/// <summary>PNG text-chunk keyword under which a baseline's mask regions are stored.</summary>
+	private const string MaskMetadataKeyword = "MobileJourneys.Masks";
+
+	/// <summary>JSON shape for a persisted mask region (avoids serializing the redundant members of <see cref="Rectangle"/>).</summary>
+	private sealed record MaskRegion(int X, int Y, int Width, int Height);
 
 	/// <summary>Decodes a PNG screenshot into an Image.</summary>
 	/// <param name="screenshot">The screenshot.</param>
@@ -43,13 +41,55 @@ internal static class ImageHelpers
 		var scaleY = (double)to.Height / from.Height;
 		return
 		[
-			.. regions.Select(r => new Rectangle(
-				(int)(r.X * scaleX),
-				(int)(r.Y * scaleY),
-				(int)Math.Ceiling(r.Width * scaleX),
-				(int)Math.Ceiling(r.Height * scaleY)
-			)),
+			.. regions.Select(r =>
+			{
+				// Round outward so the scaled rectangle always fully contains the source region.
+				// Flooring the origin and ceiling the size independently does not guarantee that —
+				// the far edge can land up to a pixel short.
+				var left = (int)Math.Floor(r.X * scaleX);
+				var top = (int)Math.Floor(r.Y * scaleY);
+				var right = (int)Math.Ceiling((r.X + r.Width) * scaleX);
+				var bottom = (int)Math.Ceiling((r.Y + r.Height) * scaleY);
+				return new Rectangle(left, top, right - left, bottom - top);
+			}),
 		];
+	}
+
+	/// <summary>
+	/// Stores mask regions in an image's PNG text metadata so they travel inside the baseline
+	/// PNG. No-op when <paramref name="regions"/> is empty. Regions are in pixel coordinates.
+	/// </summary>
+	/// <param name="image">The image whose metadata to write (before encoding to PNG).</param>
+	/// <param name="regions">Mask regions to store.</param>
+	internal static void SetMaskMetadata(Image image, Rectangle[] regions)
+	{
+		if (regions.Length == 0)
+		{
+			return;
+		}
+
+		var value = JsonSerializer.Serialize(regions.Select(r => new MaskRegion(r.X, r.Y, r.Width, r.Height)));
+		image
+			.Metadata.GetPngMetadata()
+			.TextData.Add(new PngTextData(MaskMetadataKeyword, value, string.Empty, string.Empty));
+	}
+
+	/// <summary>
+	/// Reads mask regions previously stored by <see cref="SetMaskMetadata"/> from an image's PNG
+	/// text metadata. Returns an empty array when the chunk is absent (e.g. older baselines).
+	/// </summary>
+	/// <param name="image">The image to read metadata from.</param>
+	internal static Rectangle[] GetMaskMetadata(Image image)
+	{
+		// PngTextData is a struct, so a missing keyword yields default(PngTextData) with a null Value.
+		var entry = image.Metadata.GetPngMetadata().TextData.FirstOrDefault(t => t.Keyword == MaskMetadataKeyword);
+		if (string.IsNullOrEmpty(entry.Value))
+		{
+			return [];
+		}
+
+		var regions = JsonSerializer.Deserialize<MaskRegion[]>(entry.Value) ?? [];
+		return [.. regions.Select(r => new Rectangle(r.X, r.Y, r.Width, r.Height))];
 	}
 
 	/// <summary>

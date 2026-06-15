@@ -12,9 +12,8 @@ public sealed record IosPlatformConfig(
 	string DeviceName,
 	bool IsLightTheme,
 	string AppIdentifier,
-	string AppBinaryPath,
-	int MaxScreenshotHeight
-) : PlatformConfig(PlatformVersion, DeviceName, IsLightTheme, AppIdentifier, AppBinaryPath, MaxScreenshotHeight)
+	string AppBinaryPath
+) : PlatformConfig(PlatformVersion, DeviceName, IsLightTheme, AppIdentifier, AppBinaryPath)
 {
 	/// <inheritdoc/>
 	public override TestPlatform Platform => TestPlatform.iOS;

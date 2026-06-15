@@ -23,7 +23,7 @@ public sealed class FilesystemScreenshotStorageTests
 		_tempRoot = Path.Combine(Path.GetTempPath(), $"MobileJourneysTests-{Guid.NewGuid():N}");
 		_ = Directory.CreateDirectory(_tempRoot);
 		_storage = new(_tempRoot);
-		_config = new("26.2", "iPhone", IsLightTheme: true, "com.example.app", "/unused", 2000);
+		_config = new("26.2", "iPhone", IsLightTheme: true, "com.example.app", "/unused");
 	}
 
 	[TearDown]

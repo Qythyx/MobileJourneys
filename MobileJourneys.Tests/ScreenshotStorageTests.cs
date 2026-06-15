@@ -19,7 +19,7 @@ public sealed class ScreenshotStorageTests
 	public void SetUp()
 	{
 		_storage = new();
-		_platform = new("26.2", "iPhone", IsLightTheme: true, "com.example.app", "/unused", 2000);
+		_platform = new("26.2", "iPhone", IsLightTheme: true, "com.example.app", "/unused");
 		_journey = new(
 			new TestJourneyEnvironment(),
 			[new TestExpectation("Initial")],

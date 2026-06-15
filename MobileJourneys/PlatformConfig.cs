@@ -15,18 +15,12 @@ namespace MobileJourneys;
 /// <param name="IsLightTheme">When <c>true</c>, the system theme is forced to light before each journey.</param>
 /// <param name="AppIdentifier">Bundle ID (iOS) or package name (Android), e.g., "jp.beercats.beerbox".</param>
 /// <param name="AppBinaryPath">Absolute path to the .app bundle (iOS) or signed .apk (Android).</param>
-/// <param name="MaxScreenshotHeight">
-/// Maximum height (in pixels) screenshots are scaled down to before saving as a baseline
-/// or comparing against one. Larger devices' raw screenshots are downscaled proportionally.
-/// Choose to trade off baseline file size and visual fidelity (e.g., 2000).
-/// </param>
 public abstract record PlatformConfig(
 	string PlatformVersion,
 	string DeviceName,
 	bool IsLightTheme,
 	string AppIdentifier,
-	string AppBinaryPath,
-	int MaxScreenshotHeight
+	string AppBinaryPath
 )
 {
 	internal const int SimulatorStartupTimeoutMs = 180_000;
