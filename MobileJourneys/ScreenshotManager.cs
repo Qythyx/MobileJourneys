@@ -15,6 +15,13 @@ namespace MobileJourneys;
 /// <param name="storage">Where baselines and failure artifacts are read/written.</param>
 public sealed class ScreenshotManager(ScreenshotStorage storage)
 {
+	/// <summary>
+	/// Suffix for the zero-byte FAIL marker written when the actual screenshot's dimensions differ
+	/// from the baseline's. A pixel diff is impossible across mismatched sizes, so the marker just
+	/// names the reason in the filename.
+	/// </summary>
+	private const string SizeMismatchFailSuffix = "different size";
+
 	/// <summary>Captures a FAIL screenshot (taken when a step throws) at full resolution and persists it via <see cref="ScreenshotStorage.WriteFailScreenshot"/>.</summary>
 	/// <param name="driver">The Appium driver to capture from.</param>
 	/// <param name="testStep">Identifies the step the FAIL screenshot belongs to.</param>
@@ -55,7 +62,9 @@ public sealed class ScreenshotManager(ScreenshotStorage storage)
 
 			if (actual.Width != baseline.Width || actual.Height != baseline.Height)
 			{
-				return new(false, 1, null);
+				storage.WriteNewScreenshot(testStep, ToPngBytes(actual));
+				storage.WriteFailScreenshot(testStep, SizeMismatchFailSuffix, []);
+				return new(false, 100, storage.GetReportPath(testStep.Config, testStep.JourneyName));
 			}
 
 			// The live mask comes from the actual image; union it with the baseline's own mask

@@ -217,7 +217,7 @@ public sealed class ScreenshotManagerTests
 	}
 
 	[Test]
-	public void CompareWithBaselineAndDisposeFailsWithoutWritingWhenDimensionsDiffer()
+	public void CompareWithBaselineAndDisposeWritesNewAndZeroByteFailMarkerWhenDimensionsDiffer()
 	{
 		var storage = new InMemoryScreenshotStorage();
 		var manager = new ScreenshotManager(storage);
@@ -229,8 +229,14 @@ public sealed class ScreenshotManagerTests
 		var result = manager.CompareWithBaselineAndDispose(new Image<Rgb24>(80, 100, new Rgb24(0, 128, 0)), key, []);
 
 		_ = result.Passed.Should().BeFalse();
-		_ = result.PixelDiffPercentage.Should().Be(1);
-		_ = storage.ListAllFiles(config, "Journey").Should().ContainSingle().Which.Should().Be("01 Step.png");
+		_ = result.PixelDiffPercentage.Should().Be(100);
+		_ = storage.NewScreenshotExists(key).Should().BeTrue();
+		_ = storage.FailScreenshotExists(key).Should().BeTrue();
+		_ = storage
+			.ListAllFiles(config, "Journey")
+			.Should()
+			.BeEquivalentTo("01 Step.png", "01 Step.new.png", "01 Step_FAIL_different size.png");
+		_ = storage.ReadRaw(config, "Journey", "01 Step_FAIL_different size.png").Should().BeEmpty();
 	}
 
 	[Test]
