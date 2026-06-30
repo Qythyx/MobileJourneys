@@ -10,7 +10,7 @@ public sealed class FrameworkConfigTests
 	public void FrameworkConfigPreservesAllConstructorArguments()
 	{
 		var platform = new IosPlatformConfig("26.2", "iPhone", true, "com.example.app", "/path/app");
-		var journey = new JourneyDefinition(new TestEnv(), [new TestExpectation()], [], "TestJourney");
+		var journey = new JourneyDefinition(new TestEnv(), [new TestExpectation()], [], [], "TestJourney");
 		var config = new FrameworkConfig("Display", "Desc", "Foo.Bar", "scheme", [platform], [journey]);
 
 		_ = config.DisplayName.Should().Be("Display");
@@ -24,15 +24,30 @@ public sealed class FrameworkConfigTests
 	[Test]
 	public void JourneyDefinitionThrowsWhenInitialExpectIsEmpty()
 	{
-		Action ctor = () => _ = new JourneyDefinition(new TestEnv(), [], [], "j");
+		var ctor = () => _ = new JourneyDefinition(new TestEnv(), [], [], [], "j");
 		_ = ctor.Should().Throw<ArgumentException>().WithParameterName("InitialExpect");
 	}
 
 	[Test]
 	public void JourneyDefinitionInitialNameDerivesFromFirstExpectationLabel()
 	{
-		var journey = new JourneyDefinition(new TestEnv(), [new TestExpectation("MyTarget")], [], "j");
+		var journey = new JourneyDefinition(new TestEnv(), [new TestExpectation("MyTarget")], [], [], "j");
 		_ = journey.InitialName.Should().Be("TestExpectation MyTarget");
+	}
+
+	[Test]
+	public void JourneyDefinitionDefaultsInitialMaskElementsToNullWhenOmitted()
+	{
+		var journey = new JourneyDefinition(new TestEnv(), [new TestExpectation()], []);
+		_ = journey.InitialMaskElements.Should().BeNull();
+	}
+
+	[Test]
+	public void JourneyDefinitionPreservesInitialMaskElements()
+	{
+		string[] masks = ["Spinner", "Clock"];
+		var journey = new JourneyDefinition(new TestEnv(), [new TestExpectation()], [], masks, "j");
+		_ = journey.InitialMaskElements.Should().BeSameAs(masks);
 	}
 
 	private sealed record TestEnv : IJourneyEnvironment

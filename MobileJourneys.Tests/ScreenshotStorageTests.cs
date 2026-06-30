@@ -24,6 +24,7 @@ public sealed class ScreenshotStorageTests
 			new TestJourneyEnvironment(),
 			[new TestExpectation("Initial")],
 			[new JourneyStep(new Actions.None(), [new TestExpectation("FirstStep")])],
+			[],
 			"PrimaryJourney"
 		);
 		_config = new("Tests", "Tests", "MobileJourneys.Tests", "test", [_platform], [_journey]);

@@ -24,7 +24,7 @@ public sealed class InMemoryScreenshotStorageTests
 	private TestStep K(string journey, string step) => new(_config, journey, step);
 
 	private static JourneyDefinition J(string name) =>
-		new(new TestJourneyEnvironment(), [new TestExpectation()], [], name);
+		new(new TestJourneyEnvironment(), [new TestExpectation()], [], [], name);
 
 	private sealed record TestJourneyEnvironment : IJourneyEnvironment
 	{

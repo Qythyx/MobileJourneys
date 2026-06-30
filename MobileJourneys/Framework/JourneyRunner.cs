@@ -33,7 +33,14 @@ internal static class JourneyRunner
 			JourneyStep? Step
 		)>
 		{
-			(1, journey.InitialName, () => ProcessExpectations(driver, journey.InitialExpect), [], false, null),
+			(
+				1,
+				journey.InitialName,
+				() => ProcessExpectations(driver, journey.InitialExpect),
+				journey.InitialMaskElements ?? [],
+				false,
+				null
+			),
 		};
 		for (var i = 0; i < journey.Steps.Length; i++)
 		{

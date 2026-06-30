@@ -10,10 +10,15 @@ namespace MobileJourneys;
 /// <param name="InitialExpect">Expectations for the initial screen before any steps execute.</param>
 /// <param name="Steps">The sequence of action+expectation steps.</param>
 /// <param name="Name">Auto-populated from the property name via CallerMemberName.</param>
+/// <param name="InitialMaskElements">AutomationIds of elements whose bounds are excluded from the initial
+/// screenshot's stabilization check and diff (e.g., an animated spinner on a scenario that opens directly
+/// onto a loading screen). Equivalent to <see cref="JourneyStep.MaskElements"/> but for the initial screen.
+/// Specify by name, since it follows the CallerMemberName-populated <paramref name="Name"/>.</param>
 public sealed record JourneyDefinition(
 	IJourneyEnvironment Scenario,
 	Expectation[] InitialExpect,
 	JourneyStep[] Steps,
+	string[]? InitialMaskElements = null,
 	[CallerMemberName] string Name = ""
 )
 {

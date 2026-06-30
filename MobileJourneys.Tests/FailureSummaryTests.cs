@@ -56,7 +56,7 @@ public sealed class FailureSummaryTests
 	}
 
 	private static TestCase MakeCase(PlatformConfig config, string journeyName) =>
-		new(config, new JourneyDefinition(new TestEnv(), [new TestExpect()], [], journeyName));
+		new(config, new JourneyDefinition(new TestEnv(), [new TestExpect()], [], [], journeyName));
 
 	[Test]
 	public void RecordFailureFirstCallAddsConfigEntry()

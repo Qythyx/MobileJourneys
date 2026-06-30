@@ -24,7 +24,7 @@ public sealed class DependencyCheckerTests
 			TestNodeNamespace: "Test",
 			DeepLinkScheme: "test",
 			PlatformConfigs: [],
-			Journeys: [new JourneyDefinition(new TestEnv(), [new TestExpect()], [], "j")]
+			Journeys: [new JourneyDefinition(new TestEnv(), [new TestExpect()], [], [], "j")]
 		);
 
 		// Either succeeds (host has appium installed) or throws InvalidOperationException
@@ -56,7 +56,7 @@ public sealed class DependencyCheckerTests
 				[
 					new AndroidPlatformConfig("15", "Pixel", "avd", true, "com.example", "/path/app.apk", null),
 				],
-				Journeys: [new JourneyDefinition(new TestEnv(), [new TestExpect()], [], "j")]
+				Journeys: [new JourneyDefinition(new TestEnv(), [new TestExpect()], [], [], "j")]
 			);
 
 			Action act = () => DependencyChecker.Verify(config);
