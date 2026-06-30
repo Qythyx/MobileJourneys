@@ -20,21 +20,38 @@ tag-driven.
   `alpha.0` prefix comes from `MinVerDefaultPreReleaseIdentifiers` in the csproj).
 - With no tags at all, builds produce `0.0.0-alpha.0.<height>+<sha>`.
 
-### Releasing a new version
+### Releasing a new version (automatic)
 
-1. Make sure `main` is clean and pushed.
-2. Decide the bump per SemVer (breaking → major, feature → minor, fix → patch).
-3. Tag and push:
+Tagging is automated. The `release` job in
+[ci.yml](.github/workflows/ci.yml) runs on every push to `main` (after tests pass) and uses
+[`mathieudutour/github-tag-action`](https://github.com/mathieudutour/github-tag-action) to read the
+[Conventional Commits](https://www.conventionalcommits.org/) since the last tag, compute the next
+SemVer, push the tag, and publish a GitHub Release with the changelog. MinVer then stamps that tag
+on the next build. **No manual tagging is needed — just merge with well-formed commit messages.**
 
-   ```sh
-   git tag 1.0.0
-   git push origin 1.0.0
-   ```
+Bump rules:
 
-4. The next build (locally or in CI) will stamp the assembly as `1.0.0`.
+| Commit type(s) since last tag                                | Result         |
+| ------------------------------------------------------------ | -------------- |
+| `feat:`                                                      | minor          |
+| `fix:` / `perf:`                                             | patch          |
+| `!` or `BREAKING CHANGE:`                                    | major          |
+| only `docs`/`chore`/`ci`/`refactor`/`test`/`style`/`build`   | no release     |
 
-Tags must be plain SemVer (`1.0.0`, not `v1.0.0`). If a `v` prefix is ever desired, set
-`<MinVerTagPrefix>v</MinVerTagPrefix>` in the csproj.
+Tags are plain SemVer (`1.0.0`, not `v1.0.0`) via `tag_prefix: ""`.
+
+### Releasing manually (override)
+
+To cut a specific version by hand (e.g., to skip a number or force a release the commit messages
+wouldn't produce), tag and push directly:
+
+```sh
+git tag 1.0.0
+git push origin 1.0.0
+```
+
+The next build stamps the assembly as `1.0.0`. If a `v` prefix is ever desired, set
+`<MinVerTagPrefix>v</MinVerTagPrefix>` in the csproj **and** the workflow's `tag_prefix`.
 
 ### Where the version surfaces at runtime
 
