@@ -15,6 +15,7 @@ namespace MobileJourneys;
 /// <param name="AppIdentifier">Package name (e.g., "jp.beercats.beerbox").</param>
 /// <param name="AppBinaryPath">Absolute path to the signed .apk.</param>
 /// <param name="MainActivity">Optional. Defaults to <c>$"{AppIdentifier}.MainActivity"</c>.</param>
+/// <param name="ColorTolerance">Permitted per-pixel color delta (sum of R, G, B deltas) when comparing against baselines.</param>
 public sealed record AndroidPlatformConfig(
 	string PlatformVersion,
 	string DeviceName,
@@ -22,7 +23,8 @@ public sealed record AndroidPlatformConfig(
 	bool IsLightTheme,
 	string AppIdentifier,
 	string AppBinaryPath,
-	string? MainActivity
+	string? MainActivity,
+	int ColorTolerance = 3 * 10
 ) : PlatformConfig(PlatformVersion, DeviceName, IsLightTheme, AppIdentifier, AppBinaryPath)
 {
 	/// <inheritdoc/>
@@ -30,9 +32,6 @@ public sealed record AndroidPlatformConfig(
 
 	/// <inheritdoc/>
 	public override string AutomationName => "UiAutomator2";
-
-	/// <inheritdoc/>
-	public override int ColorTolerance => 3 * 10;
 
 	/// <summary>The activity to launch on app start, falling back to <c>$"{AppIdentifier}.MainActivity"</c>.</summary>
 	public string ResolvedMainActivity => MainActivity ?? $"{AppIdentifier}.MainActivity";

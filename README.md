@@ -15,8 +15,7 @@ and verified against per-platform PNG screenshot baselines.
 - Built-in actions: `Tap`, `TypeText`, `SwipeLeft`/`Right`, `ScrollToElement`, `DismissAlert`,
   `DismissKeyboard`, `TapAlertButton`, `TapNotification`, `InvertSystemTheme`, `SetSystemFontSize`,
   `None`.
-- Built-in expectations: `Found`, `NotFound`, `FoundWithText`, `AlertFound`,
-  `WaitForNotification`.
+- Built-in expectations: `Found`, `NotFound`, `FoundWithText`, `AlertFound`, `WaitForNotification`.
 - An Appium-driven `TestDriver` with element-finding (with stale-element retry), gestures, alerts,
   deep links, hardware-keyboard control, and crash detection.
 - Screenshot-baseline comparison via `SixLabors.ImageSharp` + `Codeuctivity.ImageSharpCompare` with

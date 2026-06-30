@@ -12,7 +12,8 @@ public sealed record IosPlatformConfig(
 	string DeviceName,
 	bool IsLightTheme,
 	string AppIdentifier,
-	string AppBinaryPath
+	string AppBinaryPath,
+	int ColorTolerance = 3 * 2
 ) : PlatformConfig(PlatformVersion, DeviceName, IsLightTheme, AppIdentifier, AppBinaryPath)
 {
 	/// <inheritdoc/>
@@ -20,9 +21,6 @@ public sealed record IosPlatformConfig(
 
 	/// <inheritdoc/>
 	public override string AutomationName => "XCUITest";
-
-	/// <inheritdoc/>
-	public override int ColorTolerance => 3 * 2;
 
 	internal override void ConfigureAppiumOptions(AppiumOptions options)
 	{

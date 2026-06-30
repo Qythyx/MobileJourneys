@@ -37,7 +37,7 @@ public abstract record PlatformConfig(
 	/// Allow small per-pixel color differences (e.g., JPEG decoding non-determinism).
 	/// The number is the sum of the delta for each component, R, G, and B.
 	/// </summary>
-	public abstract int ColorTolerance { get; }
+	public abstract int ColorTolerance { get; init; }
 
 	/// <summary>Human-readable identifier used as the screenshot subdirectory name.</summary>
 	public string DisplayName => $"{Platform} · {PlatformVersion} · {DeviceName} · {(IsLightTheme ? "light" : "dark")}";
