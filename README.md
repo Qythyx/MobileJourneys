@@ -291,6 +291,26 @@ CI runs the same flow on every push and PR ([.github/workflows/ci.yml](.github/w
 publishes a coverage summary to the GitHub Actions job page, and uploads the full HTML report as a
 build artifact (`coverage-report`).
 
+### Versioning & releases
+
+The library version is derived from git tags by [MinVer](https://github.com/adamralph/minver) at
+build time — there is no `<Version>` in any csproj. Tagging is **automated**: the `release` job in
+[.github/workflows/ci.yml](.github/workflows/ci.yml) runs on every push to `main` (after tests pass)
+and uses [`mathieudutour/github-tag-action`](https://github.com/mathieudutour/github-tag-action) to
+read the [Conventional Commits](https://www.conventionalcommits.org/) since the last tag, compute the
+next SemVer, push the tag, and publish a GitHub Release with the changelog. MinVer stamps that tag on
+the next build, so **no manual `git tag` is needed** — just merge with well-formed commit messages.
+
+| Commit type(s) since last tag                              | Result     |
+| ---------------------------------------------------------- | ---------- |
+| `feat:`                                                    | minor      |
+| `fix:` / `perf:`                                           | patch      |
+| `!` or `BREAKING CHANGE:`                                  | major      |
+| only `docs`/`chore`/`ci`/`refactor`/`test`/`style`/`build` | no release |
+
+To cut a specific version by hand, tag and push directly (`git tag 1.2.3 && git push origin 1.2.3`);
+tags are plain SemVer, no `v` prefix.
+
 ## Status
 
 - v0: ProjectReference-only consumption from sibling repos.
