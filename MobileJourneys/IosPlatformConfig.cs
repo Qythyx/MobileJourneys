@@ -7,6 +7,12 @@ namespace MobileJourneys;
 /// <summary>
 /// iOS simulator fixture (XCUITest).
 /// </summary>
+/// <param name="PlatformVersion">The iOS version, e.g., "26.2".</param>
+/// <param name="DeviceName">The simulator's display name visible to xcrun (e.g., "iPhone 16 Pro").</param>
+/// <param name="IsLightTheme">When <c>true</c>, the system theme is forced to light before each journey.</param>
+/// <param name="AppIdentifier">Bundle ID (e.g., "jp.beercats.beerbox").</param>
+/// <param name="AppBinaryPath">Absolute path to the .app bundle.</param>
+/// <param name="ColorTolerance">Permitted per-pixel color delta (sum of R, G, B deltas) when comparing against baselines.</param>
 public sealed record IosPlatformConfig(
 	string PlatformVersion,
 	string DeviceName,
