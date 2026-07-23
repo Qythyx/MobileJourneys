@@ -225,6 +225,22 @@ public sealed record AndroidPlatformConfig(
 		ProcessRunner.Run(AdbPath, ["-s", deviceId, "shell", "settings", "put", "system", "font_scale", scale]);
 	}
 
+	internal override void OnBeforeTests(TestDriver driver, string deviceId)
+	{
+		// On a fresh emulator, Chrome answers its first VIEW intent with the first-run
+		// experience instead of loading the requested URL, which strands any journey that
+		// leaves the app through the system browser. The command-line file (honored on
+		// userdebug system images) skips the first run, and pre-granting the notification
+		// permission suppresses the one-time notifications promo dialog that would otherwise
+		// cover the page. Both are idempotent and persist in the AVD.
+		_ = RunAdb(
+			deviceId,
+			"shell",
+			"echo 'chrome --no-first-run --disable-fre --no-default-browser-check' > /data/local/tmp/chrome-command-line"
+		);
+		_ = RunAdb(deviceId, "shell", "pm", "grant", "com.android.chrome", "android.permission.POST_NOTIFICATIONS");
+	}
+
 	internal override void VerifyDependencies()
 	{
 		var androidHome = Environment.GetEnvironmentVariable("ANDROID_HOME");
