@@ -18,6 +18,8 @@ internal static class ImageHelpers
 	/// <summary>PNG text-chunk keyword under which a baseline's mask regions are stored.</summary>
 	private const string MaskMetadataKeyword = "MobileJourneys.Masks";
 
+	private const string FailureDetailsKeyword = "MobileJourneys.Failure";
+
 	/// <summary>JSON shape for a persisted mask region (avoids serializing the redundant members of <see cref="Rectangle"/>).</summary>
 	private sealed record MaskRegion(int X, int Y, int Width, int Height);
 
@@ -91,6 +93,31 @@ internal static class ImageHelpers
 		var regions = JsonSerializer.Deserialize<MaskRegion[]>(entry.Value) ?? [];
 		return [.. regions.Select(r => new Rectangle(r.X, r.Y, r.Width, r.Height))];
 	}
+
+	/// <summary>
+	/// Stores the full text of the failure that produced a FAIL screenshot in the image's PNG
+	/// metadata. The filename carries a sanitized, truncated version for directory listings; this
+	/// keeps the untruncated original for the viewer.
+	/// </summary>
+	/// <param name="image">The FAIL screenshot to annotate.</param>
+	/// <param name="details">The failure text (exception type, message, and stack trace).</param>
+	internal static void SetFailureDetails(Image image, string details)
+	{
+		if (string.IsNullOrEmpty(details))
+		{
+			return;
+		}
+
+		image
+			.Metadata.GetPngMetadata()
+			.TextData.Add(new PngTextData(FailureDetailsKeyword, details, string.Empty, string.Empty));
+	}
+
+	/// <summary>Reads failure text previously stored by <see cref="SetFailureDetails"/>; empty when absent.</summary>
+	/// <param name="image">The FAIL screenshot to read from.</param>
+	internal static string GetFailureDetails(Image image) =>
+		image.Metadata.GetPngMetadata().TextData.FirstOrDefault(t => t.Keyword == FailureDetailsKeyword).Value
+		?? string.Empty;
 
 	/// <summary>
 	/// Compares two images pixel-by-pixel, skipping pixels that fall within mask regions.

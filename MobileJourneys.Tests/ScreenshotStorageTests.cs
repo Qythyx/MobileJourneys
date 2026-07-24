@@ -32,10 +32,9 @@ public sealed class ScreenshotStorageTests
 
 	private string InitialStep => $"01 {_journey.InitialName}";
 
-	private TestStep K(string journey, string step) => new(_platform, journey, step);
+	private TestStep K(string journey, string step) => new(_platform, journey, step, journey);
 
-	private List<string> FindExtraneous(bool delete) =>
-		_storage.FindExtraneous(_config, j => j.ExpectedStepNames(), delete);
+	private List<string> FindExtraneous(bool delete) => _storage.FindExtraneous(_config, delete);
 
 	private sealed record TestJourneyEnvironment : IJourneyEnvironment
 	{
@@ -52,17 +51,17 @@ public sealed class ScreenshotStorageTests
 	}
 
 	[Test]
-	public void ReturnsOrphanedJourneyFolder()
+	public void ReturnsBaselineInUnknownContainer()
 	{
 		_storage.WriteBaseline(K("OrphanJourney", "01 Step"), [0]);
 
 		var paths = FindExtraneous(delete: false);
 
-		_ = paths.Should().Contain($"{_platform.DisplayName}/OrphanJourney/");
+		_ = paths.Should().ContainSingle().Which.Should().Be($"{_platform.DisplayName}/OrphanJourney/01 Step.png");
 	}
 
 	[Test]
-	public void ReturnsOrphanedBaselineInValidJourney()
+	public void ReturnsOrphanedBaselineInValidContainer()
 	{
 		_storage.WriteBaseline(K(_journey.Name, InitialStep), [0]);
 		_storage.WriteBaseline(K(_journey.Name, "99 RemovedStep"), [0]);
@@ -77,12 +76,13 @@ public sealed class ScreenshotStorageTests
 	}
 
 	[Test]
-	public void IgnoresFailureArtifactsInValidJourneys()
+	public void IgnoresFailureArtifactsOfExpectedSteps()
 	{
 		_storage.WriteBaseline(K(_journey.Name, InitialStep), [0]);
-		_storage.WriteNewScreenshot(K(_journey.Name, "01 Step"), [0]);
-		_storage.WriteDiffImage(K(_journey.Name, "01 Step"), 5.0, [0]);
-		_storage.WriteFailScreenshot(K(_journey.Name, "01 Step"), "oops", [0]);
+		_storage.WriteNewScreenshot(K(_journey.Name, InitialStep), [0]);
+		_storage.WriteDiffImage(K(_journey.Name, InitialStep), 5.0, [0]);
+		_storage.WriteFailScreenshot(K(_journey.Name, InitialStep), "oops", [0]);
+		_storage.WriteCrashLog(K(_journey.Name, InitialStep), "boom");
 
 		var paths = FindExtraneous(delete: false);
 
@@ -90,22 +90,70 @@ public sealed class ScreenshotStorageTests
 	}
 
 	[Test]
-	public void DeleteTrueRemovesExtraneousFolders()
+	public void ReturnsFailureArtifactsOfRemovedSteps()
 	{
-		_storage.WriteBaseline(K("OrphanJourney", "01 Step"), [0]);
+		_storage.WriteNewScreenshot(K(_journey.Name, "99 RemovedStep"), [0]);
 
-		_ = FindExtraneous(delete: true);
+		var paths = FindExtraneous(delete: false);
 
-		_ = _storage.BaselineExists(K("OrphanJourney", "01 Step")).Should().BeFalse();
+		_ = paths
+			.Should()
+			.ContainSingle()
+			.Which.Should()
+			.Be($"{_platform.DisplayName}/{_journey.Name}/99 RemovedStep [{_journey.Name}].new.png");
+	}
+
+	[Test]
+	public void ReturnsFailureArtifactsAttributedToUnknownJourneys()
+	{
+		_storage.WriteNewScreenshot(new(_platform, _journey.Name, InitialStep, "GhostJourney"), [0]);
+
+		var paths = FindExtraneous(delete: false);
+
+		_ = paths.Should().ContainSingle().Which.Should().EndWith($"{InitialStep} [GhostJourney].new.png");
+	}
+
+	[Test]
+	public void IgnoresExpectedBaselinesInNestedContainers()
+	{
+		var tree = new JourneyTree(
+			new TestJourneyEnvironment(),
+			[new TestExpectation("Initial")],
+			[],
+			[new Branch("TreeJourney", [new JourneyStep(new Actions.None(), [new TestExpectation("LeafStep")])], [])],
+			null,
+			"Root"
+		);
+		var config = new FrameworkConfig(
+			"Tests",
+			"Tests",
+			"MobileJourneys.Tests",
+			"test",
+			[_platform],
+			[.. tree.Flatten()]
+		);
+		foreach (var journey in config.Journeys)
+		{
+			foreach (var (container, stepName) in journey.ExpectedStepLocations())
+			{
+				_storage.WriteBaseline(new(_platform, container, stepName, journey.Name), [0]);
+			}
+		}
+
+		var paths = _storage.FindExtraneous(config, deleteExtraneous: false);
+
+		_ = paths.Should().BeEmpty();
 	}
 
 	[Test]
 	public void DeleteTrueRemovesExtraneousBaselines()
 	{
+		_storage.WriteBaseline(K("OrphanJourney", "01 Step"), [0]);
 		_storage.WriteBaseline(K(_journey.Name, "99 RemovedStep"), [0]);
 
 		_ = FindExtraneous(delete: true);
 
+		_ = _storage.BaselineExists(K("OrphanJourney", "01 Step")).Should().BeFalse();
 		_ = _storage.BaselineExists(K(_journey.Name, "99 RemovedStep")).Should().BeFalse();
 	}
 
@@ -119,16 +167,6 @@ public sealed class ScreenshotStorageTests
 
 		_ = _storage.BaselineExists(K("OrphanJourney", "01 Step")).Should().BeTrue();
 		_ = _storage.BaselineExists(K(_journey.Name, "99 RemovedStep")).Should().BeTrue();
-	}
-
-	[Test]
-	public void FormatsFolderPathsWithTrailingSeparator()
-	{
-		_storage.WriteBaseline(K("OrphanJourney", "01 Step"), [0]);
-
-		var paths = FindExtraneous(delete: false);
-
-		_ = paths.Should().ContainSingle().Which.Should().EndWith("/");
 	}
 
 	[Test]

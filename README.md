@@ -10,8 +10,11 @@ and verified against per-platform PNG screenshot baselines.
 
 ## What you get
 
-- A small DSL (`JourneyAction`, `Expectation`, `JourneyStep`, `JourneyDefinition`) for expressing
-  app flows declaratively.
+- A small model (`JourneyAction`, `Expectation`, `JourneyStep`, `JourneyDefinition`) for expressing
+  app flows declaratively — plus `JourneyTree`/`Branch` for suites of journeys sharing step prefixes,
+  so shared steps are defined and screenshotted once.
+- A `using static` factory DSL (`MobileJourneys.Dsl`) so journeys read as bare calls —
+  `Branch("Menu", Step(Tap(id), Found(a)))` — instead of a wall of `new`.
 - Built-in actions: `Tap`, `TypeText`, `SwipeLeft`/`Right`, `ScrollToElement`, `DismissAlert`,
   `DismissKeyboard`, `TapAlertButton`, `TapNotification`, `InvertSystemTheme`, `SetSystemFontSize`,
   `None`.
@@ -21,7 +24,10 @@ and verified against per-platform PNG screenshot baselines.
 - Screenshot-baseline comparison via `SixLabors.ImageSharp` + `Codeuctivity.ImageSharpCompare` with
   maskable regions for animated UI elements.
 - A custom MTP `TestFramework` that runs the cross-product of platform fixtures and journeys, with
-  `--filter`, `--rerun`, `--list-extraneous`, `--delete-extraneous` CLI flags.
+  `--filter`, `--rerun`, `--list-extraneous`, `--delete-extraneous`, `--review` CLI flags.
+- A screenshot viewer web page (static after every run, or served live via `--review`): a
+  pannable/zoomable graph of the journey forest with thumbnails, failure badges, and extraneous
+  highlighting, plus interactive failure triage (Accept/Reject) and extraneous cleanup.
 
 ## External dependencies
 
@@ -117,22 +123,79 @@ public static class MyAppPlatforms
 
 ### 4. Write journeys
 
+Journeys are authored with a **factory DSL** imported via `using static`, so a flow reads as bare
+calls instead of a wall of `new`. `MobileJourneys.Dsl` supplies a thin factory for every built-in
+action, expectation, and tree type (`Tap`, `Found`, `Step`, `Branch`, `Tree`, …); because each
+returns the concrete type, nested calls compose without bracketing. `Step`'s expectations are
+`params`, so a step with no mask elements needs no `[ ]` around them.
+
 ```csharp
+using static MobileJourneys.Dsl;
+
 public static class Journeys
 {
     public static readonly JourneyDefinition Login = new(
         new MyAppEnvironment { LoggedIn = false },
-        [new Found("LoginButton")],
+        [Found("LoginButton")],
         [
-            new(new Tap("LoginButton"), [new Found("EmailField")]),
-            new(new TypeText("EmailField", "test@example.com")),
-            new(new TypeText("PasswordField", "hunter2")),
-            new(new Tap("SubmitButton"), [new Found("HomeScreen")]),
+            Step(Tap("LoginButton"), Found("EmailField")),
+            Step(TypeText("EmailField", "test@example.com")),
+            Step(TypeText("PasswordField", "hunter2")),
+            Step(Tap("SubmitButton"), Found("HomeScreen")),
         ]);
 
     public static IEnumerable<JourneyDefinition> All => [Login /*, …*/];
 }
 ```
+
+Journeys that share step prefixes can be defined as a `JourneyTree` instead: the root holds the
+environment and initial-screen expectations, interior `Branch` nodes hold steps shared by several
+journeys, and terminal (childless) `Branch` nodes hold the steps unique to one journey. `Flatten()`
+yields one ordinary `JourneyDefinition` per terminal node — the runner and selection flags are
+unaware of trees — but each shared step's screenshot is stored once, in a folder hierarchy mirroring
+the tree, instead of once per journey. Step numbers are the depth along the path, so a shared step
+keeps one stable filename.
+
+`Branch` has two shapes. A terminal node takes its steps as `params` —
+`Branch("About", Step(…), Step(…))` — so a leaf reads without brackets. An interior node takes an
+explicit steps array followed by its children array — `Branch("Menu", [Step(…)], [child, …])`.
+(Keeping the children a plain array rather than `params` is what lets the two overloads coexist
+unambiguously.)
+
+```csharp
+using static MobileJourneys.Dsl;
+
+public static class Journeys
+{
+    private static readonly JourneyTree Home = Tree(
+        new MyAppEnvironment { LoggedIn = true },
+        [Found("HomeScreen")],
+        [],
+        [
+            Branch(
+                "Menu",
+                [Step(Tap("MenuButton"), Found("AboutItem"))],
+                [
+                    Branch("About", Step(Tap("AboutItem"), Found("AboutPage"))),
+                    Branch("Settings", Step(Tap("SettingsItem"), Found("SettingsPage"))),
+                ]),
+        ]);
+
+    public static IEnumerable<JourneyDefinition> All => Home.Flatten();
+}
+```
+
+Like `JourneyDefinition`, a tree's name auto-populates from the field name via `[CallerMemberName]`,
+so trees must be declared as named fields; branch names are explicit (they name the screenshot
+folder). Journey names must be unique across the whole suite — `FrameworkConfig` validates this at
+construction.
+
+Two shapes are rejected at construction, because each is a mistake rather than a choice: a `Branch`
+with neither steps nor children, and siblings sharing a name. The first is worth explaining — a
+childless branch with no steps re-runs exactly the path its siblings already traverse, asserts
+nothing they do not, and produces no screenshot of its own, so it costs a full journey execution per
+fixture and buys nothing; give it steps to make it a journey, or children to make it a shared prefix.
+(A tree _root_ with no steps is fine: its initial screenshot is the whole test.)
 
 ### 5. Wire up `Program.Main`
 
@@ -158,6 +221,11 @@ internal static class Program
             return CheckExtraneousFiles(config, deleteMode);
         }
 
+        if (args.Contains($"--{CommandLineProvider.ReviewOption}"))
+        {
+            return ScreenshotViewer.RunReviewServer(config);
+        }
+
         var builder = await TestApplication.CreateBuilderAsync(args);
 #if RUN_UI_TESTS
         builder.AddSelfRegisteredExtensions(args);
@@ -168,13 +236,15 @@ internal static class Program
             (caps, sp) => new TestFramework(caps, sp, config)
         );
         using var app = await builder.BuildAsync();
-        return await app.RunAsync();
+        var exitCode = await app.RunAsync();
+        // Refresh the static viewer page so it reflects this run's baselines and failure artifacts.
+        ScreenshotViewer.WriteStaticAssets(config);
+        return exitCode;
     }
 
     private static int CheckExtraneousFiles(FrameworkConfig config, bool delete)
     {
-        var storage = config.Storage ?? FilesystemScreenshotStorage.Default();
-        var paths = storage.FindExtraneous(config, j => j.ExpectedStepNames(), delete);
+        var paths = config.FindExtraneous(delete);
         Console.WriteLine($"{(delete ? "Deleted" : "Found")} {paths.Count} extraneous file(s).");
         foreach (var p in paths) Console.WriteLine($"  {p}");
         return delete ? 0 : (paths.Count == 0 ? 0 : 1);
@@ -225,17 +295,97 @@ dotnet test --project test/MyApp.UITests/MyApp.UITests.csproj -p:RunUITests=true
 # Maintenance: detect / clean up orphaned baselines after journey renames
 dotnet run --project test/MyApp.UITests -p:RunUITests=true -- --list-extraneous
 dotnet run --project test/MyApp.UITests -p:RunUITests=true -- --delete-extraneous
+
+# Serve the screenshot viewer with review actions enabled
+dotnet run --project test/MyApp.UITests -p:RunUITests=true -- --review
 ```
 
 ## Screenshots
 
 Baselines live under
-`<consumer-project>/Screenshots/<PlatformConfig.DisplayName>/<JourneyName>/<NN> <StepLabel>.png`.
-The first run for a new step produces the baseline; subsequent runs compare. Failure artifacts (the
-actual capture for a mismatch, the diff visualization, FAIL screenshots from exceptions, and crash
-logs) land alongside the baseline and are auto-cleaned when the step next passes. Filename layout is
-owned by the storage backend; with the default `FilesystemScreenshotStorage` they appear as
-`<step>.new.png`, `<step>_diff_<pct>%.png`, `<step>_FAIL_<reason>.png`, and `<step>.CRASH.txt`.
+`<consumer-project>/Screenshots/<PlatformConfig.DisplayName>/<container>/<NN> <StepLabel>.png`,
+where the container is the journey's own folder for flat `JourneyDefinition`s, or the tree node's
+nested folder path (e.g. `Home/Menu/About/`) for tree-defined journeys — shared steps are stored
+once. The first run for a new step produces the baseline; subsequent runs compare (on shared steps,
+whichever journey runs first writes the baseline and the rest compare mask-aware). Failure
+artifacts (the actual capture for a mismatch, the diff visualization, FAIL screenshots from
+exceptions, and crash logs) land alongside the baseline, stamped with the producing journey's name
+so runs through a shared node can't clobber each other's evidence, and are auto-cleaned when the
+step next passes. Filename layout is owned by the storage backend; with the default
+`FilesystemScreenshotStorage` they appear as `<step> [<journey>].new.png`,
+`<step> [<journey>]_diff_<pct>%.png`, `<step> [<journey>]_FAIL_<reason>.png`, and
+`<step> [<journey>].CRASH.txt`.
+
+A FAIL screenshot records its cause twice, for two different readers. The filename keeps a
+sanitized, 80-char reason so a directory listing still tells you what happened, and the PNG's text
+metadata carries the untruncated original — exception type, message, and stack trace — which is what
+the viewer displays. The metadata is the only source the viewer reads; an artifact written by an
+older version simply shows no details until the journey is rerun.
+
+It is captured the instant the step fails, before the app-state query and device crash log run.
+Those diagnostics take seconds, which is long enough for a screen that was merely slow to finish
+rendering — and evidence showing a perfectly good screen makes a timing failure look inexplicable.
+
+`RelaunchApp` waits for the app to reach the foreground with an accessibility tree that has stopped
+changing (capped at 30s) before returning. A cold start is therefore absorbed by the launch rather
+than spending the first expectation's timeout budget, which is what otherwise turns a slow launch
+into an "element not found" on the very first step.
+
+## Screenshot viewer
+
+Every test run writes a self-contained viewer to `Screenshots/viewer/` (`index.html` +
+`manifest.js`). Opened directly from disk it gives a read-only, pannable/zoomable view of the whole
+journey forest, drawn as **nested boxes**: a branch box contains its children, each level a shade
+lighter than its parent, so the picture is the trie rather than a diagram of it. Thumbnails sit in
+the box that owns them, journey chips mark the nodes where a journey ends (only when the node isn't
+already named after it), a red outline marks a box with a failing step of its own — deeper failures
+show as "N ✕ below" — orange marks extraneous files, and a blue ring is the current selection.
+
+Run with `--review` to serve the same page from a local HTTP port (it prints the URL to open in a
+browser); the manifest is rebuilt on every load and triage is enabled **inline in the tree**:
+`j`/`k` walk the failures, expanding the selected one in place into a panel with the
+baseline/new/diff panes and its actions, and `z` blows it up to fill the window with zoom and pan on
+each image. Actions are Accept (promote its `.new` capture to the baseline; note the promoted PNG
+carries no embedded mask metadata until the next run regenerates it), Discard (delete that journey's
+artifacts for the step, leaving the baseline alone), deleting extraneous files individually or all
+at once, and rerunning a journey — on the current fixture, all fixtures, or only the fixtures where
+it currently fails. A rerun covers the selected journey only — the scopes differ in which fixtures it runs on, not in
+how many journeys run. It shells out to `dotnet test --filter` with `--no-progress --no-ansi` (a
+repainting progress line renders as hundreds of near-identical rows in a scrollback pane), streams
+the output into the page, and reloads the view when it finishes; only one rerun runs at a time,
+since concurrent runs would fight over the simulators. Press `u` to reload from disk by hand if a
+run's completion is ever missed.
+
+Resolving the selected failure — a rerun passing, or Accept/Discard — deliberately does not advance
+the selection. Snapping to whatever failure fell into the vacated slot is disorienting and hides the
+fact that anything succeeded. Instead the resolved node is held in place with a green outline and a
+✓ note, the status line turns green with the remaining count, and the log box's header goes green;
+you move on with `j`/`k`, which clears the green state. The log box persists as the record of the
+run and is dismissed with `Esc` or its ✕.
+
+Press `?` in the page for the keymap. Highlights: `1`–`4` and `[`/`]` switch fixture, `j`/`k` step
+through failures (centering each), `z` zooms the selected one, `b`/`n`/`d`/`space` rotate the leading
+image pane through baseline/new/diff, `f` fits the tree, `u` reloads from disk, `a` accepts, `x`
+discards, and rerun is a two-key chord (`r` then `r`/`a`/`f`) so an expensive run can't fire on a
+single keypress.
+
+Anything that has to stay legible while zoomed — emphasis outlines, the selection ring, node titles —
+is sized in units divided by the zoom scale (`--inv`), so outlines keep a constant on-screen
+thickness and titles stay within a readable min/max no matter how far in or out you are. Dragging
+anywhere pans, including on top of a screenshot; a press that doesn't move is still a click.
+
+Image URLs carry a `?v=` token (the file's last-write time) and the server serves those responses
+`immutable`, so switching fixtures back and forth reloads nothing — an unchanged file keeps its URL
+and comes from the browser cache with no request. A file that changes gets a new token, hence a new
+URL, and is refetched; a stale file can never share a URL with its replacement. The page and
+`manifest.js` are served `no-store` so the version map itself is always current. (The `shots/` vs
+`../` URL form is fixed by how the page was loaded — http vs `file://` — not by live connectivity,
+so a momentary server drop never rewrites image URLs or breaks the cached images.)
+
+The connected badge is kept honest by a lightweight `api/ping` every few seconds rather than a
+one-time check, so stopping or restarting the server flips it (and disables/re-enables the actions)
+within a poll — a restarted server reconnects on its own. A failed action request flips it
+immediately without waiting for the next poll.
 
 ## Custom actions and expectations
 
@@ -252,11 +402,34 @@ public sealed record TapLocalizedAlert(string English, string Japanese) : Journe
 }
 ```
 
+Give your app-specific actions and expectations factory helpers of their own — a static `AppDsl`
+class mirroring `MobileJourneys.Dsl`, one thin method per type — and import it with a second
+`using static` next to the framework's. Journeys then read uniformly whether a step uses a built-in
+action or one of yours; nothing in the DSL is special to the framework's own types, so there is no
+reason for a call site to fall back to `new` for an app-specific one.
+
+```csharp
+namespace MyApp.UITests;
+
+public static class AppDsl
+{
+    public static TapLocalizedAlert TapLocalizedAlert(string english, string japanese) =>
+        new(english, japanese);
+    // … one factory per app-specific action / expectation
+}
+```
+
+```csharp
+using static MobileJourneys.Dsl;   // Tap, Found, Step, Branch, Tree, …
+using static MyApp.UITests.AppDsl; // your app's actions
+```
+
 ## Worked example
 
 The Beerbox app (`~/Projects/beerbox`) is the original consumer this framework was extracted from —
-see `test/app/Beerbox.App.UITests/` there for a complete production example: `BeerboxPlatforms.cs`,
-`MockEnvironment.cs`, the 6 Beerbox-specific actions, and 32 journeys.
+see its `Beerbox.App.UITests` project for a complete production example: `BeerboxPlatforms.cs`,
+`MockEnvironment.cs`, its app-specific actions and their `AppDsl`, and its journeys authored with the
+DSL.
 
 ## Development
 

@@ -1,0 +1,1674 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>Screenshot Viewer</title>
+	<style>
+		:root {
+			--bg: #14161a;
+			--panel: #1e2128;
+			--panel2: #262a33;
+			--text: #d8dce4;
+			--muted: #8b93a3;
+			--accent: #4d9fff;
+			--fail: #ff5c5c;
+			--extra: #ffab40;
+			--ok: #58c877;
+			--border: #333947;
+		}
+
+		* {
+			box-sizing: border-box;
+		}
+
+		html,
+		body {
+			margin: 0;
+			height: 100%;
+			background: var(--bg);
+			color: var(--text);
+			font: 13px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif;
+		}
+
+		img {
+			-webkit-user-drag: none;
+			user-select: none;
+		}
+
+		header {
+			display: flex;
+			align-items: center;
+			gap: 14px;
+			padding: 8px 14px;
+			background: var(--panel);
+			border-bottom: 1px solid var(--border);
+			position: sticky;
+			top: 0;
+			z-index: 20;
+		}
+
+		header h1 {
+			font-size: 15px;
+			margin: 0 6px 0 0;
+			font-weight: 600;
+		}
+
+		.seg {
+			display: flex;
+			border: 1px solid var(--border);
+			border-radius: 7px;
+			overflow: hidden;
+		}
+
+		.seg button {
+			background: transparent;
+			color: var(--muted);
+			border: 0;
+			padding: 5px 12px;
+			cursor: pointer;
+			font: inherit;
+			white-space: nowrap;
+		}
+
+		.seg button.active {
+			background: var(--accent);
+			color: #fff;
+		}
+
+		.seg button .badge {
+			display: inline-block;
+			min-width: 17px;
+			padding: 0 5px;
+			margin-left: 6px;
+			border-radius: 9px;
+			background: var(--fail);
+			color: #fff;
+			font-size: 11px;
+			line-height: 17px;
+		}
+
+		.seg button .badge.extra {
+			background: var(--extra);
+			color: #402800;
+		}
+
+		#nav-status {
+			color: var(--muted);
+			font-size: 12px;
+			white-space: nowrap;
+		}
+
+		#mode-hint {
+			margin-left: auto;
+			color: var(--muted);
+			font-size: 12px;
+			white-space: nowrap;
+		}
+
+		.keyhint {
+			display: inline-block;
+			border: 1px solid var(--border);
+			border-radius: 4px;
+			padding: 0 4px;
+			margin-left: 6px;
+			font-size: 10px;
+			color: var(--muted);
+			background: var(--bg);
+		}
+
+		/* --- graph ---
+	   The tree is nested DOM boxes, so the browser lays it out; #world is the only thing
+	   transformed for pan/zoom. Emphasis (outlines, rings, titles) is divided by the zoom
+	   scale via --inv so it keeps a constant on-screen size at any zoom. */
+		#graph-wrap {
+			position: fixed;
+			inset: 46px 0 0 0;
+			overflow: hidden;
+			cursor: grab;
+		}
+
+		#graph-wrap.panning {
+			cursor: grabbing;
+		}
+
+		#world {
+			position: absolute;
+			transform-origin: 0 0;
+			--inv: 1;
+			padding: 20px;
+			user-select: none;
+		}
+
+		/* Fill and edge are both translucent white, so each nested box sits a step lighter than its
+	   parent and its edge stays a step brighter again than its own fill, at any depth. One outline
+	   per box — recolored below when the box is failing or holds extraneous files — sized in units
+	   divided by the zoom scale so it holds its on-screen thickness, and outside the layout so that
+	   scaling cannot feed back into it the way a border width would. */
+		.node {
+			display: inline-block;
+			vertical-align: top;
+			border-radius: 12px;
+			padding: 8px;
+			outline: calc(1px * var(--inv)) solid rgba(255, 255, 255, 0.16);
+			background: rgba(255, 255, 255, 0.035);
+			min-width: 150px;
+		}
+
+		.node+.node {
+			margin-left: 10px;
+		}
+
+		.node.has-fail {
+			outline: calc(2px * var(--inv)) solid var(--fail);
+		}
+
+		.node.has-extra {
+			outline: calc(2px * var(--inv)) solid var(--extra);
+		}
+
+		/* A synthesized container for files no journey references — dashes its orange outline. */
+		.node.orphan {
+			outline-style: dashed;
+		}
+
+		/* Still one outline: the selected node (always a failure) recolors to the accent, so the box
+	   you are on reads blue and the other failures stay red — no second concentric ring. Must come
+	   after has-fail/has-extra to win the equal-specificity tie. */
+		.node.current {
+			outline: calc(3px * var(--inv)) solid var(--accent);
+		}
+
+		/* A failure just cleared (rerun passed / accepted / discarded): green, held in place until you
+	   navigate, so the resolution is visible instead of the view jumping to the next failure. */
+		.node.resolved {
+			outline: calc(2px * var(--inv)) solid var(--ok);
+		}
+
+		.shot.passed img {
+			outline: calc(2px * var(--inv)) solid var(--ok);
+			outline-offset: calc(-1px * var(--inv));
+		}
+
+		.shot .cap .ok {
+			color: var(--ok);
+		}
+
+		/* width:0 + min-width:100% keeps a long title from widening the box, so it can ellipsize
+	   against the width the screenshots below it establish. */
+		.nhead {
+			display: flex;
+			align-items: baseline;
+			justify-content: center;
+			gap: 6px;
+			margin-bottom: 6px;
+			flex-wrap: wrap;
+			width: 0;
+			min-width: 100%;
+			text-align: center;
+		}
+
+		.nname {
+			font-weight: 600;
+			min-width: 0;
+			max-width: 100%;
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			font-size: clamp(calc(10px * var(--inv)), 12px, calc(24px * var(--inv)));
+		}
+
+		.below {
+			color: var(--fail);
+			opacity: 0.75;
+			white-space: nowrap;
+			font-size: clamp(calc(8px * var(--inv)), 10px, calc(13px * var(--inv)));
+		}
+
+		.dot {
+			display: inline-block;
+			width: 8px;
+			height: 8px;
+			border-radius: 50%;
+		}
+
+		.dot.fail {
+			background: var(--fail);
+		}
+
+		.dot.extra {
+			background: var(--extra);
+		}
+
+		.chip {
+			background: var(--panel2);
+			color: var(--accent);
+			border: 1px solid var(--accent);
+			border-radius: 8px;
+			padding: 0 6px;
+			white-space: nowrap;
+			font-size: clamp(calc(8px * var(--inv)), 10px, calc(14px * var(--inv)));
+		}
+
+		.shots {
+			display: flex;
+			gap: 6px;
+			align-items: flex-start;
+			justify-content: center;
+		}
+
+		.kids {
+			display: flex;
+			gap: 10px;
+			align-items: flex-start;
+			justify-content: center;
+			margin-top: 10px;
+		}
+
+		.shot {
+			width: 120px;
+			flex: none;
+			position: relative;
+		}
+
+		.shot img {
+			width: 100%;
+			display: block;
+			border-radius: 5px;
+			border: 1px solid var(--border);
+			background: #000;
+			cursor: pointer;
+			min-height: 40px;
+		}
+
+		.shot.fail img {
+			outline: calc(2px * var(--inv)) solid var(--fail);
+			outline-offset: calc(-1px * var(--inv));
+		}
+
+		.shot.extra img {
+			outline: calc(2px * var(--inv)) dashed var(--extra);
+			outline-offset: calc(-1px * var(--inv));
+		}
+
+		.shot .cap {
+			color: var(--muted);
+			margin-top: 2px;
+			word-break: break-word;
+			font-size: 10px;
+		}
+
+		.shot.extra .cap {
+			color: var(--extra);
+		}
+
+		.shot .cap .pct {
+			color: var(--fail);
+		}
+
+		.shot .missing {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			height: 60px;
+			border: 1px dashed var(--border);
+			border-radius: 5px;
+			color: var(--muted);
+			font-size: 10px;
+		}
+
+		.shot .del {
+			position: absolute;
+			top: 3px;
+			right: 3px;
+			background: var(--extra);
+			color: #402800;
+			border: 0;
+			border-radius: 5px;
+			cursor: pointer;
+			font: inherit;
+			font-weight: 700;
+			padding: 0 5px;
+			font-size: calc(11px * var(--inv));
+			line-height: 1.5;
+		}
+
+		/* --- inline triage panel (the selected failure, expanded in place) --- */
+		.triage {
+			border: 1px solid var(--accent);
+			border-radius: 10px;
+			padding: 8px;
+			background: var(--panel);
+			min-width: 420px;
+		}
+
+		.triage .thead {
+			display: flex;
+			gap: 8px;
+			align-items: baseline;
+			flex-wrap: wrap;
+			margin-bottom: 2px;
+		}
+
+		.triage .thead b {
+			font-size: clamp(calc(10px * var(--inv)), 12px, calc(17px * var(--inv)));
+		}
+
+		.triage .thead .pct {
+			color: var(--fail);
+			font-weight: 600;
+		}
+
+		.triage .explain {
+			color: var(--muted);
+			margin-bottom: 6px;
+			font-size: 11px;
+			max-width: 420px;
+		}
+
+		.failtext {
+			margin: 0 0 6px;
+			padding: 6px 8px;
+			max-width: 420px;
+			max-height: 120px;
+			overflow: auto;
+			background: #2a1414;
+			border: 1px solid var(--fail);
+			border-radius: 6px;
+			color: #ffc9c9;
+			font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+			font-size: 10px;
+			line-height: 1.4;
+			white-space: pre-wrap;
+			word-break: break-word;
+		}
+
+		#zoomview .failtext {
+			max-width: none;
+			max-height: 22vh;
+			margin: 0 16px 10px;
+			font-size: 11px;
+		}
+
+		.panes {
+			display: flex;
+			gap: 6px;
+			align-items: flex-start;
+			justify-content: center;
+		}
+
+		.pane {
+			width: 132px;
+			flex: none;
+		}
+
+		.pane.rotating .plabel {
+			color: var(--accent);
+		}
+
+		.plabel {
+			font-size: 10px;
+			color: var(--muted);
+			margin-bottom: 3px;
+		}
+
+		.pane img {
+			width: 100%;
+			display: block;
+			border: 1px solid var(--border);
+			border-radius: 5px;
+			background: #000;
+			cursor: pointer;
+		}
+
+		.tactions {
+			display: flex;
+			gap: 6px;
+			margin-top: 8px;
+			flex-wrap: wrap;
+			max-width: 420px;
+		}
+
+		.tactions .btn {
+			font-size: 11px;
+			padding: 4px 10px;
+		}
+
+		.btn {
+			font: inherit;
+			border-radius: 7px;
+			border: 1px solid var(--border);
+			cursor: pointer;
+			background: var(--panel2);
+			color: var(--text);
+			padding: 5px 14px;
+		}
+
+		.btn:hover {
+			filter: brightness(1.15);
+		}
+
+		.btn.accept {
+			background: var(--ok);
+			border-color: var(--ok);
+			color: #06280f;
+			font-weight: 600;
+		}
+
+		.btn.reject {
+			background: var(--fail);
+			border-color: var(--fail);
+			color: #330808;
+			font-weight: 600;
+		}
+
+		.btn.delete {
+			background: var(--extra);
+			border-color: var(--extra);
+			color: #402800;
+			font-weight: 600;
+		}
+
+		.btn[disabled] {
+			opacity: 0.45;
+			cursor: not-allowed;
+		}
+
+		/* --- zoom view (z): the selected failure filling the window --- */
+		#zoomview {
+			position: fixed;
+			inset: 46px 0 0 0;
+			background: var(--bg);
+			z-index: 40;
+			display: none;
+			flex-direction: column;
+		}
+
+		#zoomview .zhead {
+			display: flex;
+			gap: 10px;
+			align-items: baseline;
+			padding: 10px 16px;
+			border-bottom: 1px solid var(--border);
+			flex-wrap: wrap;
+		}
+
+		#zoomview .zhead .pct {
+			color: var(--fail);
+			font-weight: 600;
+		}
+
+		#zoomview .zhead .close {
+			margin-left: auto;
+			cursor: pointer;
+			color: var(--muted);
+		}
+
+		#zoomview .zbody {
+			flex: 1;
+			display: flex;
+			gap: 10px;
+			padding: 10px 16px;
+			min-height: 0;
+		}
+
+		#zoomview figure {
+			margin: 0;
+			flex: 1 1 0;
+			min-width: 0;
+			display: flex;
+			flex-direction: column;
+			min-height: 0;
+		}
+
+		#zoomview figcaption {
+			font-size: 11px;
+			color: var(--muted);
+			margin-bottom: 4px;
+		}
+
+		#zoomview figure.rotating figcaption {
+			color: var(--accent);
+		}
+
+		#zoomview .zoombox {
+			flex: 1;
+			min-height: 0;
+			overflow: hidden;
+			border: 1px solid var(--border);
+			border-radius: 6px;
+			background: #000;
+			cursor: grab;
+			display: flex;
+			align-items: flex-start;
+			justify-content: center;
+		}
+
+		#zoomview .zoombox.dragging {
+			cursor: grabbing;
+		}
+
+		#zoomview .zoombox img {
+			max-height: 100%;
+			max-width: 100%;
+			object-fit: contain;
+			transform-origin: center center;
+		}
+
+		#zoomview .zactions {
+			padding: 10px 16px;
+			border-top: 1px solid var(--border);
+			display: flex;
+			gap: 8px;
+			flex-wrap: wrap;
+		}
+
+		/* --- overlays --- */
+		#lightbox {
+			position: fixed;
+			inset: 0;
+			background: rgba(0, 0, 0, 0.85);
+			display: none;
+			align-items: center;
+			justify-content: center;
+			z-index: 50;
+			cursor: zoom-out;
+			flex-direction: column;
+		}
+
+		#lightbox img {
+			max-width: 92vw;
+			max-height: 88vh;
+			border: 1px solid var(--border);
+			border-radius: 6px;
+		}
+
+		#lightbox .cap {
+			color: var(--muted);
+			margin-top: 8px;
+			font-size: 12px;
+		}
+
+		#help {
+			position: fixed;
+			inset: 0;
+			background: rgba(0, 0, 0, 0.75);
+			display: none;
+			z-index: 60;
+			align-items: center;
+			justify-content: center;
+		}
+
+		#help .sheet {
+			background: var(--panel);
+			border: 1px solid var(--border);
+			border-radius: 12px;
+			padding: 18px 24px;
+			max-height: 86vh;
+			overflow: auto;
+			min-width: 460px;
+		}
+
+		#help h2 {
+			margin: 0 0 12px;
+			font-size: 15px;
+		}
+
+		#help h3 {
+			margin: 14px 0 6px;
+			font-size: 12px;
+			color: var(--muted);
+			text-transform: uppercase;
+			letter-spacing: 0.06em;
+		}
+
+		#help table {
+			border-collapse: collapse;
+			width: 100%;
+		}
+
+		#help td {
+			padding: 2px 0;
+			font-size: 12px;
+		}
+
+		#help td.k {
+			width: 130px;
+		}
+
+		#help kbd {
+			background: var(--panel2);
+			border: 1px solid var(--border);
+			border-radius: 4px;
+			padding: 1px 6px;
+			font-size: 11px;
+			font-family: inherit;
+		}
+
+		#toast {
+			position: fixed;
+			bottom: 18px;
+			left: 50%;
+			transform: translateX(-50%);
+			background: var(--panel2);
+			border: 1px solid var(--border);
+			color: var(--text);
+			padding: 8px 16px;
+			border-radius: 8px;
+			display: none;
+			z-index: 70;
+			font-size: 12px;
+		}
+
+		#toast.chord {
+			border-color: var(--accent);
+		}
+
+		#runner {
+			position: fixed;
+			right: 14px;
+			bottom: 14px;
+			width: 520px;
+			max-height: 46vh;
+			z-index: 65;
+			background: var(--panel);
+			border: 1px solid var(--accent);
+			border-radius: 10px;
+			display: none;
+			flex-direction: column;
+			overflow: hidden;
+		}
+
+		#runner[data-state="pass"] {
+			border-color: var(--ok);
+		}
+
+		#runner[data-state="fail"] {
+			border-color: var(--fail);
+		}
+
+		#runner .rhd {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			padding: 8px 12px;
+			border-bottom: 1px solid var(--border);
+		}
+
+		#runner .rhd b {
+			font-size: 12px;
+		}
+
+		#runner .status {
+			width: 13px;
+			text-align: center;
+			font-weight: 700;
+		}
+
+		#runner .status.pass {
+			color: var(--ok);
+		}
+
+		#runner .status.fail {
+			color: var(--fail);
+		}
+
+		#runner .rhd .close {
+			margin-left: auto;
+			cursor: pointer;
+			color: var(--muted);
+		}
+
+		#runner pre {
+			margin: 0;
+			padding: 8px 12px;
+			overflow: auto;
+			font-size: 11px;
+			line-height: 1.4;
+			font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+			color: var(--muted);
+			white-space: pre-wrap;
+		}
+
+		.spin {
+			display: inline-block;
+			vertical-align: middle;
+			width: 11px;
+			height: 11px;
+			border: 2px solid var(--border);
+			border-top-color: var(--accent);
+			border-radius: 50%;
+			animation: spin 0.8s linear infinite;
+		}
+
+		@keyframes spin {
+			to {
+				transform: rotate(360deg);
+			}
+		}
+	</style>
+</head>
+
+<body>
+	<header>
+		<h1 id="title">Screenshots</h1>
+		<div class="seg" id="config-seg"></div>
+		<span id="nav-status"></span>
+		<button class="btn delete" id="del-extra" style="display:none">Delete all extraneous</button>
+		<span id="mode-hint"></span>
+	</header>
+	<div id="graph-wrap">
+		<div id="world"></div>
+	</div>
+	<div id="zoomview"></div>
+	<div id="lightbox"><img alt="" />
+		<div class="cap"></div>
+	</div>
+	<div id="help">
+		<div class="sheet"></div>
+	</div>
+	<div id="runner">
+		<div class="rhd"><span class="status"><span class="spin"></span></span><b></b><span class="close"
+				title="Close (Esc)">✕</span></div>
+		<pre></pre>
+	</div>
+	<div id="toast"></div>
+	<script src="manifest.js"></script>
+	<script>
+		"use strict";
+		(() => {
+			const M = window.MANIFEST;
+			let config = M.configs[0];
+			let serverMode = false;    // the review server is reachable right now
+			let everServer = false;    // it was reachable at least once (distinguishes "died" from "static file")
+			let selected = 0;        // index into currentFailures(); -1 = nothing selected
+			let resolved = null;     // a failure just cleared (rerun passed / accepted / discarded), shown in place
+			let zoomed = false;      // the z view is open
+			let chord = null, chordTimer = null, pollTimer = null;
+			const paneKind = new Map();   // failure key -> artifact shown in the rotating pane
+			const $ = (sel) => document.querySelector(sel);
+
+			// ---------- data ----------
+			const splitPath = (p) => {
+				const i = p.lastIndexOf("/");
+				return { container: p.slice(0, i), file: p.slice(i + 1) };
+			};
+			// How the page was loaded, fixed for its lifetime — NOT whether the server is reachable right
+			// now. A momentary server drop must not rewrite image URLs (the page is still served over http
+			// and the images are cached); only the actions and the badge track live connectivity.
+			const httpServed = location.protocol === "http:" || location.protocol === "https:";
+			const shotUrl = (container, file) => {
+				const rel = [...container.split("/"), file].map(encodeURIComponent).join("/");
+				const base = httpServed
+					? "shots/" + encodeURIComponent(config) + "/" + rel
+					: "../" + encodeURIComponent(config) + "/" + rel;
+				// A per-file version token makes an unchanged file's URL stable across device switches (so it
+				// serves from the browser cache) and a changed file's URL new (so it refetches). The server
+				// pairs the token with an immutable Cache-Control; a static file:// open has no such server.
+				const version = httpServed ? (filesFor(config).versions || {})[container + "/" + file] : null;
+				return version ? base + "?v=" + encodeURIComponent(version) : base;
+			};
+			const filesFor = (cfg) => M.files[cfg] || { baselines: [], failures: [], extraneous: [] };
+			const baselineSet = (cfg) => new Set(filesFor(cfg).baselines);
+			const failureKey = (f) => f.container + "|" + f.step + "|" + f.journey;
+			const nodeNameOf = (container) => container.slice(container.lastIndexOf("/") + 1);
+
+			const failureGroups = (cfg) => {
+				const groups = new Map();
+				for (const f of filesFor(cfg).failures) {
+					const key = f.container + " " + f.step + " " + f.journey;
+					if (!groups.has(key)) {
+						groups.set(key, {
+							container: f.container, step: f.step, journey: f.journey,
+							kinds: {}, percent: null, failureText: "",
+						});
+					}
+					const g = groups.get(key);
+					g.kinds[f.kind] = f.file;
+					if (f.percent != null) { g.percent = f.percent; }
+					if (f.kind === "fail") { g.failureText = f.details || ""; }
+				}
+				return [...groups.entries()].sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0).map((e) => e[1]);
+			};
+			const currentFailures = () => failureGroups(config);
+			const selectedFailure = () => currentFailures()[selected];
+
+			// A journey-end chip only earns its space when the node is not already named after it.
+			const journeyEnds = (() => {
+				const ends = new Map();
+				for (const [name, containers] of Object.entries(M.journeys)) {
+					const end = containers[containers.length - 1];
+					if (!ends.has(end)) { ends.set(end, []); }
+					ends.get(end).push(name);
+				}
+				return ends;
+			})();
+			const chipsFor = (path) => (journeyEnds.get(path) || []).filter((j) => j !== nodeNameOf(path));
+
+			// ---------- header ----------
+			document.title = M.title + " — Screenshots";
+			$("#title").textContent = M.title;
+			const configSeg = $("#config-seg");
+			M.configs.forEach((cfg, i) => {
+				const b = document.createElement("button");
+				b.textContent = cfg;
+				b.dataset.config = cfg;
+				b.title = `Switch to ${cfg} (${i + 1})`;
+				b.addEventListener("click", () => setConfig(cfg));
+				configSeg.appendChild(b);
+			});
+			$("#del-extra").addEventListener("click", async () => {
+				if (await api("delete-all-extraneous", {})) { refresh("Deleted all extraneous files"); }
+			});
+
+			function setConfig(next) {
+				config = next;
+				selected = 0;
+				resolved = null;
+				closeZoom();
+				render();
+				focusSelected(false);
+			}
+
+			// ---------- tree model ----------
+			function buildTree() {
+				const nodes = new Map();
+				for (const n of M.nodes) {
+					nodes.set(n.path, { ...n, children: [], extraFiles: [], orphan: false });
+				}
+				for (const path of filesFor(config).extraneous) {
+					const { container, file } = splitPath(path);
+					if (!nodes.has(container)) {
+						let parent = null;
+						for (let p = container; p.includes("/");) {
+							p = p.slice(0, p.lastIndexOf("/"));
+							if (nodes.has(p)) { parent = p; break; }
+						}
+						nodes.set(container, { path: container, name: nodeNameOf(container), parent, steps: [], children: [], extraFiles: [], orphan: true });
+					}
+					nodes.get(container).extraFiles.push(file);
+				}
+				const roots = [];
+				for (const n of nodes.values()) {
+					if (n.parent && nodes.has(n.parent)) { nodes.get(n.parent).children.push(n); }
+					else { roots.push(n); }
+				}
+				return roots;
+			}
+
+			// Failures anywhere beneath a node — shown as a muted count in its header, so a collapsed-
+			// looking box still hints at trouble inside without claiming the failure as its own.
+			function failuresBelow(node, byContainer) {
+				let total = 0;
+				for (const c of node.children) { total += (byContainer.get(c.path) || []).length + failuresBelow(c, byContainer); }
+				return total;
+			}
+
+			// ---------- rendering ----------
+			function renderGraph() {
+				const world = $("#world");
+				world.innerHTML = "";
+				const roots = buildTree();
+				const byContainer = new Map();
+				for (const f of currentFailures()) {
+					if (!byContainer.has(f.container)) { byContainer.set(f.container, []); }
+					byContainer.get(f.container).push(f);
+				}
+				for (const r of roots) {
+					const band = document.createElement("div");
+					band.style.marginBottom = "26px";
+					band.appendChild(renderNode(r, byContainer));
+					world.appendChild(band);
+				}
+			}
+
+			function renderNode(n, byContainer) {
+				const el = document.createElement("div");
+				el.className = "node";
+				el.dataset.path = n.path;
+				if (n.orphan) { el.classList.add("orphan"); }
+				const nodeFails = byContainer.get(n.path) || [];
+				const below = failuresBelow(n, byContainer);
+				// Red means a step in *this* box failed — not merely that something below it did.
+				if (nodeFails.length > 0) { el.classList.add("has-fail"); }
+				else if (n.extraFiles.length > 0) { el.classList.add("has-extra"); }
+				const sel = selectedFailure();
+				if (sel && sel.container === n.path) { el.classList.add("current"); }
+				const resolvedHere = resolved && resolved.container === n.path;
+				if (resolvedHere && nodeFails.length === 0) { el.classList.add("resolved"); }
+
+				const head = document.createElement("div");
+				head.className = "nhead";
+				const name = document.createElement("span");
+				name.className = "nname";
+				name.textContent = n.name;
+				name.title = n.path;
+				head.appendChild(name);
+				if (nodeFails.length > 0) { head.appendChild(mark("fail")); }
+				if (n.extraFiles.length > 0) { head.appendChild(mark("extra")); }
+				if (below > 0) {
+					const hint = document.createElement("span");
+					hint.className = "below";
+					hint.textContent = `${below} ✕ below`;
+					hint.title = `${below} failing step(s) inside this branch`;
+					head.appendChild(hint);
+				}
+				for (const j of chipsFor(n.path)) {
+					const c = document.createElement("span");
+					c.className = "chip";
+					c.textContent = j;
+					c.title = `Journey “${j}” ends here`;
+					head.appendChild(c);
+				}
+				el.appendChild(head);
+
+				const baselines = baselineSet(config);
+				const shots = document.createElement("div");
+				shots.className = "shots";
+				for (const step of n.steps) {
+					const stepFails = nodeFails.filter((f) => f.step === step);
+					const isSelected = sel && sel.container === n.path && sel.step === step;
+					if (isSelected) {
+						shots.appendChild(triagePanel(sel));
+					} else {
+						const file = step + ".png";
+						const fig = shotFigure(n.path, file, step, baselines.has(n.path + "/" + file), stepFails, false);
+						if (resolvedHere && resolved.step === step && stepFails.length === 0) {
+							fig.classList.add("passed");
+							const ok = document.createElement("span");
+							ok.className = "ok";
+							ok.textContent = " ✓ " + resolved.label;
+							fig.querySelector(".cap").appendChild(ok);
+						}
+						shots.appendChild(fig);
+					}
+				}
+				for (const file of n.extraFiles) {
+					shots.appendChild(shotFigure(n.path, file, file, true, [], true));
+				}
+				if (shots.children.length > 0) { el.appendChild(shots); }
+
+				if (n.children.length > 0) {
+					const kids = document.createElement("div");
+					kids.className = "kids";
+					for (const c of n.children) { kids.appendChild(renderNode(c, byContainer)); }
+					el.appendChild(kids);
+				}
+				return el;
+			}
+
+			function mark(kind) {
+				const s = document.createElement("span");
+				s.className = "dot " + kind;
+				return s;
+			}
+
+			function shotFigure(container, file, label, present, stepFails, isExtra) {
+				const fig = document.createElement("div");
+				fig.className = "shot" + (stepFails.length > 0 ? " fail" : "") + (isExtra ? " extra" : "");
+				if (present) {
+					const img = document.createElement("img");
+					img.loading = "lazy";
+					img.draggable = false;
+					img.src = shotUrl(container, file);
+					img.addEventListener("click", () => {
+						if (stepFails.length > 0) { selectFailure(stepFails[0]); }
+						else { openLightbox(img.src, container + "/" + file); }
+					});
+					fig.appendChild(img);
+				} else {
+					const miss = document.createElement("div");
+					miss.className = "missing";
+					miss.textContent = "no baseline yet";
+					fig.appendChild(miss);
+				}
+				if (isExtra && serverMode) {
+					const del = document.createElement("button");
+					del.className = "del";
+					del.textContent = "✕";
+					del.title = "Delete this unreferenced file";
+					del.addEventListener("click", async (e) => {
+						e.stopPropagation();
+						if (await api("delete-extraneous", { config, container, file })) { refresh("Deleted " + file); }
+					});
+					fig.appendChild(del);
+				}
+				const cap = document.createElement("div");
+				cap.className = "cap";
+				cap.textContent = label + (isExtra ? " (extraneous)" : "");
+				for (const f of stepFails) {
+					const s = document.createElement("span");
+					s.className = "pct";
+					const who = f.journey === nodeNameOf(container) ? "" : " " + f.journey;
+					s.textContent = " ✕" + who + (f.percent != null ? ` ${f.percent.toFixed(2)}%` : "");
+					cap.appendChild(s);
+				}
+				fig.appendChild(cap);
+				return fig;
+			}
+
+			// ---------- triage ----------
+			function paneKinds(f) {
+				const kinds = [];
+				if (baselineSet(config).has(f.container + "/" + f.step + ".png")) { kinds.push("baseline"); }
+				if (f.kinds.new) { kinds.push("new"); }
+				if (f.kinds.diff) { kinds.push("diff"); }
+				if (f.kinds.fail) { kinds.push("fail"); }
+				return kinds;
+			}
+			const kindLabel = { baseline: "baseline", new: "new capture", diff: "diff (white = changed)", fail: "failure screenshot" };
+			const kindFile = (f, kind) => (kind === "baseline" ? f.step + ".png" : f.kinds[kind]);
+			// A diff needs the accept/discard explanation; any other failure is better served by the error
+			// that actually caused it.
+			function explainBlock(f) {
+				const el = document.createElement(f.kinds.new ? "div" : "pre");
+				el.className = f.kinds.new ? "explain" : "failtext";
+				el.textContent = f.kinds.new
+					? "Screenshot changed. Accept replaces the baseline with the new capture; Discard deletes this run's artifacts and keeps the baseline."
+					: f.failureText || "The step failed before a comparison could happen; no details were recorded.";
+				return el;
+			}
+
+			// Only the leading pane cycles; the rest are fixed references that never move, so b/n/d changes
+			// one image instead of reshuffling all of them (baseline/new/diff → new/new/diff → diff/new/diff).
+			function orderedKinds(f) {
+				const kinds = paneKinds(f);
+				const key = failureKey(f);
+				if (!paneKind.has(key) || !kinds.includes(paneKind.get(key))) { paneKind.set(key, kinds[0]); }
+				return [paneKind.get(key), ...kinds.slice(1)];
+			}
+
+			function triagePanel(f) {
+				const box = document.createElement("div");
+				box.className = "triage";
+				const head = document.createElement("div");
+				head.className = "thead";
+				const b = document.createElement("b");
+				b.textContent = f.step + " — " + f.journey;
+				head.appendChild(b);
+				if (f.percent != null) {
+					const p = document.createElement("span");
+					p.className = "pct";
+					p.textContent = f.percent.toFixed(3) + "% diff";
+					head.appendChild(p);
+				}
+				box.appendChild(head);
+				box.appendChild(explainBlock(f));
+
+				const panes = document.createElement("div");
+				panes.className = "panes";
+				orderedKinds(f).forEach((k, i) => {
+					const pane = document.createElement("div");
+					pane.className = "pane" + (i === 0 ? " rotating" : "");
+					const label = document.createElement("div");
+					label.className = "plabel";
+					label.textContent = kindLabel[k] + (i === 0 ? " ⟳" : "");
+					const img = document.createElement("img");
+					img.loading = "lazy";
+					img.draggable = false;
+					img.src = shotUrl(f.container, kindFile(f, k));
+					img.addEventListener("click", () => openZoom());
+					pane.append(label, img);
+					panes.appendChild(pane);
+				});
+				box.appendChild(panes);
+				box.appendChild(triageActions(f, false));
+				return box;
+			}
+
+			function triageActions(f, big) {
+				const actions = document.createElement("div");
+				actions.className = big ? "zactions" : "tactions";
+				const add = (label, cls, key, onClick, enabled) => {
+					const b = document.createElement("button");
+					b.className = "btn " + cls;
+					b.innerHTML = `${label}<span class="keyhint">${key}</span>`;
+					b.title = `${label} (${key})`;
+					b.disabled = !(enabled ?? serverMode);
+					b.addEventListener("click", (e) => { e.stopPropagation(); onClick(); });
+					actions.appendChild(b);
+				};
+				if (f.kinds.new) { add("Accept new baseline", "accept", "a", () => act("accept", f)); }
+				add(f.kinds.new ? "Discard result" : "Discard failure artifacts", "reject", "x", () => act("reject", f));
+				// Every scope reruns this one journey; they differ only in which fixtures it runs on.
+				add(`Rerun ${f.journey} here`, "", "r r", () => rerun(f.journey, "this"));
+				add("on all devices", "", "r a", () => rerun(f.journey, "all"));
+				add("on failed devices", "", "r f", () => rerun(f.journey, "failed"));
+				if (paneKinds(f).length > 1) { add("Cycle image", "", "space", () => rotatePane(null), true); }
+				add(big ? "Close zoom" : "Zoom", "", "z", () => (big ? closeZoom() : openZoom()), true);
+				return actions;
+			}
+
+			async function act(action, f) {
+				if (!serverMode) { toast("start with --review to enable this"); return; }
+				if (await api(action, { config, container: f.container, step: f.step, journey: f.journey })) {
+					closeZoom();
+					refresh(
+						action === "accept" ? "Accepted " + f.step : "Discarded " + f.step,
+						action === "accept" ? "baseline accepted" : "artifacts discarded"
+					);
+				}
+			}
+
+			// ---------- zoom view (z) ----------
+			const zoomImgState = new Map();
+			function openZoom() {
+				const f = selectedFailure();
+				if (!f) { toast("no failure selected"); return; }
+				zoomed = true;
+				const view = $("#zoomview");
+				view.innerHTML = "";
+				view.style.display = "flex";
+
+				const head = document.createElement("div");
+				head.className = "zhead";
+				const b = document.createElement("b");
+				b.textContent = f.step + " — " + f.journey;
+				const where = document.createElement("span");
+				where.style.color = "var(--muted)";
+				where.textContent = config + "/" + f.container;
+				head.append(b, where);
+				if (f.percent != null) {
+					const p = document.createElement("span");
+					p.className = "pct";
+					p.textContent = f.percent.toFixed(3) + "% diff";
+					head.appendChild(p);
+				}
+				const close = document.createElement("span");
+				close.className = "close";
+				close.textContent = "✕ close (z / Esc)";
+				close.addEventListener("click", closeZoom);
+				head.appendChild(close);
+				view.appendChild(head);
+				if (!f.kinds.new) { view.appendChild(explainBlock(f)); }
+
+				const body = document.createElement("div");
+				body.className = "zbody";
+				zoomImgState.clear();
+				orderedKinds(f).forEach((k, i) => {
+					const fig = document.createElement("figure");
+					if (i === 0) { fig.className = "rotating"; }
+					const cap = document.createElement("figcaption");
+					cap.textContent = kindLabel[k] + (i === 0 ? " ⟳" : "");
+					const boxEl = document.createElement("div");
+					boxEl.className = "zoombox";
+					const img = document.createElement("img");
+					img.draggable = false;
+					img.src = shotUrl(f.container, kindFile(f, k));
+					boxEl.appendChild(img);
+					attachImageZoom(boxEl, img);
+					fig.append(cap, boxEl);
+					body.appendChild(fig);
+				});
+				view.appendChild(body);
+				view.appendChild(triageActions(f, true));
+				if (f.kinds.crash) {
+					const a = document.createElement("a");
+					a.href = shotUrl(f.container, f.kinds.crash);
+					a.target = "_blank";
+					a.style.cssText = "color:var(--accent);font-size:12px;padding:0 16px 10px";
+					a.textContent = "device crash log: " + f.kinds.crash;
+					view.appendChild(a);
+				}
+			}
+
+			function closeZoom() {
+				zoomed = false;
+				$("#zoomview").style.display = "none";
+			}
+
+			// Scroll to zoom, drag to pan — inside the zoom view only, where there is no graph behind it.
+			function attachImageZoom(box, img) {
+				const st = { s: 1, x: 0, y: 0 };
+				zoomImgState.set(img, st);
+				const apply = () => { img.style.transform = `translate(${st.x}px, ${st.y}px) scale(${st.s})`; };
+				box.addEventListener("wheel", (e) => {
+					e.preventDefault();
+					st.s = Math.min(10, Math.max(1, st.s * Math.exp(-e.deltaY * 0.002)));
+					if (st.s === 1) { st.x = 0; st.y = 0; }
+					apply();
+				}, { passive: false });
+				let dragging = false, lx = 0, ly = 0;
+				box.addEventListener("pointerdown", (e) => {
+					dragging = true; lx = e.clientX; ly = e.clientY;
+					box.classList.add("dragging");
+					box.setPointerCapture(e.pointerId);
+				});
+				box.addEventListener("pointermove", (e) => {
+					if (!dragging) { return; }
+					st.x += e.clientX - lx; st.y += e.clientY - ly;
+					lx = e.clientX; ly = e.clientY;
+					apply();
+				});
+				box.addEventListener("pointerup", () => { dragging = false; box.classList.remove("dragging"); });
+			}
+
+			function resetZoom() {
+				for (const [img, st] of zoomImgState) {
+					st.s = 1; st.x = 0; st.y = 0;
+					img.style.transform = "";
+				}
+			}
+
+			function rotatePane(kind) {
+				const f = selectedFailure();
+				if (!f) { return; }
+				const kinds = paneKinds(f);
+				if (kinds.length === 0) { return; }
+				const key = failureKey(f);
+				if (kind === null) {
+					const i = kinds.indexOf(paneKind.get(key) ?? kinds[0]);
+					paneKind.set(key, kinds[(i + 1) % kinds.length]);
+				} else if (kinds.includes(kind)) {
+					paneKind.set(key, kind);
+				} else {
+					toast(`no ${kind} image for this failure`);
+					return;
+				}
+				render();
+				if (zoomed) { openZoom(); }
+			}
+
+			// ---------- pan & zoom (graph) ----------
+			const wrap = $("#graph-wrap"), world = $("#world");
+			let tx = 30, ty = 30, scale = 0.5;
+			function applyTransform() {
+				world.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+				world.style.setProperty("--inv", 1 / scale);
+			}
+			applyTransform();
+			function fitView() {
+				const r = wrap.getBoundingClientRect();
+				const w = world.scrollWidth, h = world.scrollHeight;
+				scale = Math.min((r.width - 40) / Math.max(1, w), (r.height - 40) / Math.max(1, h), 1);
+				tx = (r.width - w * scale) / 2;
+				ty = 20;
+				applyTransform();
+			}
+			function animateTo(nx, ny, ns) {
+				const sx = tx, sy = ty, ss = scale, t0 = performance.now(), dur = 260;
+				const step = (now) => {
+					const t = Math.min(1, (now - t0) / dur);
+					const e = t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t);
+					tx = sx + (nx - sx) * e; ty = sy + (ny - sy) * e; scale = ss + (ns - ss) * e;
+					applyTransform();
+					if (t < 1) { requestAnimationFrame(step); }
+				};
+				requestAnimationFrame(step);
+			}
+			function focusSelected(animate) {
+				const f = selectedFailure();
+				if (!f) { return; }
+				const el = $(`#world .node[data-path="${cssEscape(f.container)}"] .triage`)
+					|| $(`#world .node[data-path="${cssEscape(f.container)}"]`);
+				if (!el) { return; }
+				const r = wrap.getBoundingClientRect(), wr = world.getBoundingClientRect(), er = el.getBoundingClientRect();
+				const w = er.width / scale, h = er.height / scale;
+				const cx = (er.left - wr.left) / scale + w / 2, cy = (er.top - wr.top) / scale + h / 2;
+				const ns = Math.min(1.2, (r.width - 80) / Math.max(1, w), (r.height - 80) / Math.max(1, h));
+				const nx = r.width / 2 - cx * ns, ny = r.height / 2 - cy * ns;
+				if (animate) { animateTo(nx, ny, ns); } else { tx = nx; ty = ny; scale = ns; applyTransform(); }
+			}
+			const cssEscape = (s) => (window.CSS && CSS.escape ? CSS.escape(s) : s.replace(/["\\]/g, "\\$&"));
+
+			// Panning works anywhere, including on top of a screenshot; a press that does not move is
+			// still a click, so thumbnails stay interactive.
+			let down = null;
+			wrap.addEventListener("pointerdown", (e) => {
+				if (e.button !== 0) { return; }
+				down = { x: e.clientX, y: e.clientY, moved: false };
+				try { wrap.setPointerCapture(e.pointerId); } catch { /* synthetic or already-released pointer */ }
+			});
+			wrap.addEventListener("pointermove", (e) => {
+				if (!down) { return; }
+				const dx = e.clientX - down.x, dy = e.clientY - down.y;
+				if (!down.moved && Math.hypot(dx, dy) < 4) { return; }
+				if (!down.moved) { down.moved = true; wrap.classList.add("panning"); }
+				tx += e.clientX - down.x; ty += e.clientY - down.y;
+				down.x = e.clientX; down.y = e.clientY;
+				applyTransform();
+			});
+			wrap.addEventListener("pointerup", () => { wrap.classList.remove("panning"); });
+			wrap.addEventListener("click", (e) => {
+				if (down && down.moved) { e.stopPropagation(); e.preventDefault(); }
+				down = null;
+			}, true);
+			wrap.addEventListener("wheel", (e) => {
+				e.preventDefault();
+				const ns = Math.min(3, Math.max(0.03, scale * Math.exp(-e.deltaY * 0.0015)));
+				const r = wrap.getBoundingClientRect();
+				const cx = e.clientX - r.left, cy = e.clientY - r.top;
+				tx = cx - ((cx - tx) / scale) * ns;
+				ty = cy - ((cy - ty) / scale) * ns;
+				scale = ns;
+				applyTransform();
+			}, { passive: false });
+			wrap.addEventListener("dblclick", (e) => { if (!e.target.closest(".node")) { fitView(); } });
+
+			function selectFailure(f) {
+				const i = currentFailures().findIndex((x) => failureKey(x) === failureKey(f));
+				if (i >= 0) { resolved = null; selected = i; render(); focusSelected(true); }
+			}
+			function moveSelection(delta) {
+				const fails = currentFailures();
+				if (fails.length === 0) { toast("no failures on this device"); return; }
+				resolved = null;
+				selected = (selected + delta + fails.length) % fails.length;
+				render();
+				focusSelected(true);
+				if (zoomed) { openZoom(); }
+				const f = fails[selected];
+				toast(`${selected + 1}/${fails.length} · ${f.step} — ${f.journey}`);
+			}
+
+			// ---------- rerun ----------
+			async function rerun(journey, scope) {
+				if (!serverMode) { toast("start with --review to enable rerunning"); return; }
+				const res = await fetch("api/rerun", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ config, journey, scope }),
+				}).catch((e) => ({ ok: false, text: async () => e.message }));
+				if (!res.ok) { toast("rerun failed: " + (await res.text())); return; }
+				const { id } = await res.json();
+				const r = $("#runner");
+				r.style.display = "flex";
+				r.removeAttribute("data-state");
+				r.querySelector("pre").textContent = "";
+				r.querySelector(".status").innerHTML = `<span class="spin"></span>`;
+				pollJob(id);
+			}
+			$("#runner .close").addEventListener("click", () => { $("#runner").style.display = "none"; });
+
+			function pollJob(id) {
+				clearTimeout(pollTimer);
+				// A poll can fail transiently while the child process hammers the disk; giving up on the
+				// first miss would strand the run as permanently "in progress" and skip the refresh.
+				let misses = 0;
+				const tick = async () => {
+					const res = await fetch("api/rerun-status?id=" + encodeURIComponent(id), { cache: "no-store" }).catch(() => null);
+					if (!res || !res.ok) {
+						if (++misses < 15) { pollTimer = setTimeout(tick, 1000); }
+						else { toast("lost contact with the rerun; press u to refresh"); }
+						return;
+					}
+					misses = 0;
+					const job = await res.json();
+					const runner = $("#runner");
+					runner.querySelector("b").textContent = job.description;
+					const pre = runner.querySelector("pre");
+					const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
+					pre.textContent = job.lines.join("\n");
+					if (atBottom) { pre.scrollTop = pre.scrollHeight; }
+					if (job.running) {
+						pollTimer = setTimeout(tick, 1000);
+					} else {
+						const passed = job.exitCode === 0;
+						runner.dataset.state = passed ? "pass" : "fail";
+						runner.querySelector(".status").innerHTML = passed
+							? `<span class="pass">✓</span>`
+							: `<span class="fail">✕</span>`;
+						refresh(
+							passed ? "Rerun passed" : `Rerun finished with exit code ${job.exitCode}`,
+							passed ? "passed on rerun" : null
+						);
+					}
+				};
+				tick();
+			}
+
+			// ---------- overlays ----------
+			function openLightbox(src, caption) {
+				const lb = $("#lightbox");
+				lb.querySelector("img").src = src;
+				lb.querySelector(".cap").textContent = caption;
+				lb.style.display = "flex";
+			}
+			$("#lightbox").addEventListener("click", () => { $("#lightbox").style.display = "none"; });
+
+			function toast(text, isChord) {
+				const t = $("#toast");
+				t.textContent = text;
+				t.classList.toggle("chord", !!isChord);
+				t.style.display = "block";
+				clearTimeout(toast._h);
+				toast._h = setTimeout(() => { t.style.display = "none"; }, isChord ? 4000 : 2500);
+			}
+
+			const HELP = [
+				["Global", [
+					["?", "show / hide this help"],
+					["1 … 4", "switch device"],
+					["[ / ]", "previous / next device"],
+					["f", "fit the whole tree to the window"],
+					["u", "reload the screenshots from disk"],
+					["Esc", "close overlay, cancel a pending chord"],
+				]],
+				["Failures", [
+					["j / ↓", "next failure (expands it in place)"],
+					["k / ↑", "previous failure"],
+					["z", "zoom the selected failure to fill the window"],
+					["b / n / d", "rotating pane → baseline / new / diff"],
+					["space", "cycle the rotating pane"],
+					["0", "reset image zoom (in the zoom view)"],
+				]],
+				["Actions", [
+					["a", "accept new baseline"],
+					["x", "discard result"],
+					["r then r", "rerun this device"],
+					["r then a", "rerun all devices"],
+					["r then f", "rerun failed devices"],
+				]],
+			];
+			function renderHelp() {
+				const sheet = $("#help .sheet");
+				sheet.innerHTML = "<h2>Keyboard shortcuts</h2>";
+				for (const [group, rows] of HELP) {
+					const h = document.createElement("h3");
+					h.textContent = group;
+					sheet.appendChild(h);
+					const table = document.createElement("table");
+					for (const [k, what] of rows) {
+						const tr = document.createElement("tr");
+						const td1 = document.createElement("td");
+						td1.className = "k";
+						for (const part of k.split(" ")) {
+							if (part === "/" || part === "then" || part === "…") {
+								td1.appendChild(document.createTextNode(" " + part + " "));
+							} else {
+								const kbd = document.createElement("kbd");
+								kbd.textContent = part;
+								td1.appendChild(kbd);
+							}
+						}
+						const td2 = document.createElement("td");
+						td2.textContent = what;
+						tr.append(td1, td2);
+						table.appendChild(tr);
+					}
+					sheet.appendChild(table);
+				}
+			}
+			renderHelp();
+			$("#help").addEventListener("click", (e) => { if (e.target.id === "help") { $("#help").style.display = "none"; } });
+
+			// ---------- keyboard ----------
+			function startChord(prefix) {
+				chord = prefix;
+				toast("rerun:  r = this device   a = all devices   f = failed devices   (Esc cancels)", true);
+				clearTimeout(chordTimer);
+				chordTimer = setTimeout(() => { chord = null; }, 4000);
+			}
+			function resolveChord(key) {
+				clearTimeout(chordTimer);
+				chord = null;
+				const f = selectedFailure();
+				if (!f) { toast("no failure selected"); return; }
+				const scope = key === "r" ? "this" : key === "a" ? "all" : key === "f" ? "failed" : null;
+				if (!scope) { toast("rerun cancelled"); return; }
+				rerun(f.journey, scope);
+			}
+
+			document.addEventListener("keydown", (e) => {
+				if (e.metaKey || e.ctrlKey || e.altKey) { return; }
+				const k = e.key;
+				if (k === "Escape") {
+					chord = null;
+					$("#help").style.display = "none";
+					$("#lightbox").style.display = "none";
+					$("#runner").style.display = "none";
+					closeZoom();
+					return;
+				}
+				if (chord === "r") { e.preventDefault(); resolveChord(k.toLowerCase()); return; }
+				if (k === "?") { e.preventDefault(); const h = $("#help"); h.style.display = h.style.display === "flex" ? "none" : "flex"; return; }
+				if (k >= "1" && k <= "9") {
+					const cfg = M.configs[Number(k) - 1];
+					if (cfg) { setConfig(cfg); }
+					return;
+				}
+				if (k === "[" || k === "]") {
+					const i = M.configs.indexOf(config);
+					setConfig(M.configs[(i + (k === "]" ? 1 : -1) + M.configs.length) % M.configs.length]);
+					return;
+				}
+				if (k === "j" || k === "ArrowDown") { e.preventDefault(); moveSelection(1); return; }
+				if (k === "k" || k === "ArrowUp") { e.preventDefault(); moveSelection(-1); return; }
+				if (k === "f") { fitView(); return; }
+				if (k === "u") { refresh("Reloaded from disk"); return; }
+				if (k === "z") { zoomed ? closeZoom() : openZoom(); return; }
+				if (k === "b") { rotatePane("baseline"); return; }
+				if (k === "n") { rotatePane("new"); return; }
+				if (k === "d") { rotatePane("diff"); return; }
+				if (k === " ") { e.preventDefault(); rotatePane(null); return; }
+				if (k === "0") { resetZoom(); return; }
+				if (k === "r") { e.preventDefault(); startChord("r"); return; }
+				if (k === "a" || k === "x") {
+					const f = selectedFailure();
+					if (!f) { toast("no failure selected"); return; }
+					if (k === "a" && !f.kinds.new) { toast("nothing to accept — this failure has no new capture"); return; }
+					act(k === "a" ? "accept" : "reject", f);
+				}
+			});
+
+			// ---------- server API ----------
+			async function api(action, body) {
+				try {
+					const res = await fetch("api/" + action, {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify(body),
+					});
+					if (!res.ok) { toast("Request failed: " + (await res.text())); return false; }
+					return true;
+				} catch (err) {
+					// A thrown fetch means the server is unreachable (a 4xx would have resolved above), so
+					// reflect that in the badge immediately rather than waiting for the next poll.
+					setServerMode(false);
+					toast("Request failed — is the review server still running? (" + err.message + ")");
+					return false;
+				}
+			}
+
+			// `resolvedLabel` (e.g. "passed on rerun") marks a refresh that cleared the current failure. When
+			// set and the failure is indeed gone, the view stays on that node with a green ✓ instead of
+			// snapping to whatever failure now occupies its old index — the user advances with j when ready.
+			async function refresh(message, resolvedLabel) {
+				const wasOn = selectedFailure();
+				try {
+					const res = await fetch("manifest.js", { cache: "no-store" });
+					if (!res.ok) { throw new Error("manifest returned " + res.status); }
+					new Function(await res.text())();
+					Object.assign(M, window.MANIFEST);
+				} catch (err) {
+					toast("Refresh failed (" + err.message + ") — press u to retry");
+					return;
+				}
+
+				const fails = currentFailures();
+				const clearedCurrent = resolvedLabel && wasOn && !fails.some((f) => failureKey(f) === failureKey(wasOn));
+				if (clearedCurrent) {
+					resolved = { container: wasOn.container, step: wasOn.step, journey: wasOn.journey, label: resolvedLabel };
+					selected = -1;
+				} else if (selected >= fails.length) {
+					selected = Math.max(0, fails.length - 1);
+				}
+				render();
+				if (zoomed) { if (selectedFailure()) { openZoom(); } else { closeZoom(); } }
+				if (message) { toast(message); }
+			}
+
+			// ---------- render ----------
+			function render() {
+				document.querySelectorAll("#config-seg button").forEach((b) => {
+					b.classList.toggle("active", b.dataset.config === config);
+					const fails = failureGroups(b.dataset.config).length;
+					const extra = filesFor(b.dataset.config).extraneous.length;
+					b.querySelectorAll(".badge").forEach((x) => x.remove());
+					if (fails > 0) {
+						const s = document.createElement("span");
+						s.className = "badge";
+						s.textContent = fails;
+						b.appendChild(s);
+					}
+					if (extra > 0) {
+						const s = document.createElement("span");
+						s.className = "badge extra";
+						s.textContent = extra;
+						b.appendChild(s);
+					}
+				});
+				const fails = currentFailures();
+				const status = $("#nav-status");
+				if (resolved) {
+					status.textContent = `✓ ${resolved.label} — ${fails.length} failure${fails.length === 1 ? "" : "s"} left`
+						+ (fails.length > 0 ? " · press j for next" : " 🎉");
+					status.style.color = "var(--ok)";
+				} else {
+					status.textContent = fails.length > 0
+						? `failure ${Math.min(selected + 1, fails.length)} / ${fails.length}`
+						: "no failures";
+					status.style.color = "var(--muted)";
+				}
+				const extraCount = filesFor(config).extraneous.length;
+				const del = $("#del-extra");
+				del.style.display = extraCount > 0 && serverMode ? "" : "none";
+				del.textContent = `Delete all extraneous (${extraCount})`;
+				const hint = $("#mode-hint");
+				const label = serverMode
+					? "review server connected"
+					: everServer
+						? "⚠ review server disconnected — retrying…"
+						: "static mode — run with <b>--review</b> to enable actions";
+				hint.innerHTML = label + `<span class="keyhint">? for help</span>`;
+				hint.style.color = serverMode ? "var(--muted)" : everServer ? "var(--fail)" : "var(--muted)";
+				renderGraph();
+			}
+
+			// The server can be stopped or restarted out from under the page, so keep the connected state
+			// honest by polling rather than checking only once. Re-render only when it actually flips, so
+			// a healthy connection costs nothing but a ping. A recovered server re-enables the actions.
+			function setServerMode(up) {
+				if (up) { everServer = true; }
+				if (up !== serverMode) {
+					serverMode = up;
+					render();
+				}
+			}
+			async function checkServer() {
+				try {
+					const res = await fetch("api/ping", { cache: "no-store" });
+					setServerMode(res.ok);
+				} catch {
+					setServerMode(false);
+				}
+			}
+
+			checkServer().finally(() => { render(); fitView(); });
+			setInterval(checkServer, 4000);
+		})();
+	</script>
+</body>
+
+</html>

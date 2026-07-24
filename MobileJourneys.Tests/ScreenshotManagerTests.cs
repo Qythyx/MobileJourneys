@@ -166,7 +166,7 @@ public sealed class ScreenshotManagerTests
 		var storage = new InMemoryScreenshotStorage();
 		var manager = new ScreenshotManager(storage);
 		var config = BuildConfig();
-		var key = new TestStep(config, "Journey", "01 Step");
+		var key = new TestStep(config, "Journey", "01 Step", "Journey");
 		var actual = new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0));
 
 		var result = manager.CompareWithBaselineAndDispose(actual, key, []);
@@ -183,7 +183,7 @@ public sealed class ScreenshotManagerTests
 		var storage = new InMemoryScreenshotStorage();
 		var manager = new ScreenshotManager(storage);
 		var config = BuildConfig();
-		var key = new TestStep(config, "Journey", "01 Step");
+		var key = new TestStep(config, "Journey", "01 Step", "Journey");
 
 		// Seed an existing baseline by running once with no baseline present.
 		_ = manager.CompareWithBaselineAndDispose(new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0)), key, []);
@@ -201,7 +201,7 @@ public sealed class ScreenshotManagerTests
 		var storage = new InMemoryScreenshotStorage();
 		var manager = new ScreenshotManager(storage);
 		var config = BuildConfig();
-		var key = new TestStep(config, "Journey", "01 Step");
+		var key = new TestStep(config, "Journey", "01 Step", "Journey");
 
 		// Seed a green baseline.
 		_ = manager.CompareWithBaselineAndDispose(new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0)), key, []);
@@ -222,7 +222,7 @@ public sealed class ScreenshotManagerTests
 		var storage = new InMemoryScreenshotStorage();
 		var manager = new ScreenshotManager(storage);
 		var config = BuildConfig();
-		var key = new TestStep(config, "Journey", "01 Step");
+		var key = new TestStep(config, "Journey", "01 Step", "Journey");
 
 		_ = manager.CompareWithBaselineAndDispose(new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0)), key, []);
 
@@ -235,8 +235,8 @@ public sealed class ScreenshotManagerTests
 		_ = storage
 			.ListAllFiles(config, "Journey")
 			.Should()
-			.BeEquivalentTo("01 Step.png", "01 Step.new.png", "01 Step_FAIL_different size.png");
-		_ = storage.ReadRaw(config, "Journey", "01 Step_FAIL_different size.png").Should().BeEmpty();
+			.BeEquivalentTo("01 Step.png", "01 Step [Journey].new.png", "01 Step [Journey]_FAIL_different size.png");
+		_ = storage.ReadRaw(config, "Journey", "01 Step [Journey]_FAIL_different size.png").Should().BeEmpty();
 	}
 
 	[Test]
@@ -245,7 +245,7 @@ public sealed class ScreenshotManagerTests
 		var storage = new InMemoryScreenshotStorage();
 		var manager = new ScreenshotManager(storage);
 		var config = BuildConfig();
-		var key = new TestStep(config, "Journey", "01 Step");
+		var key = new TestStep(config, "Journey", "01 Step", "Journey");
 
 		// Seed a baseline (green with a red stripe at x∈[20,40)) whose stored mask is a wide
 		// band x∈[10,40) — simulating a run where the dynamic element's content was wide.
@@ -268,7 +268,7 @@ public sealed class ScreenshotManagerTests
 		var storage = new InMemoryScreenshotStorage();
 		var manager = new ScreenshotManager(storage);
 		var config = BuildConfig();
-		var key = new TestStep(config, "Journey", "01 Step");
+		var key = new TestStep(config, "Journey", "01 Step", "Journey");
 
 		// Same scenario, but the baseline carries no stored mask (older baseline / no masking on
 		// the seeding run). Without a baseline mask to union, the narrow live mask can't cover the

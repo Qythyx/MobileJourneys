@@ -33,16 +33,33 @@ public sealed record JourneyDefinition(
 	/// </summary>
 	public string InitialName => InitialExpect[0].Label;
 
+	/// <summary>
+	/// Per-step screenshot container paths ('/'-separated, relative to the platform folder), one
+	/// entry per step including the initial screenshot. Set by <see cref="JourneyTree.Flatten"/>;
+	/// <c>null</c> stores every step under <see cref="Name"/> (the flat, single-folder layout).
+	/// </summary>
+	internal string[]? StepContainers { get; init; }
+
+	/// <summary>Returns the screenshot container path for a step.</summary>
+	/// <param name="stepNumber">1-based step number; 1 is the initial screenshot.</param>
+	internal string ContainerForStep(int stepNumber) => StepContainers?[stepNumber - 1] ?? Name;
+
+	/// <summary>The distinct screenshot container paths this journey's steps are stored under.</summary>
+	internal IEnumerable<string> Containers => StepContainers?.Distinct() ?? [Name];
+
 	/// <summary>Formats a baseline filename stem from a 1-based step number and a name.</summary>
 	public static string FormatStepName(int number, string name) => $"{number:D2} {name}";
 
-	/// <summary>Yields the baseline filename stems (without extension) for every step in this journey, in order.</summary>
-	public IEnumerable<string> ExpectedStepNames()
+	/// <summary>
+	/// Yields the container path and baseline filename stem (without extension) for every step in
+	/// this journey, in order.
+	/// </summary>
+	public IEnumerable<(string Container, string StepName)> ExpectedStepLocations()
 	{
-		yield return FormatStepName(1, InitialName);
+		yield return (ContainerForStep(1), FormatStepName(1, InitialName));
 		for (var i = 0; i < Steps.Length; i++)
 		{
-			yield return FormatStepName(i + 2, Steps[i].Name);
+			yield return (ContainerForStep(i + 2), FormatStepName(i + 2, Steps[i].Name));
 		}
 	}
 

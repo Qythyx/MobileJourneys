@@ -22,16 +22,30 @@ public sealed class ScreenshotManager(ScreenshotStorage storage)
 	/// </summary>
 	private const string SizeMismatchFailSuffix = "different size";
 
-	/// <summary>Captures a FAIL screenshot (taken when a step throws) at full resolution and persists it via <see cref="ScreenshotStorage.WriteFailScreenshot"/>.</summary>
-	/// <param name="driver">The Appium driver to capture from.</param>
+	/// <summary>
+	/// Persists an already-captured FAIL screenshot via <see cref="ScreenshotStorage.WriteFailScreenshot"/>.
+	/// The caller captures the image itself so it can do so the instant the step fails, before any
+	/// slower diagnostics run — otherwise a timing failure's evidence shows a screen that finished
+	/// rendering in the meantime, contradicting the failure it is supposed to document.
+	/// </summary>
 	/// <param name="testStep">Identifies the step the FAIL screenshot belongs to.</param>
 	/// <param name="suffix">Suffix appended after <c>_FAIL_</c> (e.g., <c>"CRASH"</c> or a sanitized exception message). The caller is responsible for sanitizing the suffix for filename use.</param>
+	/// <param name="pngBytes">The screenshot captured at the moment of failure; empty when the app was unreachable.</param>
+	/// <param name="details">Full failure text stored in the image's metadata, so the viewer can show
+	/// the whole message rather than the truncated, sanitized version the filename can hold.</param>
 	/// <returns>Display path to the saved file (suitable for log messages).</returns>
-	public string CaptureFailScreenshot(AppiumDriver driver, TestStep testStep, string suffix)
+	public string WriteFailScreenshot(TestStep testStep, string suffix, byte[] pngBytes, string details)
 	{
-		using var image = Image.Load<Rgb24>(driver.GetScreenshot().AsByteArray);
+		if (pngBytes.Length == 0)
+		{
+			storage.WriteFailScreenshot(testStep, suffix, pngBytes);
+			return storage.GetReportPath(testStep);
+		}
+
+		using var image = Image.Load<Rgb24>(pngBytes);
+		ImageHelpers.SetFailureDetails(image, details);
 		storage.WriteFailScreenshot(testStep, suffix, ToPngBytes(image));
-		return storage.GetReportPath(testStep.Config, testStep.JourneyName);
+		return storage.GetReportPath(testStep);
 	}
 
 	/// <summary>
@@ -64,7 +78,7 @@ public sealed class ScreenshotManager(ScreenshotStorage storage)
 			{
 				storage.WriteNewScreenshot(testStep, ToPngBytes(actual));
 				storage.WriteFailScreenshot(testStep, SizeMismatchFailSuffix, []);
-				return new(false, 100, storage.GetReportPath(testStep.Config, testStep.JourneyName));
+				return new(false, 100, storage.GetReportPath(testStep));
 			}
 
 			// The live mask comes from the actual image; union it with the baseline's own mask
@@ -107,11 +121,7 @@ public sealed class ScreenshotManager(ScreenshotStorage storage)
 				storage.WriteDiffImage(testStep, diff.PixelErrorPercentage, ToPngBytes((Image<Rgb24>)diffImage));
 			}
 
-			return new(
-				passed,
-				diff.PixelErrorPercentage,
-				passed ? null : storage.GetReportPath(testStep.Config, testStep.JourneyName)
-			);
+			return new(passed, diff.PixelErrorPercentage, passed ? null : storage.GetReportPath(testStep));
 		}
 	}
 

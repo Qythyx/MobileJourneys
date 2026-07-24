@@ -23,6 +23,13 @@ public sealed record FrameworkConfig(
 )
 {
 	/// <summary>
+	/// The journey definitions to discover and execute. Validated at construction to have
+	/// distinct names — journey names key test identity, artifact attribution, and (for
+	/// tree-defined journeys) the screenshot folder layout.
+	/// </summary>
+	public IReadOnlyList<JourneyDefinition> Journeys { get; } = EnsureDistinctNames(Journeys);
+
+	/// <summary>
 	/// Optional storage backend for screenshots and journey artifacts. Defaults to a
 	/// <see cref="FilesystemScreenshotStorage"/> rooted at the consumer test project's
 	/// <c>Screenshots/</c> directory when <c>null</c>.
@@ -30,6 +37,20 @@ public sealed record FrameworkConfig(
 	// public ScreenshotStorage Storage => field ??= storage ?? FilesystemScreenshotStorage.Default();
 	public ScreenshotStorage Storage { get; init; } = FilesystemScreenshotStorage.Default();
 
-	public List<string> FindExtraneous(FrameworkConfig config, bool deleteExtraneous) =>
-		Storage.FindExtraneous(config, (journey) => journey.ExpectedStepNames(), deleteExtraneous);
+	/// <summary>
+	/// Finds screenshot files no journey references — see <see cref="ScreenshotStorage.FindExtraneous"/>.
+	/// </summary>
+	/// <param name="deleteExtraneous">When <c>true</c>, deletes the extraneous files after collecting them.</param>
+	public List<string> FindExtraneous(bool deleteExtraneous) => Storage.FindExtraneous(this, deleteExtraneous);
+
+	private static IReadOnlyList<JourneyDefinition> EnsureDistinctNames(IReadOnlyList<JourneyDefinition> journeys)
+	{
+		var duplicates = journeys.GroupBy(j => j.Name).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+		return duplicates.Count == 0
+			? journeys
+			: throw new ArgumentException(
+				$"Journey names must be unique; duplicates: {string.Join(", ", duplicates)}.",
+				nameof(journeys)
+			);
+	}
 }

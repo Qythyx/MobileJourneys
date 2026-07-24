@@ -86,6 +86,63 @@ public sealed class TestDriver(
 	{
 		Config.TerminateApp(App);
 		Config.LaunchApp(App, environment);
+		WaitUntilAppIsSettled();
+	}
+
+	/// <summary>
+	/// Blocks until the freshly launched app is in the foreground and its accessibility tree has
+	/// stopped changing, or until a fixed timeout elapses. Without this, a slow cold start spends the
+	/// first expectation's timeout budget rather than the launch's, so a launch that is merely slow
+	/// reads as an element that is missing.
+	/// </summary>
+	private void WaitUntilAppIsSettled()
+	{
+		const int SettleTimeoutMs = 30000;
+		const int PollIntervalMs = 250;
+		const long ForegroundState = 4;
+
+		var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+		string? previousTree = null;
+		while (stopwatch.ElapsedMilliseconds < SettleTimeoutMs)
+		{
+			try
+			{
+				if (Config.QueryAppState(App) == ForegroundState)
+				{
+					// Two identical reads mean the UI has stopped rebuilding (splash → content).
+					var tree = App.PageSource;
+					if (tree == previousTree)
+					{
+						return;
+					}
+
+					previousTree = tree;
+				}
+			}
+			catch (WebDriverException)
+			{
+				// The app or its accessibility tree is not queryable yet; keep waiting.
+				previousTree = null;
+			}
+
+			Task.Delay(PollIntervalMs).Wait();
+		}
+	}
+
+	/// <summary>
+	/// Captures a screenshot for failure diagnostics, returning an empty array when the app is
+	/// unreachable (a crash, or a session that has already gone away).
+	/// </summary>
+	public byte[] TryCaptureScreenshot()
+	{
+		try
+		{
+			return App.GetScreenshot().AsByteArray;
+		}
+		catch (Exception ex) when (ex is WebDriverException or InvalidOperationException)
+		{
+			return [];
+		}
 	}
 
 	/// <summary>Polls until the element with the given AutomationId is no longer present or the timeout elapses.</summary>
@@ -203,8 +260,7 @@ public sealed class TestDriver(
 	/// then compares the stable screenshot against a baseline image.
 	/// </summary>
 	/// <param name="action">The test action to run.</param>
-	/// <param name="journeyName">Subfolder within the screenshots directory.</param>
-	/// <param name="stepName">Baseline filename (without extension).</param>
+	/// <param name="testStep">Identifies the step whose baseline the stable screenshot is compared against.</param>
 	/// <param name="maskElementIds">AutomationIds of elements to exclude from stability polling and baseline comparison.</param>
 	/// <param name="prefetchMasks"><c>true</c> to query the mask element IDs before running the
 	/// test action. This is useful if the action will cause the elements to become unavailable
@@ -212,8 +268,7 @@ public sealed class TestDriver(
 	/// <exception cref="TimeoutException">Thrown when the screen does not stabilize within a fixed amount of time.</exception>
 	public ScreenshotComparisonResult DoActionAndCompareWithBaseline(
 		Action action,
-		string journeyName,
-		string stepName,
+		TestStep testStep,
 		string[] maskElementIds,
 		bool prefetchMasks
 	)
@@ -243,11 +298,7 @@ public sealed class TestDriver(
 		if (_screenshotPngBytes is not null)
 		{
 			_screenshotPngBytes = null;
-			return screenshotManager.CompareWithBaselineAndDispose(
-				previousImage,
-				new(Config, journeyName, stepName),
-				maskRegions
-			);
+			return screenshotManager.CompareWithBaselineAndDispose(previousImage, testStep, maskRegions);
 		}
 
 		const int MaxWaitMs = 5000;
@@ -269,11 +320,7 @@ public sealed class TestDriver(
 			if (ImageHelpers.AreImagesEqual(screenshot, previousImage, maskRegions))
 			{
 				previousImage.Dispose();
-				return screenshotManager.CompareWithBaselineAndDispose(
-					screenshot,
-					new(Config, journeyName, stepName),
-					maskRegions
-				);
+				return screenshotManager.CompareWithBaselineAndDispose(screenshot, testStep, maskRegions);
 			}
 
 			previousImage.Dispose();

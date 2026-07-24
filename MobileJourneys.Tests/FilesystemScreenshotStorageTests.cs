@@ -35,7 +35,7 @@ public sealed class FilesystemScreenshotStorageTests
 		}
 	}
 
-	private TestStep K(string journey, string step) => new(_config, journey, step);
+	private TestStep K(string journey, string step) => new(_config, journey, step, journey);
 
 	private static JourneyDefinition J(string name) =>
 		new(new TestJourneyEnvironment(), [new TestExpectation()], [], [], name);
@@ -71,11 +71,19 @@ public sealed class FilesystemScreenshotStorageTests
 	}
 
 	[Test]
-	public void WriteNewScreenshotProducesDotNewPng()
+	public void WriteBaselineNestsContainerPathSegments()
+	{
+		_storage.WriteBaseline(new(_config, "Home/Menu", "02 Step", "About"), [0]);
+
+		_ = File.Exists(Path.Combine(_tempRoot, _config.DisplayName, "Home", "Menu", "02 Step.png")).Should().BeTrue();
+	}
+
+	[Test]
+	public void WriteNewScreenshotProducesAttributedDotNewPng()
 	{
 		_storage.WriteNewScreenshot(K("Journey", "01 Step"), [0]);
 
-		_ = File.Exists(FilePath("Journey", "01 Step.new.png")).Should().BeTrue();
+		_ = File.Exists(FilePath("Journey", "01 Step [Journey].new.png")).Should().BeTrue();
 	}
 
 	[Test]
@@ -83,7 +91,7 @@ public sealed class FilesystemScreenshotStorageTests
 	{
 		_storage.WriteDiffImage(K("Journey", "01 Step"), pixelErrorPercentage: 5.123, [0]);
 
-		_ = File.Exists(FilePath("Journey", "01 Step_diff_5.123%.png")).Should().BeTrue();
+		_ = File.Exists(FilePath("Journey", "01 Step [Journey]_diff_5.123%.png")).Should().BeTrue();
 	}
 
 	[Test]
@@ -91,7 +99,7 @@ public sealed class FilesystemScreenshotStorageTests
 	{
 		_storage.WriteFailScreenshot(K("Journey", "01 Step"), suffix: "CRASH", [0]);
 
-		_ = File.Exists(FilePath("Journey", "01 Step_FAIL_CRASH.png")).Should().BeTrue();
+		_ = File.Exists(FilePath("Journey", "01 Step [Journey]_FAIL_CRASH.png")).Should().BeTrue();
 	}
 
 	[Test]
@@ -99,7 +107,7 @@ public sealed class FilesystemScreenshotStorageTests
 	{
 		_storage.WriteCrashLog(K("Journey", "01 Step"), "stack trace here");
 
-		_ = File.ReadAllText(FilePath("Journey", "01 Step.CRASH.txt")).Should().Be("stack trace here");
+		_ = File.ReadAllText(FilePath("Journey", "01 Step [Journey].CRASH.txt")).Should().Be("stack trace here");
 	}
 
 	[Test]
@@ -131,8 +139,23 @@ public sealed class FilesystemScreenshotStorageTests
 		_storage.DeleteFailureArtifactsForStep(K("Journey", "01 Step"));
 
 		_ = File.Exists(FilePath("Journey", "01 Step.png")).Should().BeTrue();
-		_ = File.Exists(FilePath("Journey", "01 Step.new.png")).Should().BeFalse();
-		_ = File.Exists(FilePath("Journey", "02 Other.new.png")).Should().BeTrue();
+		_ = File.Exists(FilePath("Journey", "01 Step [Journey].new.png")).Should().BeFalse();
+		_ = File.Exists(FilePath("Journey", "02 Other [Journey].new.png")).Should().BeTrue();
+	}
+
+	[Test]
+	public void DeleteFailureArtifactsForStepLeavesOtherJourneysArtifactsInSharedContainer()
+	{
+		var aboutStep = new TestStep(_config, "Home/Menu", "02 Step", "About");
+		var contactStep = new TestStep(_config, "Home/Menu", "02 Step", "ContactUs");
+		_storage.WriteNewScreenshot(aboutStep, [0]);
+		_storage.WriteNewScreenshot(contactStep, [0]);
+
+		_storage.DeleteFailureArtifactsForStep(aboutStep);
+
+		var sharedDir = Path.Combine(_tempRoot, _config.DisplayName, "Home", "Menu");
+		_ = File.Exists(Path.Combine(sharedDir, "02 Step [About].new.png")).Should().BeFalse();
+		_ = File.Exists(Path.Combine(sharedDir, "02 Step [ContactUs].new.png")).Should().BeTrue();
 	}
 
 	[Test]
@@ -145,8 +168,8 @@ public sealed class FilesystemScreenshotStorageTests
 		_storage.DeleteAllFailureArtifacts(_config, J("Journey"));
 
 		_ = File.Exists(FilePath("Journey", "01 Step.png")).Should().BeTrue();
-		_ = File.Exists(FilePath("Journey", "01 Step.new.png")).Should().BeFalse();
-		_ = File.Exists(FilePath("Journey", "01 Step.CRASH.txt")).Should().BeFalse();
+		_ = File.Exists(FilePath("Journey", "01 Step [Journey].new.png")).Should().BeFalse();
+		_ = File.Exists(FilePath("Journey", "01 Step [Journey].CRASH.txt")).Should().BeFalse();
 	}
 
 	[Test]

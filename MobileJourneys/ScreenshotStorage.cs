@@ -1,14 +1,20 @@
 namespace MobileJourneys;
 
 /// <summary>
-/// Persistence layer for screenshot baselines and journey artifacts (failure
-/// screenshots, diff images, crash logs). Step-scoped operations identify their
-/// target via <see cref="TestStep"/>. Backends own the filename layout — the
-/// extension/suffix for baselines, "new" captures, diff images, FAIL screenshots,
-/// and crash logs is internal to the implementation and not part of this contract.
+/// Persistence layer for screenshot baselines and journey artifacts (failure screenshots,
+/// diff images, crash logs). Step-scoped operations identify their target via
+/// <see cref="TestStep"/>, whose container path locates the step's folder — the journey's
+/// own folder for flat journeys, a shared node path for tree-defined journeys. Failure
+/// artifacts are attributed to the journey that produced them, so several journeys can
+/// fail on a shared step without clobbering each other's evidence.
 /// </summary>
 public abstract class ScreenshotStorage
 {
+	/// <summary>A stored file, identified by its container path and filename.</summary>
+	/// <param name="Container">'/'-separated container path relative to the platform folder.</param>
+	/// <param name="FileName">Filename within the container.</param>
+	protected sealed record StoredFile(string Container, string FileName);
+
 	/// <summary>Returns <c>true</c> if a baseline exists for the given step.</summary>
 	internal abstract bool BaselineExists(TestStep testStep);
 
@@ -22,6 +28,9 @@ public abstract class ScreenshotStorage
 	/// <summary>Writes the "actual" PNG captured during a baseline mismatch (the <c>.new</c> companion).</summary>
 	internal abstract void WriteNewScreenshot(TestStep testStep, byte[] pngBytes);
 
+	/// <summary>Reads the bytes of a step's <c>.new</c> capture, or <c>null</c> when none exists.</summary>
+	internal abstract byte[]? ReadNewScreenshot(TestStep testStep);
+
 	/// <summary>Writes the diff visualization image for a baseline mismatch, tagged with the pixel-error percentage.</summary>
 	internal abstract void WriteDiffImage(TestStep testStep, double pixelErrorPercentage, byte[] pngBytes);
 
@@ -31,109 +40,91 @@ public abstract class ScreenshotStorage
 	/// <summary>Writes a UTF-8 crash-log artifact for a step.</summary>
 	internal abstract void WriteCrashLog(TestStep testStep, string content);
 
-	/// <summary>Lists the journey container names that exist for the platform. Empty when the platform container is missing. The returned list is a snapshot — safe to mutate the storage during enumeration.</summary>
-	protected abstract IReadOnlyList<string> ListJourneysInStorage(PlatformConfig config);
+	/// <summary>Lists every stored file under the platform, recursively. Excludes dotfiles. Empty when the platform container is missing. The returned list is a snapshot — safe to mutate the storage during enumeration.</summary>
+	protected abstract IReadOnlyList<StoredFile> ListFiles(PlatformConfig config);
 
-	/// <summary>Lists the step names (prefix without extension) for which a baseline exists. Excludes failure artifacts and dotfiles. Empty when the journey is missing.</summary>
-	protected abstract IReadOnlyList<string> ListBaselineStepNames(PlatformConfig config, string journeyName);
-
-	/// <summary>Returns <c>true</c> when the journey contains any failure artifact (new/diff/FAIL screenshot, or crash log).</summary>
+	/// <summary>Returns <c>true</c> when any of the journey's containers holds a failure artifact attributed to it.</summary>
 	internal abstract bool HasFailureArtifacts(PlatformConfig config, JourneyDefinition journey);
 
-	/// <summary>Deletes every failure artifact associated with one step (matched by step-name prefix). No-op when the journey is missing.</summary>
+	/// <summary>Deletes every failure artifact one step's journey produced for it. No-op when the container is missing.</summary>
 	internal abstract void DeleteFailureArtifactsForStep(TestStep testStep);
 
-	/// <summary>Deletes every failure artifact in the journey, leaving baselines intact. No-op when the journey is missing.</summary>
+	/// <summary>Deletes every failure artifact attributed to the journey, leaving baselines intact. No-op when the journey's containers are missing.</summary>
 	internal abstract void DeleteAllFailureArtifacts(PlatformConfig config, JourneyDefinition journey);
 
-	/// <summary>Deletes the baseline for a step. No-op when the file or journey is missing.</summary>
-	protected abstract void DeleteBaseline(TestStep testStep);
+	/// <summary>Deletes one stored file. No-op when missing.</summary>
+	protected abstract void DeleteFile(PlatformConfig config, StoredFile file);
 
-	/// <summary>Deletes the journey container and everything in it. No-op when missing.</summary>
-	protected abstract void DeleteJourney(PlatformConfig config, string journeyName);
+	/// <summary>Deletes containers left without any files, recursively. The platform container itself is kept.</summary>
+	protected abstract void DeleteEmptyContainers(PlatformConfig config);
 
-	/// <summary>Deletes the journey container only when it has no files.</summary>
-	protected abstract void DeleteJourneyIfEmpty(PlatformConfig config, string journeyName);
+	/// <summary>Returns a display string identifying a step's container (used in failure messages).</summary>
+	public virtual string GetReportPath(TestStep testStep) => $"{testStep.Config.DisplayName}/{testStep.Container}/";
 
-	/// <summary>Returns a display string identifying a journey container (used in failure messages and the extraneous-files report).</summary>
-	public virtual string GetReportPath(PlatformConfig config, string journeyName) =>
-		$"{config.DisplayName}/{journeyName}/";
-
-	/// <summary>Returns a display string identifying a single step's baseline (used in the extraneous-files report).</summary>
-	protected virtual string GetReportPath(TestStep testStep) =>
-		$"{testStep.Config.DisplayName}/{testStep.JourneyName}/{testStep.StepName}.png";
+	/// <summary>Returns a display string identifying a single stored file (used in the extraneous-files report).</summary>
+	protected virtual string GetReportPath(PlatformConfig config, StoredFile file) =>
+		$"{config.DisplayName}/{file.Container}/{file.FileName}";
 
 	/// <summary>
-	/// Finds journey containers and baselines that aren't expected by <paramref name="config"/>.
-	/// The expected baseline names per journey are produced by <paramref name="stepNamesOf"/>.
+	/// Finds stored files that no journey in <paramref name="config"/> references: baselines
+	/// without a matching step, and failure artifacts whose step or journey no longer exists.
 	/// </summary>
 	/// <param name="config">Framework configuration providing the platform and journey lists.</param>
-	/// <param name="stepNamesOf">Returns the expected step names (without extension) for a given journey.</param>
-	/// <param name="deleteExtraneous">When <c>true</c>, deletes the extraneous baselines and
-	/// empty journey containers after collecting them.</param>
+	/// <param name="deleteExtraneous">When <c>true</c>, deletes the extraneous files and any
+	/// containers left empty after collecting them.</param>
 	/// <returns>Display paths suitable for the user-facing extraneous-files report.</returns>
-	internal List<string> FindExtraneous(
-		FrameworkConfig config,
-		Func<JourneyDefinition, IEnumerable<string>> stepNamesOf,
-		bool deleteExtraneous
-	)
+	internal List<string> FindExtraneous(FrameworkConfig config, bool deleteExtraneous)
 	{
-		var expectedSteps = config
-			.PlatformConfigs.SelectMany(p =>
-				config.Journeys.SelectMany(j => stepNamesOf(j).Select(name => new TestStep(p, j.Name, name)))
-			)
-			.ToHashSet();
-		var expectedJourneys = expectedSteps.Select(s => (s.Config, s.JourneyName)).ToHashSet();
-
-		var extraneousJourneys = new List<(PlatformConfig Platform, string JourneyName)>();
-		var extraneousBaselines = new List<TestStep>();
-
+		var expected = new ExpectedScreenshots(config.Journeys);
+		var extraneous = new List<(PlatformConfig Platform, StoredFile File)>();
 		foreach (var platform in config.PlatformConfigs)
 		{
-			foreach (var journeyName in ListJourneysInStorage(platform))
-			{
-				if (!expectedJourneys.Contains((platform, journeyName)))
-				{
-					extraneousJourneys.Add((platform, journeyName));
-					continue;
-				}
-
-				foreach (var stepName in ListBaselineStepNames(platform, journeyName))
-				{
-					var step = new TestStep(platform, journeyName, stepName);
-					if (!expectedSteps.Contains(step))
-					{
-						extraneousBaselines.Add(step);
-					}
-				}
-			}
+			extraneous.AddRange(
+				ListFiles(platform)
+					.Where(file => !expected.IsExpected(file.Container, file.FileName))
+					.Select(file => (platform, file))
+			);
 		}
 
 		if (deleteExtraneous)
 		{
-			foreach (var (platform, journeyName) in extraneousJourneys)
+			foreach (var (platform, file) in extraneous)
 			{
-				DeleteJourney(platform, journeyName);
-			}
-
-			foreach (var step in extraneousBaselines)
-			{
-				DeleteBaseline(step);
+				DeleteFile(platform, file);
 			}
 
 			foreach (var platform in config.PlatformConfigs)
 			{
-				foreach (var journeyName in ListJourneysInStorage(platform))
-				{
-					DeleteJourneyIfEmpty(platform, journeyName);
-				}
+				DeleteEmptyContainers(platform);
 			}
 		}
 
-		return
-		[
-			.. extraneousJourneys.Select(j => GetReportPath(j.Platform, j.JourneyName)),
-			.. extraneousBaselines.Select(GetReportPath),
-		];
+		return [.. extraneous.Select(e => GetReportPath(e.Platform, e.File)).Order(StringComparer.Ordinal)];
 	}
+
+	/// <summary>Lists every stored file under the platform as (container, filename) pairs — see <see cref="ListFiles"/>.</summary>
+	internal IReadOnlyList<(string Container, string FileName)> ListStoredFiles(PlatformConfig config) =>
+		[.. ListFiles(config).Select(f => (f.Container, f.FileName))];
+
+	/// <summary>Deletes one stored file identified by container path and filename. No-op when missing.</summary>
+	internal void DeleteStoredFile(PlatformConfig config, string container, string fileName) =>
+		DeleteFile(config, new(container, fileName));
+
+	/// <summary>Deletes containers left without any files — see <see cref="DeleteEmptyContainers"/>.</summary>
+	internal void CleanupEmptyContainers(PlatformConfig config) => DeleteEmptyContainers(config);
+
+	/// <summary>Reads the raw bytes of one stored file, or <c>null</c> when it does not exist.</summary>
+	/// <param name="config">Platform fixture the file belongs to.</param>
+	/// <param name="container">'/'-separated container path relative to the platform folder.</param>
+	/// <param name="fileName">Filename within the container.</param>
+	internal abstract byte[]? ReadFile(PlatformConfig config, string container, string fileName);
+
+	/// <summary>
+	/// A token that changes whenever the file's contents change and is stable while they don't,
+	/// used to build cache-busting image URLs for the viewer. Empty when the file is missing.
+	/// </summary>
+	/// <param name="config">Platform fixture the file belongs to.</param>
+	/// <param name="container">'/'-separated container path relative to the platform folder.</param>
+	/// <param name="fileName">Filename within the container.</param>
+	internal abstract string FileVersion(PlatformConfig config, string container, string fileName);
 }

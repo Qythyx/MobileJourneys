@@ -21,7 +21,7 @@ public sealed class InMemoryScreenshotStorageTests
 		_config = new("26.2", "iPhone", IsLightTheme: true, "com.example.app", "/unused");
 	}
 
-	private TestStep K(string journey, string step) => new(_config, journey, step);
+	private TestStep K(string journey, string step) => new(_config, journey, step, journey);
 
 	private static JourneyDefinition J(string name) =>
 		new(new TestJourneyEnvironment(), [new TestExpectation()], [], [], name);
@@ -73,7 +73,7 @@ public sealed class InMemoryScreenshotStorageTests
 		_storage.WriteDiffImage(K("Journey", "01 Step"), pixelErrorPercentage: 5.123, [0]);
 
 		_ = _storage.DiffImageExists(K("Journey", "01 Step")).Should().BeTrue();
-		_ = _storage.ListAllFiles(_config, "Journey").Should().Contain("01 Step_diff_5.123%.png");
+		_ = _storage.ListAllFiles(_config, "Journey").Should().Contain("01 Step [Journey]_diff_5.123%.png");
 	}
 
 	[Test]
@@ -82,7 +82,7 @@ public sealed class InMemoryScreenshotStorageTests
 		_storage.WriteFailScreenshot(K("Journey", "01 Step"), suffix: "CRASH", [0]);
 
 		_ = _storage.FailScreenshotExists(K("Journey", "01 Step")).Should().BeTrue();
-		_ = _storage.ListAllFiles(_config, "Journey").Should().Contain("01 Step_FAIL_CRASH.png");
+		_ = _storage.ListAllFiles(_config, "Journey").Should().Contain("01 Step [Journey]_FAIL_CRASH.png");
 	}
 
 	[Test]
@@ -92,7 +92,7 @@ public sealed class InMemoryScreenshotStorageTests
 
 		_ = _storage.CrashLogExists(K("Journey", "01 Step")).Should().BeTrue();
 		_ = _storage
-			.ReadRaw(_config, "Journey", "01 Step.CRASH.txt")
+			.ReadRaw(_config, "Journey", "01 Step [Journey].CRASH.txt")
 			.Should()
 			.BeEquivalentTo("hello world"u8.ToArray());
 	}
@@ -164,5 +164,16 @@ public sealed class InMemoryScreenshotStorageTests
 		_storage.DeleteAllFailureArtifacts(_config, J("Journey"));
 
 		_ = _storage.ListAllFiles(_config, "Journey").Should().BeEquivalentTo(["01 Step.png", "02 Step.png"]);
+	}
+
+	[Test]
+	public void HasFailureArtifactsDistinguishesJourneysSharingAContainer()
+	{
+		var aboutJourney = J("About") with { StepContainers = ["Home/Menu"] };
+		var contactJourney = J("ContactUs") with { StepContainers = ["Home/Menu"] };
+		_storage.WriteNewScreenshot(new(_config, "Home/Menu", "02 Step", "About"), [0]);
+
+		_ = _storage.HasFailureArtifacts(_config, aboutJourney).Should().BeTrue();
+		_ = _storage.HasFailureArtifacts(_config, contactJourney).Should().BeFalse();
 	}
 }

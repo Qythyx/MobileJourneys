@@ -24,6 +24,9 @@ public sealed class CommandLineProvider(FrameworkConfig config) : ICommandLineOp
 	/// <summary>The CLI flag name for deleting orphaned screenshot baselines.</summary>
 	public const string DeleteExtraneousOption = "delete-extraneous";
 
+	/// <summary>The CLI flag name for serving the screenshot viewer with review actions enabled.</summary>
+	public const string ReviewOption = "review";
+
 	/// <inheritdoc/>
 	public string Uid => $"{TestAssembly.Name}.CommandLine";
 
@@ -63,6 +66,12 @@ public sealed class CommandLineProvider(FrameworkConfig config) : ICommandLineOp
 			new(
 				DeleteExtraneousOption,
 				"Delete screenshot files/folders not referenced by any current journey, then exit without running tests.",
+				ArgumentArity.Zero,
+				isHidden: false
+			),
+			new(
+				ReviewOption,
+				"Serve the screenshot viewer on a local port with Accept/Reject/Delete actions enabled, instead of running tests.",
 				ArgumentArity.Zero,
 				isHidden: false
 			),

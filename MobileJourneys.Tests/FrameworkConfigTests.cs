@@ -22,6 +22,18 @@ public sealed class FrameworkConfigTests
 	}
 
 	[Test]
+	public void FrameworkConfigThrowsOnDuplicateJourneyNames()
+	{
+		var platform = new IosPlatformConfig("26.2", "iPhone", true, "com.example.app", "/path/app");
+		var journeyA = new JourneyDefinition(new TestEnv(), [new TestExpectation()], [], [], "Dup");
+		var journeyB = new JourneyDefinition(new TestEnv(), [new TestExpectation()], [], [], "Dup");
+
+		var ctor = () => _ = new FrameworkConfig("D", "D", "Foo", "scheme", [platform], [journeyA, journeyB]);
+
+		_ = ctor.Should().Throw<ArgumentException>().WithMessage("*unique*Dup*");
+	}
+
+	[Test]
 	public void JourneyDefinitionThrowsWhenInitialExpectIsEmpty()
 	{
 		var ctor = () => _ = new JourneyDefinition(new TestEnv(), [], [], [], "j");

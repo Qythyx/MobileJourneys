@@ -4,19 +4,13 @@ namespace MobileJourneys;
 
 /// <summary>
 /// Default <see cref="ScreenshotStorage"/> implementation that persists artifacts under
-/// the consumer's <c>Screenshots/</c> directory on disk.
+/// the consumer's <c>Screenshots/</c> directory on disk. Container paths map to nested
+/// directories, so tree-defined journeys store shared steps once in a folder hierarchy
+/// mirroring the tree.
 /// </summary>
 /// <param name="rootDir">Absolute path to the screenshots root (e.g., <c>&lt;project&gt;/Screenshots</c>).</param>
 internal sealed class FilesystemScreenshotStorage(string rootDir) : ScreenshotStorage
 {
-	private const string BaselineExtension = ".png";
-	private const string NewSuffix = ".new.png";
-	private const string DiffPrefix = "_diff_";
-	private const string DiffExtension = ".png";
-	private const string FailPrefix = "_FAIL_";
-	private const string FailExtension = ".png";
-	private const string CrashLogExtension = ".CRASH.txt";
-
 	/// <summary>The screenshots root directory this instance writes under.</summary>
 	internal string RootDir { get; } = rootDir;
 
@@ -32,69 +26,72 @@ internal sealed class FilesystemScreenshotStorage(string rootDir) : ScreenshotSt
 
 	/// <inheritdoc/>
 	internal override void WriteBaseline(TestStep testStep, byte[] pngBytes) =>
-		WriteBytes(testStep.Config, testStep.JourneyName, testStep.StepName + BaselineExtension, pngBytes);
+		WriteBytes(testStep, ArtifactNaming.BaselineFileName(testStep), pngBytes);
 
 	/// <inheritdoc/>
 	internal override void WriteNewScreenshot(TestStep testStep, byte[] pngBytes) =>
-		WriteBytes(testStep.Config, testStep.JourneyName, testStep.StepName + NewSuffix, pngBytes);
+		WriteBytes(testStep, ArtifactNaming.NewFileName(testStep), pngBytes);
+
+	/// <inheritdoc/>
+	internal override byte[]? ReadNewScreenshot(TestStep testStep)
+	{
+		var path = Path.Combine(
+			ContainerDir(testStep.Config, testStep.Container),
+			ArtifactNaming.NewFileName(testStep)
+		);
+		return File.Exists(path) ? File.ReadAllBytes(path) : null;
+	}
 
 	/// <inheritdoc/>
 	internal override void WriteDiffImage(TestStep testStep, double pixelErrorPercentage, byte[] pngBytes) =>
-		WriteBytes(
-			testStep.Config,
-			testStep.JourneyName,
-			DiffFileName(testStep.StepName, pixelErrorPercentage),
-			pngBytes
-		);
+		WriteBytes(testStep, ArtifactNaming.DiffFileName(testStep, pixelErrorPercentage), pngBytes);
 
 	/// <inheritdoc/>
 	internal override void WriteFailScreenshot(TestStep testStep, string suffix, byte[] pngBytes) =>
-		WriteBytes(testStep.Config, testStep.JourneyName, FailFileName(testStep.StepName, suffix), pngBytes);
+		WriteBytes(testStep, ArtifactNaming.FailFileName(testStep, suffix), pngBytes);
 
 	/// <inheritdoc/>
 	internal override void WriteCrashLog(TestStep testStep, string content)
 	{
-		var dir = JourneyDir(testStep.Config, testStep.JourneyName);
+		var dir = ContainerDir(testStep.Config, testStep.Container);
 		_ = Directory.CreateDirectory(dir);
-		File.WriteAllText(Path.Combine(dir, testStep.StepName + CrashLogExtension), content);
+		File.WriteAllText(Path.Combine(dir, ArtifactNaming.CrashLogFileName(testStep)), content);
 	}
 
 	/// <inheritdoc/>
-	protected override IReadOnlyList<string> ListJourneysInStorage(PlatformConfig config)
+	protected override IReadOnlyList<StoredFile> ListFiles(PlatformConfig config)
 	{
 		var platformDir = PlatformDir(config);
-		return Directory.Exists(platformDir)
-			? [.. Directory.GetDirectories(platformDir).Select(Path.GetFileName).Where(n => n is not null)!]
-			: [];
-	}
-
-	/// <inheritdoc/>
-	protected override IReadOnlyList<string> ListBaselineStepNames(PlatformConfig config, string journeyName)
-	{
-		var dir = JourneyDir(config, journeyName);
-		return Directory.Exists(dir)
-			?
+		return !Directory.Exists(platformDir)
+			? []
+			:
 			[
 				.. Directory
-					.GetFiles(dir, "*" + BaselineExtension)
-					.Select(Path.GetFileName)
-					.Where(n => n is not null && IsBaselineFileName(n))
-					.Select(n => n![..^BaselineExtension.Length]),
-			]
-			: [];
+					.EnumerateFiles(platformDir, "*", SearchOption.AllDirectories)
+					.Select(path => new StoredFile(
+						Path.GetRelativePath(platformDir, Path.GetDirectoryName(path)!)
+							.Replace(Path.DirectorySeparatorChar, '/'),
+						Path.GetFileName(path)
+					))
+					.Where(f => !f.FileName.StartsWith('.')),
+			];
 	}
 
 	/// <inheritdoc/>
-	internal override bool HasFailureArtifacts(PlatformConfig config, JourneyDefinition journey)
-	{
-		var dir = JourneyDir(config, journey.Name);
-		return Directory.Exists(dir) && Directory.EnumerateFiles(dir).Any(p => IsFailureArtifact(Path.GetFileName(p)));
-	}
+	internal override bool HasFailureArtifacts(PlatformConfig config, JourneyDefinition journey) =>
+		journey.Containers.Any(container =>
+		{
+			var dir = ContainerDir(config, container);
+			return Directory.Exists(dir)
+				&& Directory
+					.EnumerateFiles(dir)
+					.Any(p => ArtifactNaming.IsFailureArtifactForJourney(Path.GetFileName(p), journey.Name));
+		});
 
 	/// <inheritdoc/>
 	internal override void DeleteFailureArtifactsForStep(TestStep testStep)
 	{
-		var dir = JourneyDir(testStep.Config, testStep.JourneyName);
+		var dir = ContainerDir(testStep.Config, testStep.Container);
 		if (!Directory.Exists(dir))
 		{
 			return;
@@ -102,8 +99,9 @@ internal sealed class FilesystemScreenshotStorage(string rootDir) : ScreenshotSt
 
 		foreach (var path in Directory.GetFiles(dir))
 		{
-			var name = Path.GetFileName(path);
-			if (IsFailureArtifactForStep(name, testStep.StepName))
+			if (
+				ArtifactNaming.IsFailureArtifactForStep(Path.GetFileName(path), testStep.StepName, testStep.JourneyName)
+			)
 			{
 				File.Delete(path);
 			}
@@ -113,25 +111,52 @@ internal sealed class FilesystemScreenshotStorage(string rootDir) : ScreenshotSt
 	/// <inheritdoc/>
 	internal override void DeleteAllFailureArtifacts(PlatformConfig config, JourneyDefinition journey)
 	{
-		var dir = JourneyDir(config, journey.Name);
-		if (!Directory.Exists(dir))
+		foreach (var container in journey.Containers)
 		{
-			return;
-		}
-
-		foreach (var path in Directory.GetFiles(dir))
-		{
-			if (IsFailureArtifact(Path.GetFileName(path)))
+			var dir = ContainerDir(config, container);
+			if (!Directory.Exists(dir))
 			{
-				File.Delete(path);
+				continue;
+			}
+
+			foreach (var path in Directory.GetFiles(dir))
+			{
+				if (ArtifactNaming.IsFailureArtifactForJourney(Path.GetFileName(path), journey.Name))
+				{
+					File.Delete(path);
+				}
 			}
 		}
 	}
 
 	/// <inheritdoc/>
-	protected override void DeleteBaseline(TestStep testStep)
+	internal override byte[]? ReadFile(PlatformConfig config, string container, string fileName)
 	{
-		var path = BaselinePath(testStep);
+		var path = Path.Combine(ContainerDir(config, container), fileName);
+		return File.Exists(path) ? File.ReadAllBytes(path) : null;
+	}
+
+	/// <inheritdoc/>
+	internal override string FileVersion(PlatformConfig config, string container, string fileName)
+	{
+		var path = Path.Combine(ContainerDir(config, container), fileName);
+		return File.Exists(path)
+			? File.GetLastWriteTimeUtc(path).Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture)
+			: string.Empty;
+	}
+
+	/// <inheritdoc/>
+	protected override void DeleteFile(PlatformConfig config, StoredFile file)
+	{
+		var path = Path.Combine(ContainerDir(config, file.Container), file.FileName);
+		if (!IsWithinRoot(path))
+		{
+			throw new ArgumentException(
+				$"Refusing to delete a path outside the screenshots root: {file.Container}/{file.FileName}",
+				nameof(file)
+			);
+		}
+
 		if (File.Exists(path))
 		{
 			File.Delete(path);
@@ -139,62 +164,47 @@ internal sealed class FilesystemScreenshotStorage(string rootDir) : ScreenshotSt
 	}
 
 	/// <inheritdoc/>
-	protected override void DeleteJourney(PlatformConfig config, string journeyName)
+	protected override void DeleteEmptyContainers(PlatformConfig config)
 	{
-		var dir = JourneyDir(config, journeyName);
-		if (Directory.Exists(dir))
+		var platformDir = PlatformDir(config);
+		if (!Directory.Exists(platformDir))
 		{
-			Directory.Delete(dir, recursive: true);
+			return;
+		}
+
+		// Deepest-first so a directory whose only content was empty subdirectories is itself removed.
+		foreach (
+			var dir in Directory
+				.GetDirectories(platformDir, "*", SearchOption.AllDirectories)
+				.OrderByDescending(d => d.Length)
+		)
+		{
+			if (Directory.GetFileSystemEntries(dir).Length == 0)
+			{
+				Directory.Delete(dir);
+			}
 		}
 	}
 
-	/// <inheritdoc/>
-	protected override void DeleteJourneyIfEmpty(PlatformConfig config, string journeyName)
+	private void WriteBytes(TestStep testStep, string fileName, byte[] bytes)
 	{
-		var dir = JourneyDir(config, journeyName);
-		if (Directory.Exists(dir) && Directory.GetFileSystemEntries(dir).Length == 0)
-		{
-			Directory.Delete(dir);
-		}
-	}
-
-	private static string DiffFileName(string stepName, double pixelErrorPercentage) =>
-		$"{stepName}{DiffPrefix}{pixelErrorPercentage:F3}%{DiffExtension}";
-
-	private static string FailFileName(string stepName, string suffix) =>
-		$"{stepName}{FailPrefix}{suffix}{FailExtension}";
-
-	private static bool IsBaselineFileName(string fileName) =>
-		!fileName.StartsWith('.')
-		&& fileName.EndsWith(BaselineExtension, StringComparison.Ordinal)
-		&& !fileName.EndsWith(NewSuffix, StringComparison.Ordinal)
-		&& !fileName.Contains(DiffPrefix, StringComparison.Ordinal)
-		&& !fileName.Contains(FailPrefix, StringComparison.Ordinal);
-
-	private static bool IsFailureArtifact(string fileName) =>
-		fileName.EndsWith(NewSuffix, StringComparison.Ordinal)
-		|| fileName.Contains(DiffPrefix, StringComparison.Ordinal)
-		|| fileName.Contains(FailPrefix, StringComparison.Ordinal)
-		|| fileName.EndsWith(CrashLogExtension, StringComparison.Ordinal);
-
-	private static bool IsFailureArtifactForStep(string fileName, string stepName) =>
-		fileName.Equals(stepName + NewSuffix, StringComparison.Ordinal)
-		|| fileName.StartsWith(stepName + DiffPrefix, StringComparison.Ordinal)
-		|| fileName.StartsWith(stepName + FailPrefix, StringComparison.Ordinal)
-		|| fileName.Equals(stepName + CrashLogExtension, StringComparison.Ordinal);
-
-	private void WriteBytes(PlatformConfig config, string journeyName, string fileName, byte[] bytes)
-	{
-		var dir = JourneyDir(config, journeyName);
+		var dir = ContainerDir(testStep.Config, testStep.Container);
 		_ = Directory.CreateDirectory(dir);
 		File.WriteAllBytes(Path.Combine(dir, fileName), bytes);
 	}
 
 	private string PlatformDir(PlatformConfig config) => Path.Combine(RootDir, config.DisplayName);
 
-	private string JourneyDir(PlatformConfig config, string journeyName) =>
-		Path.Combine(PlatformDir(config), journeyName);
+	private string ContainerDir(PlatformConfig config, string container) =>
+		Path.Combine(PlatformDir(config), container.Replace('/', Path.DirectorySeparatorChar));
+
+	/// <summary>Returns whether the resolved path stays inside <see cref="RootDir"/> — a guard against a
+	/// crafted container/filename escaping the screenshots tree via <c>..</c> or an absolute segment.</summary>
+	/// <param name="path">The candidate path to test.</param>
+	private bool IsWithinRoot(string path) =>
+		Path.GetFullPath(path)
+			.StartsWith(Path.GetFullPath(RootDir) + Path.DirectorySeparatorChar, StringComparison.Ordinal);
 
 	private string BaselinePath(TestStep testStep) =>
-		Path.Combine(JourneyDir(testStep.Config, testStep.JourneyName), testStep.StepName + BaselineExtension);
+		Path.Combine(ContainerDir(testStep.Config, testStep.Container), ArtifactNaming.BaselineFileName(testStep));
 }

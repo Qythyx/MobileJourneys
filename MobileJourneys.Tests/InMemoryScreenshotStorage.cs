@@ -4,117 +4,134 @@ namespace MobileJourneys.Tests;
 
 /// <summary>
 /// In-memory <see cref="ScreenshotStorage"/> for unit tests. Files live in nested
-/// dictionaries keyed by platform display name, journey name, and the implementation's
-/// own filename layout. Filename construction mirrors <see cref="FilesystemScreenshotStorage"/>
+/// dictionaries keyed by platform display name, container path, and filename, using the
+/// same <see cref="ArtifactNaming"/> layout as <see cref="FilesystemScreenshotStorage"/>
 /// so the two backends produce the same observable behavior.
 /// </summary>
 internal sealed class InMemoryScreenshotStorage : ScreenshotStorage
 {
-	private const string BaselineExtension = ".png";
-	private const string NewSuffix = ".new.png";
-	private const string DiffPrefix = "_diff_";
-	private const string DiffExtension = ".png";
-	private const string FailPrefix = "_FAIL_";
-	private const string FailExtension = ".png";
-	private const string CrashLogExtension = ".CRASH.txt";
-
 	private readonly Dictionary<string, Dictionary<string, Dictionary<string, byte[]>>> _files = [];
 
 	internal override bool BaselineExists(TestStep testStep) =>
-		Lookup(testStep.Config, testStep.JourneyName) is { } journey
-		&& journey.ContainsKey(testStep.StepName + BaselineExtension);
+		Lookup(testStep.Config, testStep.Container) is { } container
+		&& container.ContainsKey(ArtifactNaming.BaselineFileName(testStep));
 
 	internal override byte[] ReadBaseline(TestStep testStep)
 	{
-		var fileName = testStep.StepName + BaselineExtension;
+		var fileName = ArtifactNaming.BaselineFileName(testStep);
 		return
-			Lookup(testStep.Config, testStep.JourneyName) is { } journey && journey.TryGetValue(fileName, out var bytes)
+			Lookup(testStep.Config, testStep.Container) is { } container
+			&& container.TryGetValue(fileName, out var bytes)
 			? bytes
 			: throw new FileNotFoundException(
-				$"No baseline '{fileName}' for journey '{testStep.JourneyName}' on '{testStep.Config.DisplayName}'."
+				$"No baseline '{fileName}' under '{testStep.Config.DisplayName}/{testStep.Container}'."
 			);
 	}
 
 	internal override void WriteBaseline(TestStep testStep, byte[] pngBytes) =>
-		GetOrCreateJourney(testStep.Config, testStep.JourneyName)[testStep.StepName + BaselineExtension] = pngBytes;
+		GetOrCreateContainer(testStep.Config, testStep.Container)[ArtifactNaming.BaselineFileName(testStep)] = pngBytes;
 
 	internal override void WriteNewScreenshot(TestStep testStep, byte[] pngBytes) =>
-		GetOrCreateJourney(testStep.Config, testStep.JourneyName)[testStep.StepName + NewSuffix] = pngBytes;
+		GetOrCreateContainer(testStep.Config, testStep.Container)[ArtifactNaming.NewFileName(testStep)] = pngBytes;
+
+	internal override byte[]? ReadNewScreenshot(TestStep testStep) =>
+		Lookup(testStep.Config, testStep.Container) is { } container
+		&& container.TryGetValue(ArtifactNaming.NewFileName(testStep), out var bytes)
+			? bytes
+			: null;
 
 	internal override void WriteDiffImage(TestStep testStep, double pixelErrorPercentage, byte[] pngBytes) =>
-		GetOrCreateJourney(testStep.Config, testStep.JourneyName)[
-			DiffFileName(testStep.StepName, pixelErrorPercentage)
+		GetOrCreateContainer(testStep.Config, testStep.Container)[
+			ArtifactNaming.DiffFileName(testStep, pixelErrorPercentage)
 		] = pngBytes;
 
 	internal override void WriteFailScreenshot(TestStep testStep, string suffix, byte[] pngBytes) =>
-		GetOrCreateJourney(testStep.Config, testStep.JourneyName)[FailFileName(testStep.StepName, suffix)] = pngBytes;
+		GetOrCreateContainer(testStep.Config, testStep.Container)[ArtifactNaming.FailFileName(testStep, suffix)] =
+			pngBytes;
 
 	internal override void WriteCrashLog(TestStep testStep, string content) =>
-		GetOrCreateJourney(testStep.Config, testStep.JourneyName)[testStep.StepName + CrashLogExtension] =
+		GetOrCreateContainer(testStep.Config, testStep.Container)[ArtifactNaming.CrashLogFileName(testStep)] =
 			Encoding.UTF8.GetBytes(content);
 
-	protected override IReadOnlyList<string> ListJourneysInStorage(PlatformConfig config) =>
-		_files.TryGetValue(config.DisplayName, out var platform) ? [.. platform.Keys] : [];
-
-	protected override IReadOnlyList<string> ListBaselineStepNames(PlatformConfig config, string journeyName) =>
-		Lookup(config, journeyName) is { } journey
-			? [.. journey.Keys.Where(IsBaselineFileName).Select(n => n[..^BaselineExtension.Length])]
+	protected override IReadOnlyList<StoredFile> ListFiles(PlatformConfig config) =>
+		_files.TryGetValue(config.DisplayName, out var platform)
+			?
+			[
+				.. platform.SelectMany(container =>
+					container.Value.Keys.Where(n => !n.StartsWith('.')).Select(n => new StoredFile(container.Key, n))
+				),
+			]
 			: [];
 
 	internal override bool HasFailureArtifacts(PlatformConfig config, JourneyDefinition journey) =>
-		Lookup(config, journey.Name) is { } dict && dict.Keys.Any(IsFailureArtifact);
+		journey.Containers.Any(container =>
+			Lookup(config, container) is { } files
+			&& files.Keys.Any(n => ArtifactNaming.IsFailureArtifactForJourney(n, journey.Name))
+		);
 
 	internal override void DeleteFailureArtifactsForStep(TestStep testStep)
 	{
-		if (Lookup(testStep.Config, testStep.JourneyName) is not { } journey)
+		if (Lookup(testStep.Config, testStep.Container) is not { } container)
 		{
 			return;
 		}
 
-		foreach (var name in journey.Keys.Where(n => IsFailureArtifactForStep(n, testStep.StepName)).ToList())
+		foreach (
+			var name in container
+				.Keys.Where(n => ArtifactNaming.IsFailureArtifactForStep(n, testStep.StepName, testStep.JourneyName))
+				.ToList()
+		)
 		{
-			_ = journey.Remove(name);
+			_ = container.Remove(name);
 		}
 	}
 
 	internal override void DeleteAllFailureArtifacts(PlatformConfig config, JourneyDefinition journey)
 	{
-		if (Lookup(config, journey.Name) is not { } dict)
+		foreach (var containerPath in journey.Containers)
+		{
+			if (Lookup(config, containerPath) is not { } container)
+			{
+				continue;
+			}
+
+			foreach (
+				var name in container
+					.Keys.Where(n => ArtifactNaming.IsFailureArtifactForJourney(n, journey.Name))
+					.ToList()
+			)
+			{
+				_ = container.Remove(name);
+			}
+		}
+	}
+
+	internal override byte[]? ReadFile(PlatformConfig config, string container, string fileName) =>
+		Lookup(config, container) is { } files && files.TryGetValue(fileName, out var bytes) ? bytes : null;
+
+	internal override string FileVersion(PlatformConfig config, string container, string fileName) =>
+		Lookup(config, container) is { } files && files.TryGetValue(fileName, out var bytes)
+			? bytes.Length.ToString(System.Globalization.CultureInfo.InvariantCulture)
+			: string.Empty;
+
+	protected override void DeleteFile(PlatformConfig config, StoredFile file)
+	{
+		if (Lookup(config, file.Container) is { } container)
+		{
+			_ = container.Remove(file.FileName);
+		}
+	}
+
+	protected override void DeleteEmptyContainers(PlatformConfig config)
+	{
+		if (!_files.TryGetValue(config.DisplayName, out var platform))
 		{
 			return;
 		}
 
-		foreach (var name in dict.Keys.Where(IsFailureArtifact).ToList())
+		foreach (var containerPath in platform.Where(c => c.Value.Count == 0).Select(c => c.Key).ToList())
 		{
-			_ = dict.Remove(name);
-		}
-	}
-
-	protected override void DeleteBaseline(TestStep testStep)
-	{
-		if (Lookup(testStep.Config, testStep.JourneyName) is { } journey)
-		{
-			_ = journey.Remove(testStep.StepName + BaselineExtension);
-		}
-	}
-
-	protected override void DeleteJourney(PlatformConfig config, string journeyName)
-	{
-		if (_files.TryGetValue(config.DisplayName, out var platform))
-		{
-			_ = platform.Remove(journeyName);
-		}
-	}
-
-	protected override void DeleteJourneyIfEmpty(PlatformConfig config, string journeyName)
-	{
-		if (
-			_files.TryGetValue(config.DisplayName, out var platform)
-			&& platform.TryGetValue(journeyName, out var journey)
-			&& journey.Count == 0
-		)
-		{
-			_ = platform.Remove(journeyName);
+			_ = platform.Remove(containerPath);
 		}
 	}
 
@@ -122,46 +139,44 @@ internal sealed class InMemoryScreenshotStorage : ScreenshotStorage
 
 	/// <summary>Returns <c>true</c> when a <c>.new</c> capture exists for the given step.</summary>
 	internal bool NewScreenshotExists(TestStep testStep) =>
-		Lookup(testStep.Config, testStep.JourneyName) is { } journey
-		&& journey.ContainsKey(testStep.StepName + NewSuffix);
+		Lookup(testStep.Config, testStep.Container) is { } container
+		&& container.ContainsKey(ArtifactNaming.NewFileName(testStep));
 
 	/// <summary>Returns <c>true</c> when a diff image exists for the given step (any percentage).</summary>
 	internal bool DiffImageExists(TestStep testStep) =>
-		Lookup(testStep.Config, testStep.JourneyName) is { } journey
-		&& journey.Keys.Any(n =>
-			n.StartsWith(testStep.StepName + DiffPrefix, StringComparison.Ordinal)
-			&& n.EndsWith(DiffExtension, StringComparison.Ordinal)
+		Lookup(testStep.Config, testStep.Container) is { } container
+		&& container.Keys.Any(n =>
+			n.StartsWith($"{testStep.StepName} [{testStep.JourneyName}]_diff_", StringComparison.Ordinal)
 		);
 
 	/// <summary>Returns <c>true</c> when a FAIL screenshot exists for the given step (any suffix).</summary>
 	internal bool FailScreenshotExists(TestStep testStep) =>
-		Lookup(testStep.Config, testStep.JourneyName) is { } journey
-		&& journey.Keys.Any(n =>
-			n.StartsWith(testStep.StepName + FailPrefix, StringComparison.Ordinal)
-			&& n.EndsWith(FailExtension, StringComparison.Ordinal)
+		Lookup(testStep.Config, testStep.Container) is { } container
+		&& container.Keys.Any(n =>
+			n.StartsWith($"{testStep.StepName} [{testStep.JourneyName}]_FAIL_", StringComparison.Ordinal)
 		);
 
 	/// <summary>Returns <c>true</c> when a crash log exists for the given step.</summary>
 	internal bool CrashLogExists(TestStep testStep) =>
-		Lookup(testStep.Config, testStep.JourneyName) is { } journey
-		&& journey.ContainsKey(testStep.StepName + CrashLogExtension);
+		Lookup(testStep.Config, testStep.Container) is { } container
+		&& container.ContainsKey(ArtifactNaming.CrashLogFileName(testStep));
 
 	/// <summary>Returns the raw bytes stored for any artifact name (test introspection only).</summary>
-	internal byte[] ReadRaw(PlatformConfig config, string journeyName, string fileName) =>
-		Lookup(config, journeyName) is { } journey && journey.TryGetValue(fileName, out var bytes)
+	internal byte[] ReadRaw(PlatformConfig config, string container, string fileName) =>
+		Lookup(config, container) is { } files && files.TryGetValue(fileName, out var bytes)
 			? bytes
-			: throw new FileNotFoundException($"No artifact '{fileName}' under '{config.DisplayName}/{journeyName}'.");
+			: throw new FileNotFoundException($"No artifact '{fileName}' under '{config.DisplayName}/{container}'.");
 
-	/// <summary>Lists every stored file name under the journey (test introspection only).</summary>
-	internal IReadOnlyList<string> ListAllFiles(PlatformConfig config, string journeyName) =>
-		Lookup(config, journeyName) is { } journey ? [.. journey.Keys] : [];
+	/// <summary>Lists every stored file name under the container (test introspection only).</summary>
+	internal IReadOnlyList<string> ListAllFiles(PlatformConfig config, string container) =>
+		Lookup(config, container) is { } files ? [.. files.Keys] : [];
 
-	private Dictionary<string, byte[]>? Lookup(PlatformConfig config, string journeyName) =>
-		_files.TryGetValue(config.DisplayName, out var platform) && platform.TryGetValue(journeyName, out var journey)
-			? journey
+	private Dictionary<string, byte[]>? Lookup(PlatformConfig config, string container) =>
+		_files.TryGetValue(config.DisplayName, out var platform) && platform.TryGetValue(container, out var files)
+			? files
 			: null;
 
-	private Dictionary<string, byte[]> GetOrCreateJourney(PlatformConfig config, string journeyName)
+	private Dictionary<string, byte[]> GetOrCreateContainer(PlatformConfig config, string container)
 	{
 		if (!_files.TryGetValue(config.DisplayName, out var platform))
 		{
@@ -169,37 +184,12 @@ internal sealed class InMemoryScreenshotStorage : ScreenshotStorage
 			_files[config.DisplayName] = platform;
 		}
 
-		if (!platform.TryGetValue(journeyName, out var journey))
+		if (!platform.TryGetValue(container, out var files))
 		{
-			journey = [];
-			platform[journeyName] = journey;
+			files = [];
+			platform[container] = files;
 		}
 
-		return journey;
+		return files;
 	}
-
-	private static string DiffFileName(string stepName, double pixelErrorPercentage) =>
-		$"{stepName}{DiffPrefix}{pixelErrorPercentage:F3}%{DiffExtension}";
-
-	private static string FailFileName(string stepName, string suffix) =>
-		$"{stepName}{FailPrefix}{suffix}{FailExtension}";
-
-	private static bool IsBaselineFileName(string fileName) =>
-		!fileName.StartsWith('.')
-		&& fileName.EndsWith(BaselineExtension, StringComparison.Ordinal)
-		&& !fileName.EndsWith(NewSuffix, StringComparison.Ordinal)
-		&& !fileName.Contains(DiffPrefix, StringComparison.Ordinal)
-		&& !fileName.Contains(FailPrefix, StringComparison.Ordinal);
-
-	private static bool IsFailureArtifact(string fileName) =>
-		fileName.EndsWith(NewSuffix, StringComparison.Ordinal)
-		|| fileName.Contains(DiffPrefix, StringComparison.Ordinal)
-		|| fileName.Contains(FailPrefix, StringComparison.Ordinal)
-		|| fileName.EndsWith(CrashLogExtension, StringComparison.Ordinal);
-
-	private static bool IsFailureArtifactForStep(string fileName, string stepName) =>
-		fileName.Equals(stepName + NewSuffix, StringComparison.Ordinal)
-		|| fileName.StartsWith(stepName + DiffPrefix, StringComparison.Ordinal)
-		|| fileName.StartsWith(stepName + FailPrefix, StringComparison.Ordinal)
-		|| fileName.Equals(stepName + CrashLogExtension, StringComparison.Ordinal);
 }

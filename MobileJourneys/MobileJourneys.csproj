@@ -22,4 +22,7 @@
 	<ItemGroup>
 		<InternalsVisibleTo Include="MobileJourneys.Tests" />
 	</ItemGroup>
+	<ItemGroup>
+		<EmbeddedResource Include="Viewer/index.html" />
+	</ItemGroup>
 </Project>

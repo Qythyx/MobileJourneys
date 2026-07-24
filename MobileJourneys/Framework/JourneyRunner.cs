@@ -67,17 +67,16 @@ internal static class JourneyRunner
 		foreach (var (number, name, execute, maskElements, prefetchMasks, journeyStep) in steps)
 		{
 			await reporter.StepStartedAsync(testCase, number, totalSteps, name);
-			var numberedStepName = JourneyDefinition.FormatStepName(number, name);
+			var testStep = new TestStep(
+				driver.Config,
+				journey.ContainerForStep(number),
+				JourneyDefinition.FormatStepName(number, name),
+				journey.Name
+			);
 			try
 			{
-				manager.DeleteFailureArtifactsForStep(new(driver.Config, journey.Name, numberedStepName));
-				var stepResult = driver.DoActionAndCompareWithBaseline(
-					execute,
-					journey.Name,
-					numberedStepName,
-					maskElements,
-					prefetchMasks
-				);
+				manager.DeleteFailureArtifactsForStep(testStep);
+				var stepResult = driver.DoActionAndCompareWithBaseline(execute, testStep, maskElements, prefetchMasks);
 				if (!stepResult.Passed)
 				{
 					var message =
@@ -88,7 +87,7 @@ internal static class JourneyRunner
 			}
 			catch (Exception ex)
 			{
-				HandleStepFailure(driver, manager, ex, numberedStepName, journey.Name);
+				HandleStepFailure(driver, manager, ex, testStep);
 				var message = $"step {number}/{totalSteps}: {name} — {ex.Message}";
 				failures.Add(new JourneyFailureException(message, journey, journeyStep, number, totalSteps, name, ex));
 			}
@@ -134,20 +133,18 @@ internal static class JourneyRunner
 		}
 	}
 
-	private static void HandleStepFailure(
-		TestDriver driver,
-		ScreenshotManager manager,
-		Exception ex,
-		string filePrefix,
-		string journeyName
-	)
+	private static void HandleStepFailure(TestDriver driver, ScreenshotManager manager, Exception ex, TestStep key)
 	{
-		var key = new TestStep(driver.Config, journeyName, filePrefix);
+		// Capture before anything else: querying the app state and pulling a device crash log take
+		// seconds, and on a timeout failure the screen often finishes rendering in that window —
+		// producing evidence that shows a perfectly good screen.
+		var screenshot = driver.TryCaptureScreenshot();
+		var details = $"{ex.GetType().FullName}: {ex.Message}\n\n{ex.StackTrace}";
 		var appCrashed = driver.IsAppCrashed();
 		if (appCrashed)
 		{
 			var exceptionLog = driver.CaptureDeviceCrashLog();
-			_ = manager.CaptureFailScreenshot(driver.App, key, "CRASH");
+			_ = manager.WriteFailScreenshot(key, "CRASH", screenshot, details);
 
 			var logContent =
 				exceptionLog
@@ -166,7 +163,7 @@ internal static class JourneyRunner
 		{
 			var sanitized = new string([.. ex.Message.Where(c => !Path.GetInvalidFileNameChars().Contains(c))]);
 			sanitized = sanitized.Length > 80 ? sanitized[..80] : sanitized;
-			_ = manager.CaptureFailScreenshot(driver.App, key, sanitized);
+			_ = manager.WriteFailScreenshot(key, sanitized, screenshot, details);
 		}
 	}
 }
