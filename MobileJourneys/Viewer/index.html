@@ -15,6 +15,7 @@
 			--accent: #4d9fff;
 			--fail: #ff5c5c;
 			--extra: #ffab40;
+			--pending: #ffd54a;
 			--ok: #58c877;
 			--border: #333947;
 		}
@@ -51,18 +52,61 @@
 
 		header h1 {
 			font-size: 15px;
-			margin: 0 6px 0 0;
+			margin: 0;
 			font-weight: 600;
+			line-height: 1.1;
 		}
 
+		#titlebox {
+			display: flex;
+			flex-direction: column;
+			justify-content: center;
+			flex: none;
+		}
+
+		#server-status {
+			font-size: 11px;
+			color: var(--muted);
+			white-space: nowrap;
+		}
+
+		#actions {
+			margin-left: auto;
+			display: flex;
+			align-items: center;
+			gap: 10px;
+		}
+
+		#help-btn {
+			flex: none;
+			width: 26px;
+			height: 26px;
+			border-radius: 50%;
+			border: 1px solid var(--border);
+			background: var(--panel2);
+			color: var(--muted);
+			cursor: pointer;
+			font: inherit;
+			font-weight: 600;
+			line-height: 1;
+		}
+
+		#help-btn:hover {
+			color: var(--text);
+			border-color: var(--accent);
+		}
+
+		/* Joined segmented control; badges overlap the top edge, so it can't clip (overflow: visible)
+		   and the end segments carry the rounded corners the container border used to clip to. */
 		.seg {
 			display: flex;
 			border: 1px solid var(--border);
 			border-radius: 7px;
-			overflow: hidden;
+			overflow: visible;
 		}
 
 		.seg button {
+			position: relative;
 			background: transparent;
 			color: var(--muted);
 			border: 0;
@@ -72,39 +116,45 @@
 			white-space: nowrap;
 		}
 
+		.seg button:first-child {
+			border-radius: 6px 0 0 6px;
+		}
+
+		.seg button:last-child {
+			border-radius: 0 6px 6px 0;
+		}
+
 		.seg button.active {
 			background: var(--accent);
 			color: #fff;
 		}
 
-		.seg button .badge {
-			display: inline-block;
-			min-width: 17px;
-			padding: 0 5px;
-			margin-left: 6px;
-			border-radius: 9px;
+		/* Notification-style counts overlapping the top-right of each device segment. */
+		.seg .badges {
+			position: absolute;
+			top: -10px;
+			right: -4px;
+			display: flex;
+			gap: 3px;
+			pointer-events: none;
+		}
+
+		.seg .badge {
+			min-width: 16px;
+			padding: 0 4px;
+			border-radius: 8px;
 			background: var(--fail);
 			color: #fff;
-			font-size: 11px;
-			line-height: 17px;
+			font-size: 10px;
+			font-weight: 600;
+			text-align: center;
+			border: 1px solid var(--panel);
+			box-sizing: content-box;
 		}
 
-		.seg button .badge.extra {
+		.seg .badge.extra {
 			background: var(--extra);
 			color: #402800;
-		}
-
-		#nav-status {
-			color: var(--muted);
-			font-size: 12px;
-			white-space: nowrap;
-		}
-
-		#mode-hint {
-			margin-left: auto;
-			color: var(--muted);
-			font-size: 12px;
-			white-space: nowrap;
 		}
 
 		.keyhint {
@@ -116,6 +166,50 @@
 			font-size: 10px;
 			color: var(--muted);
 			background: var(--bg);
+		}
+
+		/* --- rerun-all dropdown --- */
+		#rerun-all-group {
+			position: relative;
+		}
+
+		#rerun-menu {
+			position: absolute;
+			top: calc(100% + 4px);
+			right: 0;
+			min-width: 170px;
+			background: var(--panel2);
+			border: 1px solid var(--border);
+			border-radius: 8px;
+			padding: 4px;
+			display: none;
+			flex-direction: column;
+			gap: 2px;
+			z-index: 30;
+		}
+
+		#rerun-menu.open {
+			display: flex;
+		}
+
+		#rerun-menu button {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 12px;
+			background: transparent;
+			color: var(--text);
+			border: 0;
+			border-radius: 5px;
+			padding: 6px 8px;
+			cursor: pointer;
+			font: inherit;
+			white-space: nowrap;
+		}
+
+		#rerun-menu button:hover {
+			background: var(--accent);
+			color: #fff;
 		}
 
 		/* --- graph ---
@@ -173,13 +267,6 @@
 			outline-style: dashed;
 		}
 
-		/* Still one outline: the selected node (always a failure) recolors to the accent, so the box
-	   you are on reads blue and the other failures stay red — no second concentric ring. Must come
-	   after has-fail/has-extra to win the equal-specificity tie. */
-		.node.current {
-			outline: calc(3px * var(--inv)) solid var(--accent);
-		}
-
 		/* A failure just cleared (rerun passed / accepted / discarded): green, held in place until you
 	   navigate, so the resolution is visible instead of the view jumping to the next failure. */
 		.node.resolved {
@@ -217,13 +304,6 @@
 			overflow: hidden;
 			text-overflow: ellipsis;
 			font-size: clamp(calc(10px * var(--inv)), 12px, calc(24px * var(--inv)));
-		}
-
-		.below {
-			color: var(--fail);
-			opacity: 0.75;
-			white-space: nowrap;
-			font-size: clamp(calc(8px * var(--inv)), 10px, calc(13px * var(--inv)));
 		}
 
 		.dot {
@@ -272,14 +352,18 @@
 			position: relative;
 		}
 
+		/* One uniform box for every thumbnail (height set from the tallest device's aspect via --shot-h),
+		   so a node's size — and thus the whole layout — is identical across devices; object-fit keeps
+		   each screenshot whole, letterboxing where a device's aspect differs. */
 		.shot img {
 			width: 100%;
+			height: var(--shot-h, 240px);
+			object-fit: contain;
 			display: block;
 			border-radius: 5px;
 			border: 1px solid var(--border);
 			background: #000;
 			cursor: pointer;
-			min-height: 40px;
 		}
 
 		.shot.fail img {
@@ -291,6 +375,20 @@
 			outline: calc(2px * var(--inv)) dashed var(--extra);
 			outline-offset: calc(-1px * var(--inv));
 		}
+
+		/* Live rerun states. `donefail` mirrors `fail` but is driven by the progress side-channel so a
+		   failure shows the instant the step reports, before the manifest re-scan catches up. `pending`
+		   comes last so a not-yet-run step reads yellow even over a stale red outline. */
+		.shot.donefail img {
+			outline: calc(2px * var(--inv)) solid var(--fail);
+			outline-offset: calc(-1px * var(--inv));
+		}
+
+		.shot.pending img {
+			outline: calc(2px * var(--inv)) solid var(--pending);
+			outline-offset: calc(-1px * var(--inv));
+		}
+
 
 		.shot .cap {
 			color: var(--muted);
@@ -311,7 +409,7 @@
 			display: flex;
 			align-items: center;
 			justify-content: center;
-			height: 60px;
+			height: var(--shot-h, 240px);
 			border: 1px dashed var(--border);
 			border-radius: 5px;
 			color: var(--muted);
@@ -335,11 +433,13 @@
 		}
 
 		/* --- inline triage panel (the selected failure, expanded in place) --- */
+		/* Blue background marks the selected step itself, so the branch box keeps its own
+		   red/pending/resolved outline instead of being overpainted by a selection ring. */
 		.triage {
 			border: 1px solid var(--accent);
 			border-radius: 10px;
 			padding: 8px;
-			background: var(--panel);
+			background: #1b2c45;
 			min-width: 420px;
 		}
 
@@ -443,6 +543,7 @@
 			background: var(--panel2);
 			color: var(--text);
 			padding: 5px 14px;
+			white-space: nowrap;
 		}
 
 		.btn:hover {
@@ -694,10 +795,30 @@
 			gap: 8px;
 			padding: 8px 12px;
 			border-bottom: 1px solid var(--border);
+			cursor: pointer;
+		}
+
+		#runner.collapsed .rhd {
+			border-bottom: 0;
+		}
+
+		#runner.collapsed pre {
+			display: none;
+		}
+
+		#runner .rtoggle {
+			color: var(--muted);
+			font-size: 10px;
+			width: 10px;
 		}
 
 		#runner .rhd b {
 			font-size: 12px;
+			flex: 1 1 auto;
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
 		}
 
 		#runner .status {
@@ -752,11 +873,24 @@
 
 <body>
 	<header>
-		<h1 id="title">Screenshots</h1>
+		<div id="titlebox">
+			<h1 id="title">Screenshots</h1>
+			<span id="server-status"></span>
+		</div>
 		<div class="seg" id="config-seg"></div>
-		<span id="nav-status"></span>
-		<button class="btn delete" id="del-extra" style="display:none">Delete all extraneous</button>
-		<span id="mode-hint"></span>
+		<div id="actions">
+			<span id="rerun-all-group" style="display:none">
+				<button class="btn" id="rerun-all-btn" title="Rerun the whole suite (Shift+R)">Rerun all ▾</button>
+				<div id="rerun-menu">
+					<button data-failed="false" data-embed="false">Rerun all<span class="keyhint">R r</span></button>
+					<button data-failed="false" data-embed="true">Rerun all + rebuild app<span class="keyhint">R R</span></button>
+					<button data-failed="true" data-embed="false">Failures only<span class="keyhint">R f</span></button>
+					<button data-failed="true" data-embed="true">Failures + rebuild app<span class="keyhint">R F</span></button>
+				</div>
+			</span>
+			<button class="btn delete" id="del-extra" style="display:none">Delete all extraneous</button>
+			<button id="help-btn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
+		</div>
 	</header>
 	<div id="graph-wrap">
 		<div id="world"></div>
@@ -768,9 +902,9 @@
 	<div id="help">
 		<div class="sheet"></div>
 	</div>
-	<div id="runner">
-		<div class="rhd"><span class="status"><span class="spin"></span></span><b></b><span class="close"
-				title="Close (Esc)">✕</span></div>
+	<div id="runner" class="collapsed">
+		<div class="rhd"><span class="status"><span class="spin"></span></span><span class="rtoggle"
+				title="Show / hide console output">▸</span><b></b><span class="close" title="Close (Esc)">✕</span></div>
 		<pre></pre>
 	</div>
 	<div id="toast"></div>
@@ -785,7 +919,11 @@
 			let selected = 0;        // index into currentFailures(); -1 = nothing selected
 			let resolved = null;     // a failure just cleared (rerun passed / accepted / discarded), shown in place
 			let zoomed = false;      // the z view is open
-			let chord = null, chordTimer = null, pollTimer = null;
+			let chord = null, chordTimer = null, pollTimer = null, liveTimer = null;
+			// While a "rerun all" runs: { active, steps: Map("container/step" -> "pass"|"fail") }. Absent
+			// entries render as pending (yellow). Only rerun-all sets this — a single-journey rerun would
+			// wrongly paint the whole tree pending.
+			let liveProgress = null;
 			const paneKind = new Map();   // failure key -> artifact shown in the rotating pane
 			const $ = (sel) => document.querySelector(sel);
 
@@ -849,6 +987,16 @@
 			// ---------- header ----------
 			document.title = M.title + " — Screenshots";
 			$("#title").textContent = M.title;
+
+				// One thumbnail height for every device = the 120px shot width × the tallest device's
+				// aspect ratio, so node sizes (and the whole layout) match across devices.
+				(() => {
+					const aspects = M.configs
+						.map((c) => (M.dims && M.dims[c] ? M.dims[c].h / M.dims[c].w : 0))
+						.filter((a) => a > 0);
+					const boxH = aspects.length ? Math.round(120 * Math.max(...aspects)) : 240;
+					document.documentElement.style.setProperty("--shot-h", boxH + "px");
+				})();
 			const configSeg = $("#config-seg");
 			M.configs.forEach((cfg, i) => {
 				const b = document.createElement("button");
@@ -861,14 +1009,38 @@
 			$("#del-extra").addEventListener("click", async () => {
 				if (await api("delete-all-extraneous", {})) { refresh("Deleted all extraneous files"); }
 			});
+			$("#help-btn").addEventListener("click", () => {
+				const h = $("#help");
+				h.style.display = h.style.display === "flex" ? "none" : "flex";
+			});
+			$("#rerun-all-btn").addEventListener("click", (e) => {
+				e.stopPropagation();
+				$("#rerun-menu").classList.toggle("open");
+			});
+			$("#rerun-menu").addEventListener("click", (e) => {
+				const b = e.target.closest("button[data-failed]");
+				if (!b) { return; }
+				$("#rerun-menu").classList.remove("open");
+				rerunAll(b.dataset.failed === "true", b.dataset.embed === "true");
+			});
+			document.addEventListener("click", () => $("#rerun-menu").classList.remove("open"));
 
 			function setConfig(next) {
+				// Capture the selected failure before switching, so it can stay selected on the new device.
+				const prev = selectedFailure();
 				config = next;
-				selected = 0;
 				resolved = null;
+				// Step keys (container/step) are shared across devices, so the previous device's results
+				// don't apply here — drop them so this device reads pending until its next poll fills in.
+				if (liveProgress && liveProgress.active) { liveProgress.steps.clear(); }
+				// Keep the same failure selected when this device fails at that same step too (so triaging a
+				// screen follows you device to device); otherwise select nothing.
+				const fails = currentFailures();
+				selected = prev ? fails.findIndex((x) => failureKey(x) === failureKey(prev)) : -1;
 				closeZoom();
 				render();
-				focusSelected(false);
+				// No focusSelected: the tree layout is identical across devices, so keeping the current
+				// pan/zoom shows the same region — only the screenshots change.
 			}
 
 			// ---------- tree model ----------
@@ -897,14 +1069,6 @@
 				return roots;
 			}
 
-			// Failures anywhere beneath a node — shown as a muted count in its header, so a collapsed-
-			// looking box still hints at trouble inside without claiming the failure as its own.
-			function failuresBelow(node, byContainer) {
-				let total = 0;
-				for (const c of node.children) { total += (byContainer.get(c.path) || []).length + failuresBelow(c, byContainer); }
-				return total;
-			}
-
 			// ---------- rendering ----------
 			function renderGraph() {
 				const world = $("#world");
@@ -929,12 +1093,11 @@
 				el.dataset.path = n.path;
 				if (n.orphan) { el.classList.add("orphan"); }
 				const nodeFails = byContainer.get(n.path) || [];
-				const below = failuresBelow(n, byContainer);
-				// Red means a step in *this* box failed — not merely that something below it did.
+				// Red means a step in *this* box failed — a failure deeper down is shown by that box's own
+				// red outline, so this box stays neutral rather than advertising the count.
 				if (nodeFails.length > 0) { el.classList.add("has-fail"); }
 				else if (n.extraFiles.length > 0) { el.classList.add("has-extra"); }
 				const sel = selectedFailure();
-				if (sel && sel.container === n.path) { el.classList.add("current"); }
 				const resolvedHere = resolved && resolved.container === n.path;
 				if (resolvedHere && nodeFails.length === 0) { el.classList.add("resolved"); }
 
@@ -945,15 +1108,7 @@
 				name.textContent = n.name;
 				name.title = n.path;
 				head.appendChild(name);
-				if (nodeFails.length > 0) { head.appendChild(mark("fail")); }
 				if (n.extraFiles.length > 0) { head.appendChild(mark("extra")); }
-				if (below > 0) {
-					const hint = document.createElement("span");
-					hint.className = "below";
-					hint.textContent = `${below} ✕ below`;
-					hint.title = `${below} failing step(s) inside this branch`;
-					head.appendChild(hint);
-				}
 				for (const j of chipsFor(n.path)) {
 					const c = document.createElement("span");
 					c.className = "chip";
@@ -968,21 +1123,20 @@
 				shots.className = "shots";
 				for (const step of n.steps) {
 					const stepFails = nodeFails.filter((f) => f.step === step);
-					const isSelected = sel && sel.container === n.path && sel.step === step;
-					if (isSelected) {
-						shots.appendChild(triagePanel(sel));
-					} else {
-						const file = step + ".png";
-						const fig = shotFigure(n.path, file, step, baselines.has(n.path + "/" + file), stepFails, false);
-						if (resolvedHere && resolved.step === step && stepFails.length === 0) {
-							fig.classList.add("passed");
-							const ok = document.createElement("span");
-							ok.className = "ok";
-							ok.textContent = " ✓ " + resolved.label;
-							fig.querySelector(".cap").appendChild(ok);
-						}
-						shots.appendChild(fig);
+					const file = step + ".png";
+					const fig = shotFigure(n.path, file, step, baselines.has(n.path + "/" + file), stepFails, false);
+					// The selected failure is just highlighted here (a blue ring); its baseline/new/diff
+					// panes and actions live in the zoom view (z / click), so every node stays thumbnail-
+					// sized regardless of which step is selected.
+					if (sel && sel.container === n.path && sel.step === step) { fig.classList.add("current"); }
+					if (resolvedHere && resolved.step === step && stepFails.length === 0) {
+						fig.classList.add("passed");
+						const ok = document.createElement("span");
+						ok.className = "ok";
+						ok.textContent = " ✓ " + resolved.label;
+						fig.querySelector(".cap").appendChild(ok);
 					}
+					shots.appendChild(fig);
 				}
 				for (const file of n.extraFiles) {
 					shots.appendChild(shotFigure(n.path, file, file, true, [], true));
@@ -1007,13 +1161,20 @@
 			function shotFigure(container, file, label, present, stepFails, isExtra) {
 				const fig = document.createElement("div");
 				fig.className = "shot" + (stepFails.length > 0 ? " fail" : "") + (isExtra ? " extra" : "");
+				if (!isExtra) {
+					// Tag the screenshot with its identity so the live-rerun overlay can recolor it, and
+					// paint its current pending/pass/fail state now (re-renders must not lose it).
+					fig.dataset.container = container;
+					fig.dataset.step = label;
+					applyShotProgress(fig);
+				}
 				if (present) {
 					const img = document.createElement("img");
 					img.loading = "lazy";
 					img.draggable = false;
 					img.src = shotUrl(container, file);
 					img.addEventListener("click", () => {
-						if (stepFails.length > 0) { selectFailure(stepFails[0]); }
+						if (stepFails.length > 0) { triageFailure(stepFails[0]); }
 						else { openLightbox(img.src, container + "/" + file); }
 					});
 					fig.appendChild(img);
@@ -1037,13 +1198,8 @@
 				const cap = document.createElement("div");
 				cap.className = "cap";
 				cap.textContent = label + (isExtra ? " (extraneous)" : "");
-				for (const f of stepFails) {
-					const s = document.createElement("span");
-					s.className = "pct";
-					const who = f.journey === nodeNameOf(container) ? "" : " " + f.journey;
-					s.textContent = " ✕" + who + (f.percent != null ? ` ${f.percent.toFixed(2)}%` : "");
-					cap.appendChild(s);
-				}
+				// The red outline already marks a failing step; the diff percent and details live in the
+				// triage panel when it's selected, so the caption stays just the step name.
 				fig.appendChild(cap);
 				return fig;
 			}
@@ -1079,42 +1235,16 @@
 				return [paneKind.get(key), ...kinds.slice(1)];
 			}
 
-			function triagePanel(f) {
-				const box = document.createElement("div");
-				box.className = "triage";
-				const head = document.createElement("div");
-				head.className = "thead";
-				const b = document.createElement("b");
-				b.textContent = f.step + " — " + f.journey;
-				head.appendChild(b);
-				if (f.percent != null) {
-					const p = document.createElement("span");
-					p.className = "pct";
-					p.textContent = f.percent.toFixed(3) + "% diff";
-					head.appendChild(p);
-				}
-				box.appendChild(head);
-				box.appendChild(explainBlock(f));
-
-				const panes = document.createElement("div");
-				panes.className = "panes";
-				orderedKinds(f).forEach((k, i) => {
-					const pane = document.createElement("div");
-					pane.className = "pane" + (i === 0 ? " rotating" : "");
-					const label = document.createElement("div");
-					label.className = "plabel";
-					label.textContent = kindLabel[k] + (i === 0 ? " ⟳" : "");
-					const img = document.createElement("img");
-					img.loading = "lazy";
-					img.draggable = false;
-					img.src = shotUrl(f.container, kindFile(f, k));
-					img.addEventListener("click", () => openZoom());
-					pane.append(label, img);
-					panes.appendChild(pane);
+			// A rerun deletes a step's old failure artifacts before re-running it, so an artifact URL can
+			// 404 for the few seconds until the step re-fails (new capture) or passes (gone for good). Show
+			// a placeholder instead of a broken-image icon; the periodic manifest re-scan then corrects it.
+			function onArtifactError(img) {
+				img.addEventListener("error", () => {
+					const ph = document.createElement("div");
+					ph.className = "missing";
+					ph.textContent = "re-running…";
+					img.replaceWith(ph);
 				});
-				box.appendChild(panes);
-				box.appendChild(triageActions(f, false));
-				return box;
 			}
 
 			function triageActions(f, big) {
@@ -1175,8 +1305,14 @@
 					p.textContent = f.percent.toFixed(3) + "% diff";
 					head.appendChild(p);
 				}
+				// The header's per-device failure position lives here now (removed from the top toolbar).
+				const pos = document.createElement("span");
+				pos.style.cssText = "margin-left:auto;color:var(--muted)";
+				pos.textContent = `failure ${selected + 1} / ${currentFailures().length}`;
+				head.appendChild(pos);
 				const close = document.createElement("span");
 				close.className = "close";
+				close.style.marginLeft = "0";
 				close.textContent = "✕ close (z / Esc)";
 				close.addEventListener("click", closeZoom);
 				head.appendChild(close);
@@ -1196,6 +1332,7 @@
 					const img = document.createElement("img");
 					img.draggable = false;
 					img.src = shotUrl(f.container, kindFile(f, k));
+					onArtifactError(img);
 					boxEl.appendChild(img);
 					attachImageZoom(boxEl, img);
 					fig.append(cap, boxEl);
@@ -1300,7 +1437,7 @@
 			function focusSelected(animate) {
 				const f = selectedFailure();
 				if (!f) { return; }
-				const el = $(`#world .node[data-path="${cssEscape(f.container)}"] .triage`)
+				const el = $(`#world .node[data-path="${cssEscape(f.container)}"] .shot.current`)
 					|| $(`#world .node[data-path="${cssEscape(f.container)}"]`);
 				if (!el) { return; }
 				const r = wrap.getBoundingClientRect(), wr = world.getBoundingClientRect(), er = el.getBoundingClientRect();
@@ -1317,14 +1454,20 @@
 			let down = null;
 			wrap.addEventListener("pointerdown", (e) => {
 				if (e.button !== 0) { return; }
-				down = { x: e.clientX, y: e.clientY, moved: false };
-				try { wrap.setPointerCapture(e.pointerId); } catch { /* synthetic or already-released pointer */ }
+				// Don't capture here: capturing on pointerdown retargets the click to the wrapper, so a
+				// thumbnail click never reaches the image. Capture only once a real pan begins (below).
+				down = { x: e.clientX, y: e.clientY, moved: false, pointerId: e.pointerId };
 			});
 			wrap.addEventListener("pointermove", (e) => {
 				if (!down) { return; }
 				const dx = e.clientX - down.x, dy = e.clientY - down.y;
 				if (!down.moved && Math.hypot(dx, dy) < 4) { return; }
-				if (!down.moved) { down.moved = true; wrap.classList.add("panning"); }
+				if (!down.moved) {
+					down.moved = true;
+					wrap.classList.add("panning");
+					// Now it's a pan — capture so it keeps tracking even if the pointer leaves the wrapper.
+					try { wrap.setPointerCapture(down.pointerId); } catch { /* synthetic or released pointer */ }
+				}
 				tx += e.clientX - down.x; ty += e.clientY - down.y;
 				down.x = e.clientX; down.y = e.clientY;
 				applyTransform();
@@ -1350,6 +1493,11 @@
 				const i = currentFailures().findIndex((x) => failureKey(x) === failureKey(f));
 				if (i >= 0) { resolved = null; selected = i; render(); focusSelected(true); }
 			}
+			// Click a failed thumbnail → select it and open the zoom/triage view straight away.
+			function triageFailure(f) {
+				const i = currentFailures().findIndex((x) => failureKey(x) === failureKey(f));
+				if (i >= 0) { resolved = null; selected = i; render(); openZoom(); }
+			}
 			function moveSelection(delta) {
 				const fails = currentFailures();
 				if (fails.length === 0) { toast("no failures on this device"); return; }
@@ -1362,41 +1510,106 @@
 				toast(`${selected + 1}/${fails.length} · ${f.step} — ${f.journey}`);
 			}
 
+			// ---------- live rerun progress ----------
+			// Per-screenshot state from a running rerun-all: absent key = pending (yellow), "pass" =
+			// normal grey, "fail" = red at once (before the manifest re-scan writes the artifact).
+			function progressState(container, step) {
+				if (!liveProgress || !liveProgress.active) { return null; }
+				const key = container + "/" + step;
+				const r = liveProgress.steps.get(key);
+				if (r === "fail") { return "fail"; }
+				if (r === "pass") { return "pass"; }
+				// Not yet reported → pending if in scope. scope null = the whole tree ("all"); a Map keyed
+				// by device = only that device's was-failing steps ("failures").
+				if (liveProgress.scope === null) { return "pending"; }
+				const set = liveProgress.scope.get(config);
+				return set && set.has(key) ? "pending" : null;
+			}
+			function applyShotProgress(fig) {
+				const st = progressState(fig.dataset.container, fig.dataset.step);
+				fig.classList.remove("pending", "donefail");
+				if (st === "pending") { fig.classList.add("pending"); }
+				else if (st === "fail") { fig.classList.add("donefail"); }
+				else if (st === "pass") { fig.classList.remove("fail"); }
+			}
+			function applyProgress() {
+				for (const fig of document.querySelectorAll("#world .shot[data-step]")) { applyShotProgress(fig); }
+			}
+
 			// ---------- rerun ----------
-			async function rerun(journey, scope) {
+			async function startRerun(endpoint, body, live) {
 				if (!serverMode) { toast("start with --review to enable rerunning"); return; }
-				const res = await fetch("api/rerun", {
+				const res = await fetch("api/" + endpoint, {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ config, journey, scope }),
+					body: JSON.stringify(body),
 				}).catch((e) => ({ ok: false, text: async () => e.message }));
 				if (!res.ok) { toast("rerun failed: " + (await res.text())); return; }
 				const { id } = await res.json();
 				const r = $("#runner");
 				r.style.display = "flex";
+				r.classList.add("collapsed");
+				$("#runner .rtoggle").textContent = "▸";
 				r.removeAttribute("data-state");
 				r.querySelector("pre").textContent = "";
 				r.querySelector(".status").innerHTML = `<span class="spin"></span>`;
-				pollJob(id);
+				// Only rerun-all (live) drives the overlay; a single-journey rerun would wrongly paint the
+				// whole tree. "failures" reruns just the failing journeys, so pre-mark only each device's
+				// currently-failing steps pending — snapshot them per device now, before the run starts
+				// clearing artifacts. "all" marks the whole tree pending (scope = null). render() paints it.
+				if (live) {
+					let scope = null;
+					if (body.failed) {
+						scope = new Map();
+						for (const cfg of M.configs) {
+							scope.set(cfg, new Set(failureGroups(cfg).map((f) => f.container + "/" + f.step)));
+						}
+					}
+					liveProgress = { active: true, steps: new Map(), scope };
+					render();
+				}
+				pollJob(id, live);
 			}
-			$("#runner .close").addEventListener("click", () => { $("#runner").style.display = "none"; });
+			// One journey finishes fast enough that a single refresh at the end suffices.
+			const rerun = (journey, scope) => startRerun("rerun", { config, journey, scope }, false);
+			// The whole suite runs for many minutes, so watch the disk and tick the graph forward as
+			// journeys finish rather than making the user stare at a spinner (live = true). failed =
+			// only currently-failing journeys; embed = rebuild the app first. The two combine.
+			const rerunAll = (failed, embed) => startRerun("rerun-all", { failed, embed }, true);
+			$("#runner .close").addEventListener("click", (e) => { e.stopPropagation(); $("#runner").style.display = "none"; });
+			$("#runner .rhd").addEventListener("click", () => {
+				const r = $("#runner");
+				r.classList.toggle("collapsed");
+				$("#runner .rtoggle").textContent = r.classList.contains("collapsed") ? "▸" : "▾";
+			});
 
-			function pollJob(id) {
+			function pollJob(id, live) {
 				clearTimeout(pollTimer);
+				clearInterval(liveTimer);
+				// While a long "rerun all" runs, re-scan the manifest so journeys that finish appear on the
+				// graph in real time. The single-journey rerun ends quickly, so it opts out (live = false).
+				if (live) { liveTimer = setInterval(softRefresh, 3000); }
 				// A poll can fail transiently while the child process hammers the disk; giving up on the
 				// first miss would strand the run as permanently "in progress" and skip the refresh.
 				let misses = 0;
 				const tick = async () => {
-					const res = await fetch("api/rerun-status?id=" + encodeURIComponent(id), { cache: "no-store" }).catch(() => null);
+					const url = "api/rerun-status?id=" + encodeURIComponent(id) + "&config=" + encodeURIComponent(config);
+					const res = await fetch(url, { cache: "no-store" }).catch(() => null);
 					if (!res || !res.ok) {
 						if (++misses < 15) { pollTimer = setTimeout(tick, 1000); }
-						else { toast("lost contact with the rerun; press u to refresh"); }
+						else { clearInterval(liveTimer); toast("lost contact with the rerun; press u to refresh"); }
 						return;
 					}
 					misses = 0;
 					const job = await res.json();
 					const runner = $("#runner");
-					runner.querySelector("b").textContent = job.description;
+					const p = job.progress;
+					runner.querySelector("b").textContent = job.description
+						+ (p ? ` — Journey ${p.doneJourneys}/${p.totalJourneys}, Step ${p.doneSteps}/${p.totalSteps}` : "");
+					if (liveProgress && liveProgress.active && p) {
+						liveProgress.steps = new Map(Object.entries(p.steps || {}));
+						applyProgress();
+					}
 					const pre = runner.querySelector("pre");
 					const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
 					pre.textContent = job.lines.join("\n");
@@ -1404,6 +1617,9 @@
 					if (job.running) {
 						pollTimer = setTimeout(tick, 1000);
 					} else {
+						clearInterval(liveTimer);
+						// Hand coloring back to the manifest — refresh() re-renders with the real failure state.
+						liveProgress = null;
 						const passed = job.exitCode === 0;
 						runner.dataset.state = passed ? "pass" : "fail";
 						runner.querySelector(".status").innerHTML = passed
@@ -1460,6 +1676,12 @@
 					["r then a", "rerun all devices"],
 					["r then f", "rerun failed devices"],
 				]],
+				["Whole suite", [
+					["R then r", "rerun every journey on every device (updates live)"],
+					["R then R", "rerun everything, rebuilding the app first (EmbedAssemblies)"],
+					["R then f", "rerun only journeys that currently have failures"],
+					["R then F", "rerun failing journeys, rebuilding the app first"],
+				]],
 			];
 			function renderHelp() {
 				const sheet = $("#help .sheet");
@@ -1496,7 +1718,9 @@
 			// ---------- keyboard ----------
 			function startChord(prefix) {
 				chord = prefix;
-				toast("rerun:  r = this device   a = all devices   f = failed devices   (Esc cancels)", true);
+				toast(prefix === "R"
+					? "rerun all:  r = as-is   R = + rebuild app   f = failures only   F = failures + rebuild   (Esc cancels)"
+					: "rerun:  r = this device   a = all devices   f = failed devices   (Esc cancels)", true);
 				clearTimeout(chordTimer);
 				chordTimer = setTimeout(() => { chord = null; }, 4000);
 			}
@@ -1508,6 +1732,14 @@
 				const scope = key === "r" ? "this" : key === "a" ? "all" : key === "f" ? "failed" : null;
 				if (!scope) { toast("rerun cancelled"); return; }
 				rerun(f.journey, scope);
+			}
+			function resolveAllChord(key) {
+				clearTimeout(chordTimer);
+				chord = null;
+				const combos = { r: [false, false], R: [false, true], f: [true, false], F: [true, true] };
+				const combo = combos[key];
+				if (!combo) { toast("rerun cancelled"); return; }
+				rerunAll(combo[0], combo[1]);
 			}
 
 			document.addEventListener("keydown", (e) => {
@@ -1522,6 +1754,7 @@
 					return;
 				}
 				if (chord === "r") { e.preventDefault(); resolveChord(k.toLowerCase()); return; }
+				if (chord === "R") { e.preventDefault(); resolveAllChord(k); return; }
 				if (k === "?") { e.preventDefault(); const h = $("#help"); h.style.display = h.style.display === "flex" ? "none" : "flex"; return; }
 				if (k >= "1" && k <= "9") {
 					const cfg = M.configs[Number(k) - 1];
@@ -1544,6 +1777,7 @@
 				if (k === " ") { e.preventDefault(); rotatePane(null); return; }
 				if (k === "0") { resetZoom(); return; }
 				if (k === "r") { e.preventDefault(); startChord("r"); return; }
+				if (k === "R") { e.preventDefault(); startChord("R"); return; }
 				if (k === "a" || k === "x") {
 					const f = selectedFailure();
 					if (!f) { toast("no failure selected"); return; }
@@ -1599,50 +1833,60 @@
 				if (message) { toast(message); }
 			}
 
+			// A quiet re-scan for live monitoring: pull the manifest again and re-render in place, without
+			// changing the selection, snapping the view, or toasting — so a running "rerun all" ticks the
+			// graph forward as journeys finish without yanking the user around. `refresh` stays the one that
+			// reacts to a completed action.
+			async function softRefresh() {
+				try {
+					const res = await fetch("manifest.js", { cache: "no-store" });
+					if (!res.ok) { return; }
+					new Function(await res.text())();
+					Object.assign(M, window.MANIFEST);
+				} catch { return; }
+				const fails = currentFailures();
+				if (selected >= fails.length) { selected = Math.max(0, fails.length - 1); }
+				render();
+				if (zoomed && selectedFailure()) { openZoom(); }
+			}
+
 			// ---------- render ----------
 			function render() {
 				document.querySelectorAll("#config-seg button").forEach((b) => {
 					b.classList.toggle("active", b.dataset.config === config);
 					const fails = failureGroups(b.dataset.config).length;
 					const extra = filesFor(b.dataset.config).extraneous.length;
-					b.querySelectorAll(".badge").forEach((x) => x.remove());
-					if (fails > 0) {
-						const s = document.createElement("span");
-						s.className = "badge";
-						s.textContent = fails;
-						b.appendChild(s);
-					}
-					if (extra > 0) {
-						const s = document.createElement("span");
-						s.className = "badge extra";
-						s.textContent = extra;
-						b.appendChild(s);
+					b.querySelector(".badges")?.remove();
+					if (fails > 0 || extra > 0) {
+						const box = document.createElement("span");
+						box.className = "badges";
+						if (fails > 0) {
+							const s = document.createElement("span");
+							s.className = "badge";
+							s.textContent = fails;
+							box.appendChild(s);
+						}
+						if (extra > 0) {
+							const s = document.createElement("span");
+							s.className = "badge extra";
+							s.textContent = extra;
+							box.appendChild(s);
+						}
+						b.appendChild(box);
 					}
 				});
-				const fails = currentFailures();
-				const status = $("#nav-status");
-				if (resolved) {
-					status.textContent = `✓ ${resolved.label} — ${fails.length} failure${fails.length === 1 ? "" : "s"} left`
-						+ (fails.length > 0 ? " · press j for next" : " 🎉");
-					status.style.color = "var(--ok)";
-				} else {
-					status.textContent = fails.length > 0
-						? `failure ${Math.min(selected + 1, fails.length)} / ${fails.length}`
-						: "no failures";
-					status.style.color = "var(--muted)";
-				}
 				const extraCount = filesFor(config).extraneous.length;
 				const del = $("#del-extra");
 				del.style.display = extraCount > 0 && serverMode ? "" : "none";
 				del.textContent = `Delete all extraneous (${extraCount})`;
-				const hint = $("#mode-hint");
-				const label = serverMode
-					? "review server connected"
+				$("#rerun-all-group").style.display = serverMode ? "" : "none";
+				const server = $("#server-status");
+				server.textContent = serverMode
+					? "server connected"
 					: everServer
-						? "⚠ review server disconnected — retrying…"
-						: "static mode — run with <b>--review</b> to enable actions";
-				hint.innerHTML = label + `<span class="keyhint">? for help</span>`;
-				hint.style.color = serverMode ? "var(--muted)" : everServer ? "var(--fail)" : "var(--muted)";
+						? "server offline — retrying…"
+						: "static — run with --review";
+				server.style.color = serverMode || !everServer ? "var(--muted)" : "var(--fail)";
 				renderGraph();
 			}
 

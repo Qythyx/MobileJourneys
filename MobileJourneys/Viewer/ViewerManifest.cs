@@ -67,11 +67,16 @@ internal static class ViewerManifest
 		var journeys = config.Journeys.ToDictionary(j => j.Name, j => j.Containers.ToList());
 
 		var files = new Dictionary<string, object>();
+		// Pixel dimensions of a representative baseline per platform, so the page can size every
+		// screenshot thumbnail to one uniform box (the tallest device's aspect) — keeping node heights,
+		// and therefore the whole layout, identical across devices.
+		var dims = new Dictionary<string, object>();
 		foreach (var platform in config.PlatformConfigs)
 		{
 			var baselines = new List<string>();
 			var failures = new List<object>();
 			var extraneous = new List<string>();
+			(string Container, string File)? firstBaseline = null;
 			// Maps "container/file" → a token that changes only when that file changes, so the page
 			// can build cache-busting image URLs: unchanged files keep their URL (served from the
 			// browser cache with no request), a changed file gets a new URL and is refetched.
@@ -89,6 +94,7 @@ internal static class ViewerManifest
 				if (ArtifactNaming.IsBaseline(fileName))
 				{
 					baselines.Add($"{container}/{fileName}");
+					firstBaseline ??= (container, fileName);
 					continue;
 				}
 
@@ -120,6 +126,14 @@ internal static class ViewerManifest
 				extraneous,
 				versions,
 			};
+
+			if (
+				firstBaseline is { } fb
+				&& TryReadDimensions(config.Storage, platform, fb.Container, fb.File) is { } size
+			)
+			{
+				dims[platform.DisplayName] = new { w = size.Width, h = size.Height };
+			}
 		}
 
 		var manifest = new
@@ -129,6 +143,7 @@ internal static class ViewerManifest
 			nodes,
 			journeys,
 			files,
+			dims,
 		};
 		return $"window.MANIFEST = {JsonSerializer.Serialize(manifest, SerializerOptions)};";
 	}
@@ -163,6 +178,38 @@ internal static class ViewerManifest
 		catch (SixLabors.ImageSharp.ImageFormatException)
 		{
 			return string.Empty;
+		}
+	}
+
+	/// <summary>
+	/// Reads a screenshot's pixel dimensions from its PNG header (no full decode). Returns
+	/// <c>null</c> if the file is missing, empty, or not a readable image.
+	/// </summary>
+	/// <param name="storage">Storage to read the screenshot from.</param>
+	/// <param name="platform">Platform fixture the screenshot belongs to.</param>
+	/// <param name="container">Container path holding the screenshot.</param>
+	/// <param name="fileName">The screenshot's filename.</param>
+	private static (int Width, int Height)? TryReadDimensions(
+		ScreenshotStorage storage,
+		PlatformConfig platform,
+		string container,
+		string fileName
+	)
+	{
+		var bytes = storage.ReadFile(platform, container, fileName);
+		if (bytes is null or { Length: 0 })
+		{
+			return null;
+		}
+
+		try
+		{
+			var info = SixLabors.ImageSharp.Image.Identify(bytes);
+			return (info.Width, info.Height);
+		}
+		catch (SixLabors.ImageSharp.ImageFormatException)
+		{
+			return null;
 		}
 	}
 }

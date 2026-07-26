@@ -105,6 +105,7 @@ public sealed class TestFramework(
 			.ToList();
 
 		var reporter = new MtpReporter(context.MessageBus, sessionUid, this, config.TestNodeNamespace);
+		var progress = ProgressLog.FromEnvironment();
 		var skipped = TestCases.Count - selected.Count;
 		if (skipped > 0)
 		{
@@ -156,7 +157,14 @@ public sealed class TestFramework(
 								await PublishDiscoveredAsync(context, sessionUid, testCase);
 							}
 
-							await RunTestCasesAsync(driver, cases, reporter, manager, context.CancellationToken);
+							await RunTestCasesAsync(
+								driver,
+								cases,
+								reporter,
+								manager,
+								progress,
+								context.CancellationToken
+							);
 						},
 						context.CancellationToken
 					)
@@ -169,6 +177,7 @@ public sealed class TestFramework(
 		IReadOnlyList<TestCase> cases,
 		MtpReporter reporter,
 		ScreenshotManager manager,
+		ProgressLog? progress,
 		CancellationToken cancellationToken
 	)
 	{
@@ -188,8 +197,9 @@ public sealed class TestFramework(
 				await reporter.JourneyStartedAsync(testCase);
 				try
 				{
-					var result = await JourneyRunner.RunAsync(driver, testCase, reporter, manager);
+					var result = await JourneyRunner.RunAsync(driver, testCase, reporter, manager, progress);
 					await reporter.JourneyCompletedAsync(result);
+					progress?.JourneyCompleted(testCase, result.Passed);
 				}
 				catch when (cancellationToken.IsCancellationRequested)
 				{
@@ -204,6 +214,7 @@ public sealed class TestFramework(
 					await reporter.JourneyCompletedAsync(
 						new JourneyResult(testCase, false, TimeSpan.Zero, ex.Message, ex)
 					);
+					progress?.JourneyCompleted(testCase, false);
 				}
 			}
 		}

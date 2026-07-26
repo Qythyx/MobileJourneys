@@ -220,7 +220,12 @@ public static class ScreenshotViewer
 			return;
 		}
 
-		TryRespond(context, 200, "application/json", Encoding.UTF8.GetBytes(job.ToJson()));
+		TryRespond(
+			context,
+			200,
+			"application/json",
+			Encoding.UTF8.GetBytes(job.ToJson(context.Request.QueryString["config"]))
+		);
 	}
 
 	private static void HandleApi(
@@ -297,6 +302,14 @@ public static class ScreenshotViewer
 			case "rerun":
 				StartRerun(context, config, storage, JsonSerializer.Deserialize<RerunRequest>(body, RequestOptions));
 				return;
+			case "rerun-all":
+				StartRerunAll(
+					context,
+					config,
+					storage,
+					JsonSerializer.Deserialize<RerunAllRequest>(body, RequestOptions)
+				);
+				return;
 			default:
 				TryRespond(context, 404, "text/plain", Encoding.UTF8.GetBytes("unknown action"));
 				return;
@@ -304,8 +317,9 @@ public static class ScreenshotViewer
 	}
 
 	/// <summary>
-	/// Launches <c>dotnet test</c> for one journey on the requested platforms. Only one rerun
-	/// runs at a time — concurrent runs would fight over the simulators.
+	/// Reruns one journey on the requested platforms. Every scope reruns the same journey; they
+	/// differ only in which fixtures it runs on — every platform ("all"), only the ones that
+	/// currently have failures ("failed"), or the single originating one.
 	/// </summary>
 	/// <param name="context">The request to respond to.</param>
 	/// <param name="config">Framework configuration providing the journeys and platforms.</param>
@@ -338,6 +352,88 @@ public static class ScreenshotViewer
 			return;
 		}
 
+		var filterArgs = platforms.SelectMany(p => new[] { "--filter", $"{p.DisplayName}.{journey.Name}" });
+		var stepsPerJourney = journey.ExpectedStepLocations().Count();
+		LaunchRerun(
+			context,
+			$"{journey.Name} on {string.Join(", ", platforms.Select(p => p.DisplayName))}",
+			filterArgs,
+			platforms.Count,
+			platforms.Count * stepsPerJourney
+		);
+	}
+
+	/// <summary>
+	/// Reruns the whole suite. Two orthogonal flags: <see cref="RerunAllRequest.Failed"/> passes
+	/// <c>--rerun</c> to run only the journeys that currently have failure artifacts (otherwise every
+	/// journey on every platform); <see cref="RerunAllRequest.Embed"/> passes
+	/// <c>-p:EmbedAssemblies=true</c> to rebuild and re-embed the app first (needed after app-code
+	/// changes). The two combine.
+	/// </summary>
+	/// <param name="context">The request to respond to.</param>
+	/// <param name="config">Framework configuration providing the journeys and platforms, for the progress totals.</param>
+	/// <param name="storage">Storage consulted (when <c>Failed</c>) for which journeys still have failures.</param>
+	/// <param name="request">Whether to limit to failing journeys and/or rebuild the app first.</param>
+	private static void StartRerunAll(
+		HttpListenerContext context,
+		FrameworkConfig config,
+		FilesystemScreenshotStorage storage,
+		RerunAllRequest? request
+	)
+	{
+		var failed = request?.Failed ?? false;
+		var embed = request?.Embed ?? false;
+
+		var extraArgs = new List<string>();
+		if (embed)
+		{
+			extraArgs.Add("-p:EmbedAssemblies=true");
+		}
+		if (failed)
+		{
+			extraArgs.Add("--rerun");
+		}
+
+		int totalJourneys;
+		int totalSteps;
+		if (failed)
+		{
+			// Mirror the framework's own --rerun selection so the progress totals match what actually runs.
+			var journeys = config
+				.PlatformConfigs.SelectMany(p => config.Journeys.Where(j => storage.HasFailureArtifacts(p, j)))
+				.ToList();
+			totalJourneys = journeys.Count;
+			totalSteps = journeys.Sum(j => j.ExpectedStepLocations().Count());
+		}
+		else
+		{
+			var platformCount = config.PlatformConfigs.Count;
+			totalJourneys = config.Journeys.Count * platformCount;
+			totalSteps = platformCount * config.Journeys.Sum(j => j.ExpectedStepLocations().Count());
+		}
+
+		var description = (failed ? "failed journeys" : "all journeys") + (embed ? " (rebuilding app)" : "");
+		LaunchRerun(context, description, extraArgs, totalJourneys, totalSteps);
+	}
+
+	/// <summary>
+	/// Starts a <c>dotnet test</c> rerun with the given extra arguments appended to the shared ones,
+	/// tracking it as the single active job. Only one rerun runs at a time — concurrent runs would
+	/// fight over the simulators — so this answers 409 when one is already going.
+	/// </summary>
+	/// <param name="context">The request to answer with the new job's id, or an error.</param>
+	/// <param name="description">Human-readable summary of what is being rerun, shown on the page.</param>
+	/// <param name="extraArgs">Arguments appended after the shared ones — journey filters, or build flags.</param>
+	/// <param name="totalJourneys">Total journey runs this rerun will perform (journeys × platforms), for the progress counter.</param>
+	/// <param name="totalSteps">Total screenshot steps this rerun will perform, for the progress counter.</param>
+	private static void LaunchRerun(
+		HttpListenerContext context,
+		string description,
+		IEnumerable<string> extraArgs,
+		int totalJourneys,
+		int totalSteps
+	)
+	{
 		var projectPath = Directory.GetFiles(TestAssembly.ProjectRootPath, "*.csproj").FirstOrDefault();
 		if (projectPath is null)
 		{
@@ -345,7 +441,11 @@ public static class ScreenshotViewer
 			return;
 		}
 
-		var job = new RerunJob($"{journey.Name} on {string.Join(", ", platforms.Select(p => p.DisplayName))}");
+		// The running test process appends per-step/per-journey progress here (see ProgressLog); the
+		// page polls rerun-status, which reads it back. A file side-channel, not stdout, because
+		// dotnet test captures the test app's stdout.
+		var progressPath = Path.Combine(Path.GetTempPath(), $"mj-progress-{Guid.NewGuid():N}.tsv");
+		var job = new RerunJob(description, progressPath, totalJourneys, totalSteps);
 		lock (RerunGate)
 		{
 			if (jobs.Values.Any(j => j.Running))
@@ -364,6 +464,7 @@ public static class ScreenshotViewer
 			RedirectStandardError = true,
 			UseShellExecute = false,
 		};
+		startInfo.Environment["MJ_PROGRESS_FILE"] = progressPath;
 		startInfo.ArgumentList.Add("test");
 		startInfo.ArgumentList.Add("--project");
 		startInfo.ArgumentList.Add(projectPath);
@@ -372,10 +473,9 @@ public static class ScreenshotViewer
 		// scrollback pane can only render as hundreds of near-identical lines.
 		startInfo.ArgumentList.Add("--no-progress");
 		startInfo.ArgumentList.Add("--no-ansi");
-		foreach (var platform in platforms)
+		foreach (var arg in extraArgs)
 		{
-			startInfo.ArgumentList.Add("--filter");
-			startInfo.ArgumentList.Add($"{platform.DisplayName}.{journey.Name}");
+			startInfo.ArgumentList.Add(arg);
 		}
 
 		job.Append($"$ dotnet {string.Join(" ", startInfo.ArgumentList.Select(Quote))}");
@@ -385,6 +485,14 @@ public static class ScreenshotViewer
 		process.Exited += (_, _) =>
 		{
 			job.Complete(process.ExitCode);
+			try
+			{
+				File.Delete(progressPath);
+			}
+			catch (IOException)
+			{
+				// Best-effort cleanup of the temp progress file; a leftover in TEMP is harmless.
+			}
 			process.Dispose();
 		};
 
@@ -450,9 +558,14 @@ public static class ScreenshotViewer
 
 	private sealed record RerunRequest(string Config, string Journey, string Scope);
 
+	private sealed record RerunAllRequest(bool Failed, bool Embed);
+
 	/// <summary>A running or finished <c>dotnet test</c> rerun, and the console output collected from it.</summary>
 	/// <param name="description">Human-readable summary of what is being rerun, shown on the page.</param>
-	private sealed class RerunJob(string description)
+	/// <param name="progressPath">File the test process appends per-step/per-journey progress lines to.</param>
+	/// <param name="totalJourneys">Total journey runs this rerun performs, for the progress counter.</param>
+	/// <param name="totalSteps">Total screenshot steps this rerun performs, for the progress counter.</param>
+	private sealed class RerunJob(string description, string progressPath, int totalJourneys, int totalSteps)
 	{
 		private readonly List<string> lines = [];
 		private readonly object gate = new();
@@ -500,8 +613,9 @@ public static class ScreenshotViewer
 			}
 		}
 
-		/// <summary>Serializes the current status and output for the page.</summary>
-		internal string ToJson()
+		/// <summary>Serializes the current status, output, and progress for the page.</summary>
+		/// <param name="config">Platform whose per-screenshot progress the page wants; counts stay global.</param>
+		internal string ToJson(string? config)
 		{
 			lock (gate)
 			{
@@ -513,10 +627,62 @@ public static class ScreenshotViewer
 						running = Running,
 						exitCode = ExitCode,
 						lines,
+						progress = ReadProgress(config),
 					},
 					ResponseOptions
 				);
 			}
+		}
+
+		/// <summary>
+		/// Reads the progress file the test process is appending to: overall journeys/steps completed
+		/// (across all platforms, for the counter) plus a per-screenshot pass/fail map for the requested
+		/// platform (for recoloring the graph). Missing/partly-written lines are ignored, so a torn read
+		/// mid-append just yields slightly stale progress.
+		/// </summary>
+		/// <param name="config">Platform whose step results to include; <c>null</c> includes all.</param>
+		private object ReadProgress(string? config)
+		{
+			var steps = new Dictionary<string, string>(StringComparer.Ordinal);
+			var doneJourneys = 0;
+			var doneSteps = 0;
+			string text;
+			try
+			{
+				using var stream = new FileStream(progressPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+				using var reader = new StreamReader(stream, Encoding.UTF8);
+				text = reader.ReadToEnd();
+			}
+			catch (IOException)
+			{
+				text = "";
+			}
+
+			foreach (var line in text.Split('\n'))
+			{
+				switch (line.Split('\t'))
+				{
+					case ["step", var cfg, var container, var step, var result]:
+						doneSteps++;
+						if (config is null || cfg == config)
+						{
+							steps[$"{container}/{step}"] = result;
+						}
+						break;
+					case ["journey", _, _, _]:
+						doneJourneys++;
+						break;
+				}
+			}
+
+			return new
+			{
+				doneJourneys,
+				totalJourneys,
+				doneSteps,
+				totalSteps,
+				steps,
+			};
 		}
 	}
 }

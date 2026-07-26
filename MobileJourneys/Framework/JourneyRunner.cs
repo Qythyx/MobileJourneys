@@ -8,7 +8,8 @@ internal static class JourneyRunner
 		TestDriver driver,
 		TestCase testCase,
 		MtpReporter reporter,
-		ScreenshotManager manager
+		ScreenshotManager manager,
+		ProgressLog? progress
 	)
 	{
 		var journey = testCase.Journey;
@@ -73,10 +74,12 @@ internal static class JourneyRunner
 				JourneyDefinition.FormatStepName(number, name),
 				journey.Name
 			);
+			var stepPassed = true;
 			try
 			{
 				manager.DeleteFailureArtifactsForStep(testStep);
 				var stepResult = driver.DoActionAndCompareWithBaseline(execute, testStep, maskElements, prefetchMasks);
+				stepPassed = stepResult.Passed;
 				if (!stepResult.Passed)
 				{
 					var message =
@@ -87,10 +90,13 @@ internal static class JourneyRunner
 			}
 			catch (Exception ex)
 			{
+				stepPassed = false;
 				HandleStepFailure(driver, manager, ex, testStep);
 				var message = $"step {number}/{totalSteps}: {name} — {ex.Message}";
 				failures.Add(new JourneyFailureException(message, journey, journeyStep, number, totalSteps, name, ex));
 			}
+
+			progress?.StepCompleted(testStep, stepPassed);
 		}
 
 		stopwatch.Stop();
@@ -139,7 +145,7 @@ internal static class JourneyRunner
 		// seconds, and on a timeout failure the screen often finishes rendering in that window —
 		// producing evidence that shows a perfectly good screen.
 		var screenshot = driver.TryCaptureScreenshot();
-		var details = $"{ex.GetType().FullName}: {ex.Message}\n\n{ex.StackTrace}";
+		var details = $"{ex.GetType().FullName}: {ex.Message}";
 		var appCrashed = driver.IsAppCrashed();
 		if (appCrashed)
 		{
