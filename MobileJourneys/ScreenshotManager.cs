@@ -1,5 +1,4 @@
 using Codeuctivity.ImageSharpCompare;
-using OpenQA.Selenium.Appium;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using Image = SixLabors.ImageSharp.Image;
