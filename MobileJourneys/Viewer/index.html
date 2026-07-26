@@ -1272,12 +1272,16 @@
 
 			async function act(action, f) {
 				if (!serverMode) { toast("start with --review to enable this"); return; }
-				if (await api(action, { config, container: f.container, step: f.step, journey: f.journey })) {
+				if (!(await api(action, { config, container: f.container, step: f.step, journey: f.journey }))) { return; }
+				const message = action === "accept" ? "Accepted " + f.step : "Discarded " + f.step;
+				if (zoomed) {
+					// Stay in triage: with no resolvedLabel, refresh advances `selected` to the next failure
+					// (the resolved one drops out of the list) and re-opens the zoom on it — or closes the
+					// zoom once this device has no failures left.
+					refresh(message);
+				} else {
 					closeZoom();
-					refresh(
-						action === "accept" ? "Accepted " + f.step : "Discarded " + f.step,
-						action === "accept" ? "baseline accepted" : "artifacts discarded"
-					);
+					refresh(message, action === "accept" ? "baseline accepted" : "artifacts discarded");
 				}
 			}
 
