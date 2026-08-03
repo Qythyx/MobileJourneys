@@ -352,12 +352,21 @@ public static class ScreenshotViewer
 			return;
 		}
 
-		var filterArgs = platforms.SelectMany(p => new[] { "--filter", $"{p.DisplayName}.{journey.Name}" });
+		// --rerun re-derives the failing fixtures from the same predicate that built the platform list
+		// above, so the run and the progress totals cannot disagree.
+		List<string> scopeArgs = request.Scope switch
+		{
+			"all" => [],
+			"failed" => ["--rerun"],
+			_ => ["--filter", platforms[0].DisplayName],
+		};
+
 		var stepsPerJourney = journey.ExpectedStepLocations().Count();
 		LaunchRerun(
 			context,
 			$"{journey.Name} on {string.Join(", ", platforms.Select(p => p.DisplayName))}",
-			filterArgs,
+			[],
+			["--journey", journey.Name, .. scopeArgs],
 			platforms.Count,
 			platforms.Count * stepsPerJourney
 		);
@@ -384,15 +393,8 @@ public static class ScreenshotViewer
 		var failed = request?.Failed ?? false;
 		var embed = request?.Embed ?? false;
 
-		var extraArgs = new List<string>();
-		if (embed)
-		{
-			extraArgs.Add("-p:EmbedAssemblies=true");
-		}
-		if (failed)
-		{
-			extraArgs.Add("--rerun");
-		}
+		List<string> buildArgs = embed ? ["-p:EmbedAssemblies=true"] : [];
+		List<string> runnerArgs = failed ? ["--rerun"] : [];
 
 		int totalJourneys;
 		int totalSteps;
@@ -413,23 +415,25 @@ public static class ScreenshotViewer
 		}
 
 		var description = (failed ? "failed journeys" : "all journeys") + (embed ? " (rebuilding app)" : "");
-		LaunchRerun(context, description, extraArgs, totalJourneys, totalSteps);
+		LaunchRerun(context, description, buildArgs, runnerArgs, totalJourneys, totalSteps);
 	}
 
 	/// <summary>
-	/// Starts a <c>dotnet test</c> rerun with the given extra arguments appended to the shared ones,
+	/// Starts a <c>dotnet run</c> rerun with the given extra arguments appended to the shared ones,
 	/// tracking it as the single active job. Only one rerun runs at a time — concurrent runs would
 	/// fight over the simulators — so this answers 409 when one is already going.
 	/// </summary>
 	/// <param name="context">The request to answer with the new job's id, or an error.</param>
 	/// <param name="description">Human-readable summary of what is being rerun, shown on the page.</param>
-	/// <param name="extraArgs">Arguments appended after the shared ones — journey filters, or build flags.</param>
+	/// <param name="buildArgs">MSBuild properties for <c>dotnet run</c> itself, before the <c>--</c>.</param>
+	/// <param name="runnerArgs">Arguments for the runner, after the <c>--</c> — the journey selection, or <c>--rerun</c>.</param>
 	/// <param name="totalJourneys">Total journey runs this rerun will perform (journeys × platforms), for the progress counter.</param>
 	/// <param name="totalSteps">Total screenshot steps this rerun will perform, for the progress counter.</param>
 	private static void LaunchRerun(
 		HttpListenerContext context,
 		string description,
-		IEnumerable<string> extraArgs,
+		IEnumerable<string> buildArgs,
+		IEnumerable<string> runnerArgs,
 		int totalJourneys,
 		int totalSteps
 	)
@@ -442,8 +446,9 @@ public static class ScreenshotViewer
 		}
 
 		// The running test process appends per-step/per-journey progress here (see ProgressLog); the
-		// page polls rerun-status, which reads it back. A file side-channel, not stdout, because
-		// dotnet test captures the test app's stdout.
+		// page polls rerun-status, which reads it back. A file side-channel rather than the console
+		// output we already capture, because the page needs to identify the exact screenshot each
+		// event belongs to, which structured lines give it and prose does not.
 		var progressPath = Path.Combine(Path.GetTempPath(), $"mj-progress-{Guid.NewGuid():N}.tsv");
 		var job = new RerunJob(description, progressPath, totalJourneys, totalSteps);
 		lock (RerunGate)
@@ -465,15 +470,17 @@ public static class ScreenshotViewer
 			UseShellExecute = false,
 		};
 		startInfo.Environment["MJ_PROGRESS_FILE"] = progressPath;
-		startInfo.ArgumentList.Add("test");
+		startInfo.ArgumentList.Add("run");
 		startInfo.ArgumentList.Add("--project");
 		startInfo.ArgumentList.Add(projectPath);
-		startInfo.ArgumentList.Add("-p:RunUITests=true");
-		// The live progress line repaints itself with carriage returns and ANSI codes, which a
-		// scrollback pane can only render as hundreds of near-identical lines.
-		startInfo.ArgumentList.Add("--no-progress");
-		startInfo.ArgumentList.Add("--no-ansi");
-		foreach (var arg in extraArgs)
+		foreach (var arg in buildArgs)
+		{
+			startInfo.ArgumentList.Add(arg);
+		}
+		// Everything after this belongs to the runner, not to `dotnet run` itself.
+		startInfo.ArgumentList.Add("--");
+		startInfo.ArgumentList.Add("--run");
+		foreach (var arg in runnerArgs)
 		{
 			startInfo.ArgumentList.Add(arg);
 		}
@@ -560,7 +567,7 @@ public static class ScreenshotViewer
 
 	private sealed record RerunAllRequest(bool Failed, bool Embed);
 
-	/// <summary>A running or finished <c>dotnet test</c> rerun, and the console output collected from it.</summary>
+	/// <summary>A running or finished <c>dotnet run</c> rerun, and the console output collected from it.</summary>
 	/// <param name="description">Human-readable summary of what is being rerun, shown on the page.</param>
 	/// <param name="progressPath">File the test process appends per-step/per-journey progress lines to.</param>
 	/// <param name="totalJourneys">Total journey runs this rerun performs, for the progress counter.</param>
@@ -579,10 +586,9 @@ public static class ScreenshotViewer
 		private int ExitCode { get; set; }
 
 		/// <summary>
-		/// Appends one console line, discarding the oldest once the cap is reached. The rerun is
-		/// launched with <c>--no-progress --no-ansi</c> and its stdout is redirected, so the stream
-		/// carries no ANSI escapes or carriage-return repainting and the text is shown as-is; only
-		/// the blank lines those flags leave behind are dropped.
+		/// Appends one console line, discarding the oldest once the cap is reached. The rerun's
+		/// stdout is redirected, which makes the runner drop its colour codes, so the text is shown
+		/// as-is.
 		/// </summary>
 		/// <param name="line">The line to append; <c>null</c> (the end-of-stream marker) and blank lines are ignored.</param>
 		internal void Append(string? line)
@@ -603,7 +609,7 @@ public static class ScreenshotViewer
 		}
 
 		/// <summary>Marks the job finished with the process's exit code.</summary>
-		/// <param name="exitCode">The exit code <c>dotnet test</c> returned.</param>
+		/// <param name="exitCode">The exit code <c>dotnet run</c> returned.</param>
 		internal void Complete(int exitCode)
 		{
 			lock (gate)

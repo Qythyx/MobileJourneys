@@ -107,6 +107,29 @@ public abstract class ScreenshotStorage
 		return [.. extraneous.Select(e => GetReportPath(e.Platform, e.File)).Order(StringComparer.Ordinal)];
 	}
 
+	/// <summary>
+	/// Locates every failure artifact attributed to the journey, so a reader can open the evidence.
+	/// </summary>
+	/// <param name="config">Platform fixture the journey ran on.</param>
+	/// <param name="journey">The journey whose artifacts to find.</param>
+	/// <returns>Locations in whatever form this backend can be addressed by, sorted.</returns>
+	internal IReadOnlyList<string> FailureArtifactLocations(PlatformConfig config, JourneyDefinition journey) =>
+		[
+			.. ListFiles(config)
+				.Where(file => ArtifactNaming.IsFailureArtifactForJourney(file.FileName, journey.Name))
+				.Select(file => GetArtifactLocation(config, file))
+				.Order(StringComparer.Ordinal),
+		];
+
+	/// <summary>
+	/// Where a stored file can be found. Defaults to the same display path the reports use; a
+	/// backend a reader can open directly overrides it with something they can act on.
+	/// </summary>
+	/// <param name="config">Platform fixture the file belongs to.</param>
+	/// <param name="file">The stored file.</param>
+	/// <returns>The location string.</returns>
+	protected virtual string GetArtifactLocation(PlatformConfig config, StoredFile file) => GetReportPath(config, file);
+
 	/// <summary>Lists every stored file under the platform as (container, filename) pairs — see <see cref="ListFiles"/>.</summary>
 	internal IReadOnlyList<(string Container, string FileName)> ListStoredFiles(PlatformConfig config) =>
 		[.. ListFiles(config).Select(f => (f.Container, f.FileName))];

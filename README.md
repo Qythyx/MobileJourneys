@@ -1,18 +1,18 @@
 # MobileJourneys
 
-A reusable .NET 10 UI-test framework for iOS and Android apps, built on [Appium](https://appium.io/)
-and
-[Microsoft.Testing.Platform](https://learn.microsoft.com/dotnet/core/testing/microsoft-testing-platform-intro).
-Tests are written as **journeys** — declarative sequences of `Action` and `Expectation` records —
-and verified against per-platform PNG screenshot baselines.
+A reusable .NET 10 UI-test framework for iOS and Android apps, built on
+[Appium](https://appium.io/). Tests are written as **journeys** — declarative sequences of `Action`
+and `Expectation` records — and verified against per-platform PNG screenshot baselines. The consumer
+is a plain console application run with `dotnet run`, so the framework owns its console output
+rather than publishing progress to a test host.
 
 [![CI](https://github.com/Qythyx/MobileJourneys/actions/workflows/ci.yml/badge.svg)](https://github.com/Qythyx/MobileJourneys/actions/workflows/ci.yml)
 
 ## What you get
 
 - A small model (`JourneyAction`, `Expectation`, `JourneyStep`, `JourneyDefinition`) for expressing
-  app flows declaratively — plus `JourneyTree`/`Branch` for suites of journeys sharing step prefixes,
-  so shared steps are defined and screenshotted once.
+  app flows declaratively — plus `JourneyTree`/`Branch` for suites of journeys sharing step
+  prefixes, so shared steps are defined and screenshotted once.
 - A `using static` factory DSL (`MobileJourneys.Dsl`) so journeys read as bare calls —
   `Branch("Menu", Step(Tap(id), Found(a)))` — instead of a wall of `new`.
 - Built-in actions: `Tap`, `TypeText`, `SwipeLeft`/`Right`, `DismissAlert`, `DismissKeyboard`,
@@ -22,8 +22,13 @@ and verified against per-platform PNG screenshot baselines.
   deep links, hardware-keyboard control, and crash detection.
 - Screenshot-baseline comparison via `SixLabors.ImageSharp` + `Codeuctivity.ImageSharpCompare` with
   maskable regions for animated UI elements.
-- A custom MTP `TestFramework` that runs the cross-product of platform fixtures and journeys, with
-  `--filter`, `--rerun`, `--list-extraneous`, `--delete-extraneous`, `--review` CLI flags.
+- A `SuiteRunner` that runs the cross-product of platform fixtures and journeys from a plain console
+  entry point, with `--run`, `--journey`, `--filter`, `--rerun`, `--list-extraneous`,
+  `--delete-extraneous`, `--review` CLI flags — a live
+  [Spectre.Console](https://spectreconsole.net/) status table at a terminal, plain per-step lines
+  when stdout is redirected.
+- An interactive front door: with no arguments the runner offers its modes as a menu, and after a
+  run it offers each failure for inspection — message, stack trace, failing step, artifact paths.
 - A screenshot viewer web page (static after every run, or served live via `--review`): a
   pannable/zoomable graph of the journey forest with thumbnails, failure badges, and extraneous
   highlighting, plus interactive failure triage (Accept/Reject) and extraneous cleanup.
@@ -53,8 +58,8 @@ emulator -avd Pixel_8_API35     # Android (in a separate terminal)
 
 ## Quick start
 
-The framework is consumed by an MTP-based test executable that supplies its own journeys, platform
-fixtures, and per-app mock state.
+The framework is consumed by a console executable that supplies its own journeys, platform fixtures,
+and per-app mock state.
 
 ### 1. Reference the project
 
@@ -193,67 +198,31 @@ Two shapes are rejected at construction, because each is a mistake rather than a
 with neither steps nor children, and siblings sharing a name. The first is worth explaining — a
 childless branch with no steps re-runs exactly the path its siblings already traverse, asserts
 nothing they do not, and produces no screenshot of its own, so it costs a full journey execution per
-fixture and buys nothing; give it steps to make it a journey, or children to make it a shared prefix.
-(A tree _root_ with no steps is fine: its initial screenshot is the whole test.)
+fixture and buys nothing; give it steps to make it a journey, or children to make it a shared
+prefix. (A tree _root_ with no steps is fine: its initial screenshot is the whole test.)
 
 ### 5. Wire up `Program.Main`
 
 ```csharp
 internal static class Program
 {
-    public static async Task<int> Main(string[] args)
-    {
-        var config = new FrameworkConfig(
-            "MyApp UI Tests",
-            "UI test runner for MyApp.",
-            "MyApp.UITests.Journeys",
-            "myapp",
-            MyAppPlatforms.All,
-            [.. Journeys.All]
+    public static Task<int> Main(string[] args) =>
+        SuiteRunner.RunAsync(
+            new FrameworkConfig("MyApp UI Tests", MyAppPlatforms.All, [.. Journeys.All]),
+            args
         );
-
-        if (args.Contains($"--{CommandLineProvider.ListExtraneousOption}") ||
-            args.Contains($"--{CommandLineProvider.DeleteExtraneousOption}")
-        )
-        {
-            var deleteMode = args.Contains($"--{CommandLineProvider.DeleteExtraneousOption}");
-            return CheckExtraneousFiles(config, deleteMode);
-        }
-
-        if (args.Contains($"--{CommandLineProvider.ReviewOption}"))
-        {
-            return ScreenshotViewer.RunReviewServer(config);
-        }
-
-        var builder = await TestApplication.CreateBuilderAsync(args);
-#if RUN_UI_TESTS
-        builder.AddSelfRegisteredExtensions(args);
-#endif
-        builder.CommandLine.AddProvider(() => new CommandLineProvider(config));
-        _ = builder.RegisterTestFramework(
-            _ => new TestFrameworkCapabilities(),
-            (caps, sp) => new TestFramework(caps, sp, config)
-        );
-        using var app = await builder.BuildAsync();
-        var exitCode = await app.RunAsync();
-        // Refresh the static viewer page so it reflects this run's baselines and failure artifacts.
-        ScreenshotViewer.WriteStaticAssets(config);
-        return exitCode;
-    }
-
-    private static int CheckExtraneousFiles(FrameworkConfig config, bool delete)
-    {
-        var paths = config.FindExtraneous(delete);
-        Console.WriteLine($"{(delete ? "Deleted" : "Found")} {paths.Count} extraneous file(s).");
-        foreach (var p in paths) Console.WriteLine($"  {p}");
-        return delete ? 0 : (paths.Count == 0 ? 0 : 1);
-    }
 }
 ```
 
-`ScreenshotManager` is an instance class that consumes a `ScreenshotStorage`. The default is
-`FilesystemScreenshotStorage` rooted at the test project's `Screenshots/` directory; override via
-`FrameworkConfig { Storage = … }` to swap in an alternative backend.
+`SuiteRunner.RunAsync` owns everything else: parsing the flags (or offering the menu when there are
+none), selecting journeys, starting Appium, bringing every fixture up before the first journey runs,
+running the fixtures concurrently, refreshing the static viewer page, and returning the exit code (0
+all passed, 1 any failure, 2 a bad command line).
+
+Fixtures are brought up first so a device that cannot host the suite is known before any journey
+starts. An Android app installed without embedded assemblies crashes at launch, and the runner
+offers — at a terminal — to rebuild the consumer project with `-p:EmbedAssemblies=true` and try
+again; with stdout redirected it prints the same hint and abandons the fixture.
 
 ### 6. Required csproj bits
 
@@ -263,40 +232,44 @@ The consumer csproj must:
 <PropertyGroup>
     <UseMaui>true</UseMaui> <!-- if your app is MAUI -->
     <OutputType>Exe</OutputType>
-    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
-    <IsTestingPlatformApplication Condition="'$(RunUITests)' == 'true'">true</IsTestingPlatformApplication>
-    <GenerateTestingPlatformEntryPoint>false</GenerateTestingPlatformEntryPoint>
+    <!-- Not a test project: keeps the slow, simulator-dependent journeys out of
+         solution-wide `dotnet test` runs. Run them with `dotnet run` instead. -->
+    <IsTestProject>false</IsTestProject>
+    <IsTestingPlatformApplication>false</IsTestingPlatformApplication>
 </PropertyGroup>
 <ItemGroup>
     <!-- Required: lets TestAssembly resolve ProjectDir / RepoRoot. -->
     <AssemblyMetadata Include="ProjectDir" Value="$(MSBuildProjectDirectory)" />
     <AssemblyMetadata Include="RepoRoot" Value="$(RepoRoot)" />
 </ItemGroup>
-<ItemGroup>
-    <PackageReference Include="Microsoft.Testing.Platform" />
-    <PackageReference Include="Microsoft.Testing.Platform.MSBuild" />
-</ItemGroup>
 ```
 
 ## Running
 
 ```bash
-# All journeys, all platforms (gated behind RunUITests=true so solution-wide test runs skip them)
-dotnet test --project test/MyApp.UITests/MyApp.UITests.csproj -p:RunUITests=true -- --filter ""
+# No arguments: choose a mode from the menu (needs a terminal)
+dotnet run --project test/MyApp.UITests
 
-# A single journey on iOS light fixture (substring match against "{platform}.{journey}")
-dotnet test --project test/MyApp.UITests/MyApp.UITests.csproj -p:RunUITests=true -- \
-    --filter Login --filter "iPhone 17 Pro"
+# All journeys, all platforms. --run is required — no other flag starts a run.
+dotnet run --project test/MyApp.UITests -- --run
+
+# Named journeys, on every platform. --journey matches a whole journey name
+# case-insensitively, and several are ORed.
+dotnet run --project test/MyApp.UITests -- --run --journey Login --journey Logout
+
+# A single journey on the iOS light fixture. Filters are ANDed with each other and
+# with --journey, and each is a case-insensitive substring of "{platform}.{journey}".
+dotnet run --project test/MyApp.UITests -- --run --journey Login --filter "iPhone 17 Pro"
 
 # Re-run only journeys with failure artifacts on disk
-dotnet test --project test/MyApp.UITests/MyApp.UITests.csproj -p:RunUITests=true -- --rerun
+dotnet run --project test/MyApp.UITests -- --run --rerun
 
 # Maintenance: detect / clean up orphaned baselines after journey renames
-dotnet run --project test/MyApp.UITests -p:RunUITests=true -- --list-extraneous
-dotnet run --project test/MyApp.UITests -p:RunUITests=true -- --delete-extraneous
+dotnet run --project test/MyApp.UITests -- --list-extraneous
+dotnet run --project test/MyApp.UITests -- --delete-extraneous
 
 # Serve the screenshot viewer with review actions enabled
-dotnet run --project test/MyApp.UITests -p:RunUITests=true -- --review
+dotnet run --project test/MyApp.UITests -- --review
 ```
 
 ## Screenshots
@@ -306,14 +279,13 @@ Baselines live under
 where the container is the journey's own folder for flat `JourneyDefinition`s, or the tree node's
 nested folder path (e.g. `Home/Menu/About/`) for tree-defined journeys — shared steps are stored
 once. The first run for a new step produces the baseline; subsequent runs compare (on shared steps,
-whichever journey runs first writes the baseline and the rest compare mask-aware). Failure
-artifacts (the actual capture for a mismatch, the diff visualization, FAIL screenshots from
-exceptions, and crash logs) land alongside the baseline, stamped with the producing journey's name
-so runs through a shared node can't clobber each other's evidence, and are auto-cleaned when the
-step next passes. Filename layout is owned by the storage backend; with the default
-`FilesystemScreenshotStorage` they appear as `<step> [<journey>].new.png`,
-`<step> [<journey>]_diff_<pct>%.png`, `<step> [<journey>]_FAIL_<reason>.png`, and
-`<step> [<journey>].CRASH.txt`.
+whichever journey runs first writes the baseline and the rest compare mask-aware). Failure artifacts
+(the actual capture for a mismatch, the diff visualization, FAIL screenshots from exceptions, and
+crash logs) land alongside the baseline, stamped with the producing journey's name so runs through a
+shared node can't clobber each other's evidence, and are auto-cleaned when the step next passes.
+Filename layout is owned by the storage backend; with the default `FilesystemScreenshotStorage` they
+appear as `<step> [<journey>].new.png`, `<step> [<journey>]_diff_<pct>%.png`,
+`<step> [<journey>]_FAIL_<reason>.png`, and `<step> [<journey>].CRASH.txt`.
 
 A FAIL screenshot records its cause twice, for two different readers. The filename keeps a
 sanitized, 80-char reason so a directory listing still tells you what happened, and the PNG's text
@@ -348,12 +320,13 @@ each image. Actions are Accept (promote its `.new` capture to the baseline; note
 carries no embedded mask metadata until the next run regenerates it), Discard (delete that journey's
 artifacts for the step, leaving the baseline alone), deleting extraneous files individually or all
 at once, and rerunning a journey — on the current fixture, all fixtures, or only the fixtures where
-it currently fails. A rerun covers the selected journey only — the scopes differ in which fixtures it runs on, not in
-how many journeys run. It shells out to `dotnet test --filter` with `--no-progress --no-ansi` (a
-repainting progress line renders as hundreds of near-identical rows in a scrollback pane), streams
-the output into the page, and reloads the view when it finishes; only one rerun runs at a time,
-since concurrent runs would fight over the simulators. Press `u` to reload from disk by hand if a
-run's completion is ever missed.
+it currently fails. A rerun covers the selected journey only — the scopes differ in which fixtures
+it runs on, not in how many journeys run. It shells out to `dotnet run … -- --run --journey <name>`,
+narrowed by `--filter` for the current fixture or by `--rerun` for the fixtures that currently fail,
+with its output redirected so the runner falls back to plain per-step lines; it streams that into
+the page and reloads the view when it finishes. Only one rerun runs at a time, since concurrent runs
+would fight over the simulators. Press `u` to reload from disk by hand if a run's completion is ever
+missed.
 
 Resolving the selected failure — a rerun passing, or Accept/Discard — deliberately does not advance
 the selection. Snapping to whatever failure fell into the vacated slot is disorienting and hides the
@@ -363,13 +336,13 @@ you move on with `j`/`k`, which clears the green state. The log box persists as 
 run and is dismissed with `Esc` or its ✕.
 
 Press `?` in the page for the keymap. Highlights: `1`–`4` and `[`/`]` switch fixture, `j`/`k` step
-through failures (centering each), `z` zooms the selected one, `b`/`n`/`d`/`space` rotate the leading
-image pane through baseline/new/diff, `f` fits the tree, `u` reloads from disk, `a` accepts, `x`
-discards, and rerun is a two-key chord (`r` then `r`/`a`/`f`) so an expensive run can't fire on a
-single keypress.
+through failures (centering each), `z` zooms the selected one, `b`/`n`/`d`/`space` rotate the
+leading image pane through baseline/new/diff, `f` fits the tree, `u` reloads from disk, `a` accepts,
+`x` discards, and rerun is a two-key chord (`r` then `r`/`a`/`f`) so an expensive run can't fire on
+a single keypress.
 
-Anything that has to stay legible while zoomed — emphasis outlines, the selection ring, node titles —
-is sized in units divided by the zoom scale (`--inv`), so outlines keep a constant on-screen
+Anything that has to stay legible while zoomed — emphasis outlines, the selection ring, node titles
+— is sized in units divided by the zoom scale (`--inv`), so outlines keep a constant on-screen
 thickness and titles stay within a readable min/max no matter how far in or out you are. Dragging
 anywhere pans, including on top of a screenshot; a press that doesn't move is still a click.
 
@@ -426,9 +399,9 @@ using static MyApp.UITests.AppDsl; // your app's actions
 ## Worked example
 
 The Beerbox app (`~/Projects/beerbox`) is the original consumer this framework was extracted from —
-see its `Beerbox.App.UITests` project for a complete production example: `BeerboxPlatforms.cs`,
-`MockEnvironment.cs`, its app-specific actions and their `AppDsl`, and its journeys authored with the
-DSL.
+see its `Beerbox.Journeys` project for a complete production example: `BeerboxPlatforms.cs`,
+`MockEnvironment.cs`, its app-specific actions and their `AppDsl`, and its journeys authored with
+the DSL.
 
 ## Development
 
@@ -469,9 +442,10 @@ The library version is derived from git tags by [MinVer](https://github.com/adam
 build time — there is no `<Version>` in any csproj. Tagging is **automated**: the `release` job in
 [.github/workflows/ci.yml](.github/workflows/ci.yml) runs on every push to `main` (after tests pass)
 and uses [`mathieudutour/github-tag-action`](https://github.com/mathieudutour/github-tag-action) to
-read the [Conventional Commits](https://www.conventionalcommits.org/) since the last tag, compute the
-next SemVer, push the tag, and publish a GitHub Release with the changelog. MinVer stamps that tag on
-the next build, so **no manual `git tag` is needed** — just merge with well-formed commit messages.
+read the [Conventional Commits](https://www.conventionalcommits.org/) since the last tag, compute
+the next SemVer, push the tag, and publish a GitHub Release with the changelog. MinVer stamps that
+tag on the next build, so **no manual `git tag` is needed** — just merge with well-formed commit
+messages.
 
 | Commit type(s) since last tag                              | Result     |
 | ---------------------------------------------------------- | ---------- |

@@ -4,11 +4,11 @@ namespace MobileJourneys.Framework;
 
 internal static class JourneyRunner
 {
-	public static async Task<JourneyResult> RunAsync(
+	public static JourneyResult Run(
 		TestDriver driver,
 		TestCase testCase,
-		MtpReporter reporter,
 		ScreenshotManager manager,
+		RunReporter reporter,
 		ProgressLog? progress
 	)
 	{
@@ -67,7 +67,6 @@ internal static class JourneyRunner
 		var failures = new List<JourneyFailureException>();
 		foreach (var (number, name, execute, maskElements, prefetchMasks, journeyStep) in steps)
 		{
-			await reporter.StepStartedAsync(testCase, number, totalSteps, name);
 			var testStep = new TestStep(
 				driver.Config,
 				journey.ContainerForStep(number),
@@ -75,6 +74,7 @@ internal static class JourneyRunner
 				journey.Name
 			);
 			var stepPassed = true;
+			string? detail = null;
 			try
 			{
 				manager.DeleteFailureArtifactsForStep(testStep);
@@ -82,20 +82,22 @@ internal static class JourneyRunner
 				stepPassed = stepResult.Passed;
 				if (!stepResult.Passed)
 				{
+					detail = $"screenshots differ {stepResult.PixelDiffPercentage:F2}%";
 					var message =
-						$"step {number}/{totalSteps}: {name} — screenshots differ {stepResult.PixelDiffPercentage:F2}%\n"
-						+ $"  {stepResult.ReportPath ?? ""}";
+						$"step {number}/{totalSteps}: {name} — {detail}\n" + $"  {stepResult.ReportPath ?? ""}";
 					failures.Add(new JourneyFailureException(message, journey, journeyStep, number, totalSteps, name));
 				}
 			}
 			catch (Exception ex)
 			{
 				stepPassed = false;
+				detail = ex.Message;
 				HandleStepFailure(driver, manager, ex, testStep);
 				var message = $"step {number}/{totalSteps}: {name} — {ex.Message}";
 				failures.Add(new JourneyFailureException(message, journey, journeyStep, number, totalSteps, name, ex));
 			}
 
+			reporter.StepCompleted(testCase, number, totalSteps, name, stepPassed, detail);
 			progress?.StepCompleted(testStep, stepPassed);
 		}
 
@@ -120,7 +122,8 @@ internal static class JourneyRunner
 			firstFailure.Step,
 			firstFailure.StepNumber,
 			totalSteps,
-			firstFailure.StepName
+			firstFailure.StepName,
+			firstFailure.InnerException
 		);
 		return new JourneyResult(testCase, false, stopwatch.Elapsed, summary, aggregate);
 	}

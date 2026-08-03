@@ -11,11 +11,9 @@ public sealed class FrameworkConfigTests
 	{
 		var platform = new IosPlatformConfig("26.2", "iPhone", true, "com.example.app", "/path/app");
 		var journey = new JourneyDefinition(new TestEnv(), [new TestExpectation()], [], [], "TestJourney");
-		var config = new FrameworkConfig("Display", "Desc", "Foo.Bar", [platform], [journey]);
+		var config = new FrameworkConfig("Display", [platform], [journey]);
 
 		_ = config.DisplayName.Should().Be("Display");
-		_ = config.Description.Should().Be("Desc");
-		_ = config.TestNodeNamespace.Should().Be("Foo.Bar");
 		_ = config.PlatformConfigs.Should().ContainSingle().Which.Should().BeSameAs(platform);
 		_ = config.Journeys.Should().ContainSingle().Which.Should().BeSameAs(journey);
 	}
@@ -27,7 +25,7 @@ public sealed class FrameworkConfigTests
 		var journeyA = new JourneyDefinition(new TestEnv(), [new TestExpectation()], [], [], "Dup");
 		var journeyB = new JourneyDefinition(new TestEnv(), [new TestExpectation()], [], [], "Dup");
 
-		var ctor = () => _ = new FrameworkConfig("D", "D", "Foo", [platform], [journeyA, journeyB]);
+		var ctor = () => _ = new FrameworkConfig("D", [platform], [journeyA, journeyB]);
 
 		_ = ctor.Should().Throw<ArgumentException>().WithMessage("*unique*Dup*");
 	}

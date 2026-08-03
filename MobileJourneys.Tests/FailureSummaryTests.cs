@@ -5,9 +5,9 @@ using NUnit.Framework;
 namespace MobileJourneys.Tests;
 
 /// <summary>
-/// Covers <see cref="FailureSummary"/>. RecordFailure is the load-bearing entry point that
-/// <see cref="Framework.MtpReporter"/> calls; Print emits the end-of-run banner that
-/// summarizes failures grouped by fixture.
+/// Covers <see cref="FailureSummary"/>. <see cref="FailureSummary.RecordFailure"/> is the
+/// load-bearing entry point that <see cref="RunReporter.JourneyCompleted"/> calls;
+/// <see cref="FailureSummary.Print"/> emits the end-of-run banner that groups failures by fixture.
 /// </summary>
 [TestFixture]
 [NonParallelizable]
@@ -15,13 +15,6 @@ public sealed class FailureSummaryTests
 {
 	[SetUp]
 	public void Reset() => FailureSummary.ResetForTest();
-
-	[OneTimeTearDown]
-	public void Cleanup() =>
-		// FailureSummary registers a ProcessExit hook that prints any remaining failures
-		// to stderr. Clear the dictionary so the test process doesn't emit a spurious
-		// "FAILED JOURNEYS" banner when the runner exits.
-		FailureSummary.ResetForTest();
 
 	private static readonly IosPlatformConfig IosFixture = new(
 		"26.2",

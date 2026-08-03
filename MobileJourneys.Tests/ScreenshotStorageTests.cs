@@ -27,7 +27,7 @@ public sealed class ScreenshotStorageTests
 			[],
 			"PrimaryJourney"
 		);
-		_config = new("Tests", "Tests", "MobileJourneys.Tests", [_platform], [_journey]);
+		_config = new("Tests", [_platform], [_journey]);
 	}
 
 	private string InitialStep => $"01 {_journey.InitialName}";
@@ -124,7 +124,7 @@ public sealed class ScreenshotStorageTests
 			null,
 			"Root"
 		);
-		var config = new FrameworkConfig("Tests", "Tests", "MobileJourneys.Tests", [_platform], [.. tree.Flatten()]);
+		var config = new FrameworkConfig("Tests", [_platform], [.. tree.Flatten()]);
 		foreach (var journey in config.Journeys)
 		{
 			foreach (var (container, stepName) in journey.ExpectedStepLocations())

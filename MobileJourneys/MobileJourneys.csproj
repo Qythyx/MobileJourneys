@@ -15,9 +15,9 @@
 	<ItemGroup>
 		<PackageReference Include="Appium.WebDriver" />
 		<PackageReference Include="Codeuctivity.ImageSharpCompare" />
-		<PackageReference Include="Microsoft.Testing.Platform" />
 		<PackageReference Include="MinVer" PrivateAssets="All" />
 		<PackageReference Include="SixLabors.ImageSharp" />
+		<PackageReference Include="Spectre.Console" />
 	</ItemGroup>
 	<ItemGroup>
 		<InternalsVisibleTo Include="MobileJourneys.Tests" />

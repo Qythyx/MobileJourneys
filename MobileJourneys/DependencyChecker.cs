@@ -2,8 +2,8 @@ namespace MobileJourneys;
 
 /// <summary>
 /// Verifies external dependencies (Appium, Xcode tools, Android SDK platform-tools)
-/// required to drive the configured fixtures. <see cref="Framework.TestFramework"/>
-/// calls <see cref="Verify"/> at the start of every test run; missing dependencies fail
+/// required to drive the configured fixtures. <see cref="Framework.SuiteRunner"/>
+/// calls <see cref="Verify"/> at the start of every run; missing dependencies fail
 /// early with an actionable install hint instead of producing cryptic Appium errors
 /// later in the session.
 /// </summary>

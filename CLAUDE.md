@@ -57,5 +57,5 @@ The next build stamps the assembly as `1.0.0`. If a `v` prefix is ever desired, 
 
 [`TestAssembly.FrameworkVersion`](MobileJourneys/Framework/TestAssembly.cs) reads
 `AssemblyInformationalVersionAttribute` via reflection. That attribute is exactly what MinVer
-stamps, so the value flows through automatically — MTP framework/provider Version slots see the
+stamps, so the value flows through automatically — the runner's console header shows the
 MinVer-derived version with no additional plumbing.

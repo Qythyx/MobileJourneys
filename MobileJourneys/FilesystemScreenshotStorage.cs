@@ -48,8 +48,7 @@ internal sealed class FilesystemScreenshotStorage(string rootDir) : ScreenshotSt
 		double pixelErrorPercentage,
 		int pixelErrorCount,
 		byte[] pngBytes
-	) =>
-		WriteBytes(testStep, ArtifactNaming.DiffFileName(testStep, pixelErrorPercentage, pixelErrorCount), pngBytes);
+	) => WriteBytes(testStep, ArtifactNaming.DiffFileName(testStep, pixelErrorPercentage, pixelErrorCount), pngBytes);
 
 	/// <inheritdoc/>
 	internal override void WriteFailScreenshot(TestStep testStep, string suffix, byte[] pngBytes) =>
@@ -167,6 +166,10 @@ internal sealed class FilesystemScreenshotStorage(string rootDir) : ScreenshotSt
 			File.Delete(path);
 		}
 	}
+
+	/// <inheritdoc/>
+	protected override string GetArtifactLocation(PlatformConfig config, StoredFile file) =>
+		Path.Combine(ContainerDir(config, file.Container), file.FileName);
 
 	/// <inheritdoc/>
 	protected override void DeleteEmptyContainers(PlatformConfig config)

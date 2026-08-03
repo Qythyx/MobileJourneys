@@ -5,16 +5,11 @@ namespace MobileJourneys;
 /// reads journeys, platform fixtures, and IDE-display strings from this record — no globals
 /// or static lookups.
 /// </summary>
-/// <param name="DisplayName">Shown in the test runner header (e.g., "Beerbox UI Tests").</param>
-/// <param name="Description">Shown in the test runner help text.</param>
-/// <param name="TestNodeNamespace">Namespace used in MTP test-method identity. IDE test
-/// explorers (e.g., C# Dev Kit) group tests under this namespace.</param>
+/// <param name="DisplayName">Shown in the runner header (e.g., "Beerbox UI Tests").</param>
 /// <param name="PlatformConfigs">The fixture matrix the suite runs against.</param>
 /// <param name="Journeys">The journey definitions to discover and execute.</param>
 public sealed record FrameworkConfig(
 	string DisplayName,
-	string Description,
-	string TestNodeNamespace,
 	IReadOnlyList<PlatformConfig> PlatformConfigs,
 	IReadOnlyList<JourneyDefinition> Journeys
 )

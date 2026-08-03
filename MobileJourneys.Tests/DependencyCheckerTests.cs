@@ -20,8 +20,6 @@ public sealed class DependencyCheckerTests
 		// — verifying that "no platforms" doesn't disable the check.
 		var config = new FrameworkConfig(
 			DisplayName: "Test",
-			Description: "Test",
-			TestNodeNamespace: "Test",
 			PlatformConfigs: [],
 			Journeys: [new JourneyDefinition(new TestEnv(), [new TestExpect()], [], [], "j")]
 		);
@@ -48,8 +46,6 @@ public sealed class DependencyCheckerTests
 		{
 			var config = new FrameworkConfig(
 				DisplayName: "Test",
-				Description: "Test",
-				TestNodeNamespace: "Test",
 				PlatformConfigs:
 				[
 					new AndroidPlatformConfig("15", "Pixel", "avd", true, "com.example", "/path/app.apk", null),
