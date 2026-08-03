@@ -16,6 +16,7 @@ namespace MobileJourneys;
 /// <param name="AppBinaryPath">Absolute path to the signed .apk.</param>
 /// <param name="MainActivity">Optional. Defaults to <c>$"{AppIdentifier}.MainActivity"</c>.</param>
 /// <param name="ColorTolerance">Permitted per-pixel color delta (sum of R, G, B deltas) when comparing against baselines.</param>
+/// <param name="MaxDiffPixelPercentage">Percentage of pixels permitted to exceed <paramref name="ColorTolerance"/> before the step fails.</param>
 public sealed record AndroidPlatformConfig(
 	string PlatformVersion,
 	string DeviceName,
@@ -24,7 +25,8 @@ public sealed record AndroidPlatformConfig(
 	string AppIdentifier,
 	string AppBinaryPath,
 	string? MainActivity,
-	int ColorTolerance = 3 * 10
+	int ColorTolerance = 3 * 10,
+	double MaxDiffPixelPercentage = 0.005
 ) : PlatformConfig(PlatformVersion, DeviceName, IsLightTheme, AppIdentifier, AppBinaryPath)
 {
 	/// <inheritdoc/>
@@ -88,6 +90,7 @@ public sealed record AndroidPlatformConfig(
 		options.AddAdditionalAppiumOption("enforceAppInstall", true);
 		options.AddAdditionalAppiumOption("avd", AvdName);
 		options.AddAdditionalAppiumOption("avdLaunchTimeout", AvdLaunchTimeoutMs);
+		options.AddAdditionalAppiumOption($"settings[{WaitForIdleSetting}]", WaitForIdleTimeoutMs);
 	}
 
 	internal override AppiumDriver CreateDriver(AppiumOptions options) => new AndroidDriver(options);

@@ -43,8 +43,13 @@ internal sealed class FilesystemScreenshotStorage(string rootDir) : ScreenshotSt
 	}
 
 	/// <inheritdoc/>
-	internal override void WriteDiffImage(TestStep testStep, double pixelErrorPercentage, byte[] pngBytes) =>
-		WriteBytes(testStep, ArtifactNaming.DiffFileName(testStep, pixelErrorPercentage), pngBytes);
+	internal override void WriteDiffImage(
+		TestStep testStep,
+		double pixelErrorPercentage,
+		int pixelErrorCount,
+		byte[] pngBytes
+	) =>
+		WriteBytes(testStep, ArtifactNaming.DiffFileName(testStep, pixelErrorPercentage, pixelErrorCount), pngBytes);
 
 	/// <inheritdoc/>
 	internal override void WriteFailScreenshot(TestStep testStep, string suffix, byte[] pngBytes) =>

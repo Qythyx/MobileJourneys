@@ -17,9 +17,10 @@ public abstract record JourneyOp(string? Target = null)
 	/// <summary>
 	/// Type-prefix used in <see cref="Label"/>. Defaults to the runtime type's simple name;
 	/// override to give a wrapper class the same label as the underlying op (e.g., a
-	/// localized variant overrides this so screenshot baselines stay stable).
+	/// localized variant overrides this so screenshot baselines stay stable). Public so a wrapper
+	/// can forward the op it wraps rather than guess at its name.
 	/// </summary>
-	protected virtual string Name => GetType().Name;
+	public virtual string Name => GetType().Name;
 
 	/// <summary>
 	/// Step label derived from <see cref="Name"/> and optional <see cref="Target"/>.

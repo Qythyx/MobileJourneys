@@ -22,7 +22,6 @@ public sealed class DependencyCheckerTests
 			DisplayName: "Test",
 			Description: "Test",
 			TestNodeNamespace: "Test",
-			DeepLinkScheme: "test",
 			PlatformConfigs: [],
 			Journeys: [new JourneyDefinition(new TestEnv(), [new TestExpect()], [], [], "j")]
 		);
@@ -51,7 +50,6 @@ public sealed class DependencyCheckerTests
 				DisplayName: "Test",
 				Description: "Test",
 				TestNodeNamespace: "Test",
-				DeepLinkScheme: "test",
 				PlatformConfigs:
 				[
 					new AndroidPlatformConfig("15", "Pixel", "avd", true, "com.example", "/path/app.apk", null),

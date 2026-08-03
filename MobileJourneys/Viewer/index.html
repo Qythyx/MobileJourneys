@@ -980,12 +980,13 @@
 					if (!groups.has(key)) {
 						groups.set(key, {
 							container: f.container, step: f.step, journey: f.journey,
-							kinds: {}, percent: null, failureText: "",
+							kinds: {}, percent: null, pixels: null, failureText: "",
 						});
 					}
 					const g = groups.get(key);
 					g.kinds[f.kind] = f.file;
 					if (f.percent != null) { g.percent = f.percent; }
+					if (f.pixels != null) { g.pixels = f.pixels; }
 					if (f.kind === "fail") { g.failureText = f.details || ""; }
 				}
 				return [...groups.entries()].sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0).map((e) => e[1]);
@@ -1327,7 +1328,10 @@
 				if (f.percent != null) {
 					const p = document.createElement("span");
 					p.className = "pct";
-					p.textContent = f.percent.toFixed(3) + "% diff";
+					// The count is what distinguishes a stray edge pixel from a real regression: a few
+					// pixels round to 0.000%, which on its own reads as "nothing differs".
+					p.textContent = f.percent.toFixed(3) + "% diff"
+						+ (f.pixels != null ? ` (${f.pixels.toLocaleString()} px)` : "");
 					head.appendChild(p);
 				}
 				// The header's per-device failure position lives here now (removed from the top toolbar).

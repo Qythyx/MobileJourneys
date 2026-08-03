@@ -13,13 +13,15 @@ namespace MobileJourneys;
 /// <param name="AppIdentifier">Bundle ID (e.g., "jp.beercats.beerbox").</param>
 /// <param name="AppBinaryPath">Absolute path to the .app bundle.</param>
 /// <param name="ColorTolerance">Permitted per-pixel color delta (sum of R, G, B deltas) when comparing against baselines.</param>
+/// <param name="MaxDiffPixelPercentage">Percentage of pixels permitted to exceed <paramref name="ColorTolerance"/> before the step fails.</param>
 public sealed record IosPlatformConfig(
 	string PlatformVersion,
 	string DeviceName,
 	bool IsLightTheme,
 	string AppIdentifier,
 	string AppBinaryPath,
-	int ColorTolerance = 3 * 2
+	int ColorTolerance = 3 * 2,
+	double MaxDiffPixelPercentage = 0.005
 ) : PlatformConfig(PlatformVersion, DeviceName, IsLightTheme, AppIdentifier, AppBinaryPath)
 {
 	/// <inheritdoc/>

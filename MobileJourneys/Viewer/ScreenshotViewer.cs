@@ -27,7 +27,7 @@ public static class ScreenshotViewer
 	private static readonly JsonSerializerOptions ResponseOptions = new();
 
 	/// <summary>Guards <see cref="jobs"/> and the single-rerun-at-a-time rule.</summary>
-	private static readonly object RerunGate = new();
+	private static readonly Lock RerunGate = new();
 
 	private static readonly Dictionary<string, RerunJob> jobs = [];
 

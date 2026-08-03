@@ -15,9 +15,8 @@ and verified against per-platform PNG screenshot baselines.
   so shared steps are defined and screenshotted once.
 - A `using static` factory DSL (`MobileJourneys.Dsl`) so journeys read as bare calls —
   `Branch("Menu", Step(Tap(id), Found(a)))` — instead of a wall of `new`.
-- Built-in actions: `Tap`, `TypeText`, `SwipeLeft`/`Right`, `ScrollToElement`, `DismissAlert`,
-  `DismissKeyboard`, `TapAlertButton`, `TapNotification`, `InvertSystemTheme`, `SetSystemFontSize`,
-  `None`.
+- Built-in actions: `Tap`, `TypeText`, `SwipeLeft`/`Right`, `DismissAlert`, `DismissKeyboard`,
+  `TapAlertButton`, `TapNotification`, `InvertSystemTheme`, `SetSystemFontSize`, `None`.
 - Built-in expectations: `Found`, `NotFound`, `FoundWithText`, `AlertFound`, `WaitForNotification`.
 - An Appium-driven `TestDriver` with element-finding (with stale-element retry), gestures, alerts,
   deep links, hardware-keyboard control, and crash detection.

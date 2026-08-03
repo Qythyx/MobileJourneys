@@ -17,14 +17,8 @@ namespace MobileJourneys;
 /// </summary>
 /// <param name="app">The underlying Appium driver.</param>
 /// <param name="config">Platform fixture (drives platform-specific branches).</param>
-/// <param name="deepLinkScheme">URL scheme without "://" used by <see cref="ScrollToElement"/> and consumer-side notification actions.</param>
 /// <param name="screenshotManager">Instance used for baseline capture and comparison.</param>
-public sealed class TestDriver(
-	AppiumDriver app,
-	PlatformConfig config,
-	string deepLinkScheme,
-	ScreenshotManager screenshotManager
-)
+public sealed class TestDriver(AppiumDriver app, PlatformConfig config, ScreenshotManager screenshotManager)
 {
 	private enum Phase
 	{
@@ -40,14 +34,18 @@ public sealed class TestDriver(
 	/// </summary>
 	public const string AutomationIdBelowNotification = "ScreenBelowNotification";
 
+	/// <summary>
+	/// How long to wait for a mask element while resolving a step's mask regions. Masks are resolved
+	/// around the step's action, so the element is expected to be on screen already; the wait only
+	/// absorbs render lag rather than allowing for one to appear later.
+	/// </summary>
+	private static readonly TimeSpan MaskLookupTimeout = TimeSpan.FromSeconds(5);
+
 	/// <summary>The underlying Appium driver.</summary>
 	public AppiumDriver App { get; } = app;
 
 	/// <summary>The platform fixture this driver is bound to.</summary>
 	public PlatformConfig Config { get; } = config;
-
-	/// <summary>URL scheme used to open in-app deep links (without the "://" suffix).</summary>
-	public string DeepLinkScheme { get; } = deepLinkScheme;
 
 	/// <summary>
 	/// The current journey's environment. Populated by <c>JourneyRunner</c> before each
@@ -153,7 +151,7 @@ public sealed class TestDriver(
 		{
 			try
 			{
-				_ = App.FindElement(MobileBy.Id(automationId));
+				_ = FindElementNow(automationId);
 				Thread.Sleep(250);
 			}
 			catch (NoSuchElementException)
@@ -193,20 +191,9 @@ public sealed class TestDriver(
 
 		try
 		{
-			// Try resource-id first, then fall back to content-desc (accessibility ID).
-			// On Android, MAUI maps AutomationId to resource-id for most elements, but
-			// Shell.ItemTemplate bindings map to content-desc instead.
-			return wait.Until(d =>
+			return wait.Until(_ =>
 			{
-				AppiumElement element;
-				try
-				{
-					element = (AppiumElement)d.FindElement(MobileBy.Id(automationId));
-				}
-				catch (NoSuchElementException)
-				{
-					element = (AppiumElement)d.FindElement(MobileBy.AccessibilityId(automationId));
-				}
+				var element = FindElementNow(automationId);
 
 				if (condition is not { } c || c.check(element))
 				{
@@ -226,6 +213,27 @@ public sealed class TestDriver(
 		catch (WebDriverTimeoutException)
 		{
 			throw new TimeoutException($"Element '{automationId}' not found after {timeout.TotalSeconds}s.");
+		}
+	}
+
+	/// <summary>
+	/// Locates an element by AutomationId once, without waiting. Tries resource-id first, then falls
+	/// back to content-desc (accessibility ID): on Android, MAUI maps AutomationId to resource-id for
+	/// most elements, but Shell.ItemTemplate bindings map to content-desc instead. Every lookup goes
+	/// through here so none of them sees only half the elements.
+	/// </summary>
+	/// <param name="automationId">The AutomationId of the element.</param>
+	/// <returns>The found element.</returns>
+	/// <exception cref="NoSuchElementException">Thrown when neither locator matches.</exception>
+	private AppiumElement FindElementNow(string automationId)
+	{
+		try
+		{
+			return (AppiumElement)App.FindElement(MobileBy.Id(automationId));
+		}
+		catch (NoSuchElementException)
+		{
+			return (AppiumElement)App.FindElement(MobileBy.AccessibilityId(automationId));
 		}
 	}
 
@@ -256,8 +264,12 @@ public sealed class TestDriver(
 	public static void WaitForAppToSettle(int milliseconds) => Task.Delay(milliseconds).Wait();
 
 	/// <summary>
-	/// Polls screenshots until two consecutive captures are identical (skipping masked regions),
-	/// then compares the stable screenshot against a baseline image.
+	/// Polls screenshots until one matches the step's baseline (skipping masked regions), then
+	/// compares it. A screen that is still arriving — an image that has not finished decoding, a
+	/// page still transitioning — holds as still as a finished one, so stability alone stops the
+	/// polling too early; the baseline is what finished looks like. Falls back to comparing the
+	/// last capture once the budget runs out, so a step that really does differ still fails on its
+	/// screenshot, showing what it caught.
 	/// </summary>
 	/// <param name="action">The test action to run.</param>
 	/// <param name="testStep">Identifies the step whose baseline the stable screenshot is compared against.</param>
@@ -265,7 +277,6 @@ public sealed class TestDriver(
 	/// <param name="prefetchMasks"><c>true</c> to query the mask element IDs before running the
 	/// test action. This is useful if the action will cause the elements to become unavailable
 	/// such as showing a alert above them.</param>
-	/// <exception cref="TimeoutException">Thrown when the screen does not stabilize within a fixed amount of time.</exception>
 	public ScreenshotComparisonResult DoActionAndCompareWithBaseline(
 		Action action,
 		TestStep testStep,
@@ -279,14 +290,17 @@ public sealed class TestDriver(
 		}
 
 		var windowSize = App.Manage().Window.Size;
-		var previousImage = _screenshotPngBytes is not null
-			? Image.Load<Rgb24>(_screenshotPngBytes)
-			: App.GetScreenshot().AsImage();
-		var maskRegions = ImageHelpers.ScaleMaskRegions(
-			[.. maskElementIds.Select(id => GetElementRectangle(windowSize, id)).Concat(SystemMasks)],
-			windowSize,
-			new System.Drawing.Size(previousImage.Width, previousImage.Height)
-		);
+		// Measured before the capture, not after it. A step that masks an element is usually masking
+		// one that only exists while the action's work is in flight, and a screenshot is a slow round
+		// trip — taking it first spends the element's whole lifetime before anyone looks for it.
+		var maskElements = maskElementIds.Select(id => GetElementRectangle(windowSize, id)).ToArray();
+
+		Rectangle[] MaskRegionsFor(Image image) =>
+			ImageHelpers.ScaleMaskRegions(
+				[.. maskElements.Concat(SystemMasks)],
+				windowSize,
+				new System.Drawing.Size(image.Width, image.Height)
+			);
 
 		if (prefetchMasks)
 		{
@@ -297,38 +311,50 @@ public sealed class TestDriver(
 		// use it directly instead of polling Appium.
 		if (_screenshotPngBytes is not null)
 		{
+			var captured = Image.Load<Rgb24>(_screenshotPngBytes);
 			_screenshotPngBytes = null;
-			return screenshotManager.CompareWithBaselineAndDispose(previousImage, testStep, maskRegions);
+			return screenshotManager.CompareWithBaselineAndDispose(captured, testStep, MaskRegionsFor(captured));
 		}
 
-		const int MaxWaitMs = 5000;
+		// A capture costs a second or two on a loaded device, so this is a budget for a handful of
+		// samples, not for many. Only a step that never matches spends all of it.
+		const int MaxWaitMs = 10000;
 		const int MinMsBetweenScreenshots = 300;
 
+		// With nothing to match against, two identical captures are the only signal there is, and the
+		// first run records whichever one settles as the baseline every later run is held to.
+		using var baseline = screenshotManager.TryLoadBaseline(testStep);
 		var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
+		Image<Rgb24>? previousImage = null;
+		var maskRegions = Array.Empty<Rectangle>();
 		var elapsed = stopwatch.Elapsed;
 		while (stopwatch.Elapsed.TotalMilliseconds < MaxWaitMs)
 		{
 			var screenshot = App.GetScreenshot().AsImage();
-			if ((stopwatch.Elapsed - elapsed).TotalMilliseconds < MinMsBetweenScreenshots)
+			if (previousImage is not null && (stopwatch.Elapsed - elapsed).TotalMilliseconds < MinMsBetweenScreenshots)
 			{
 				screenshot.Dispose();
 				Task.Delay(100).Wait();
 				continue;
 			}
 			elapsed = stopwatch.Elapsed;
-			if (ImageHelpers.AreImagesEqual(screenshot, previousImage, maskRegions))
+			maskRegions = previousImage is null ? MaskRegionsFor(screenshot) : maskRegions;
+
+			var done = baseline is not null
+				? baseline.Matches(screenshot, maskRegions)
+				: previousImage is not null && ImageHelpers.AreImagesEqual(screenshot, previousImage, maskRegions);
+			if (done)
 			{
-				previousImage.Dispose();
+				previousImage?.Dispose();
 				return screenshotManager.CompareWithBaselineAndDispose(screenshot, testStep, maskRegions);
 			}
 
-			previousImage.Dispose();
+			previousImage?.Dispose();
 			previousImage = screenshot;
 		}
 
-		previousImage.Dispose();
-		throw new TimeoutException($"Screen did not stabilize within {MaxWaitMs}ms");
+		return screenshotManager.CompareWithBaselineAndDispose(previousImage!, testStep, maskRegions);
 	}
 
 	private Rectangle GetElementRectangle(System.Drawing.Size windowSize, string automationId)
@@ -346,7 +372,7 @@ public sealed class TestDriver(
 				windowSize.Width,
 				windowSize.Height - notificationHeight
 			),
-			_ => GetBounds(App.FindElement(MobileBy.Id(automationId))),
+			_ => GetBounds(FindElement(automationId, MaskLookupTimeout)),
 		};
 	}
 
@@ -374,19 +400,6 @@ public sealed class TestDriver(
 
 	/// <summary>Dismisses the on-screen keyboard if present.</summary>
 	public void DismissKeyboard() => Config.DismissKeyboard(App);
-
-	/// <summary>
-	/// Scrolls to an element using a deep link to the app's <c>ScrollView.ScrollToAsync</c>,
-	/// which is pixel-perfect since the framework controls the scroll position (unlike
-	/// touch-based Appium scrolling which has inherent imprecision).
-	/// </summary>
-	/// <param name="automationId">The AutomationId of the element to scroll to.</param>
-	public void ScrollToElement(string automationId)
-	{
-		DismissKeyboard();
-		OpenDeepLink($"{DeepLinkScheme}://open/scroll?id={automationId}");
-		WaitForAppToSettle(500);
-	}
 
 	/// <summary>Opens an in-app deep link via mobile: deepLink (Android) or App.OpenUrl (iOS).</summary>
 	public void OpenDeepLink(string url) => Config.OpenDeepLink(App, url);

@@ -40,9 +40,14 @@ internal sealed class InMemoryScreenshotStorage : ScreenshotStorage
 			? bytes
 			: null;
 
-	internal override void WriteDiffImage(TestStep testStep, double pixelErrorPercentage, byte[] pngBytes) =>
+	internal override void WriteDiffImage(
+		TestStep testStep,
+		double pixelErrorPercentage,
+		int pixelErrorCount,
+		byte[] pngBytes
+	) =>
 		GetOrCreateContainer(testStep.Config, testStep.Container)[
-			ArtifactNaming.DiffFileName(testStep, pixelErrorPercentage)
+			ArtifactNaming.DiffFileName(testStep, pixelErrorPercentage, pixelErrorCount)
 		] = pngBytes;
 
 	internal override void WriteFailScreenshot(TestStep testStep, string suffix, byte[] pngBytes) =>

@@ -32,7 +32,12 @@ public abstract class ScreenshotStorage
 	internal abstract byte[]? ReadNewScreenshot(TestStep testStep);
 
 	/// <summary>Writes the diff visualization image for a baseline mismatch, tagged with the pixel-error percentage.</summary>
-	internal abstract void WriteDiffImage(TestStep testStep, double pixelErrorPercentage, byte[] pngBytes);
+	internal abstract void WriteDiffImage(
+		TestStep testStep,
+		double pixelErrorPercentage,
+		int pixelErrorCount,
+		byte[] pngBytes
+	);
 
 	/// <summary>Writes a FAIL-screenshot PNG (used when a step throws). The <paramref name="suffix"/> is appended after <c>_FAIL_</c>; the caller must sanitize it for use in a filename.</summary>
 	internal abstract void WriteFailScreenshot(TestStep testStep, string suffix, byte[] pngBytes);

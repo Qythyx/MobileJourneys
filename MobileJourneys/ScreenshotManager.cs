@@ -48,6 +48,16 @@ public sealed class ScreenshotManager(ScreenshotStorage storage)
 	}
 
 	/// <summary>
+	/// Loads the step's baseline for repeated comparison, or returns <c>null</c> when the step has
+	/// none yet. Lets a caller keep capturing while a screen is still arriving: a screen missing
+	/// content it has not finished loading holds every bit as still as a finished one, so stability
+	/// alone cannot say when to stop, while the baseline says exactly what finished looks like.
+	/// </summary>
+	/// <param name="testStep">Identifies the step whose baseline to load.</param>
+	public BaselineMatcher? TryLoadBaseline(TestStep testStep) =>
+		storage.BaselineExists(testStep) ? new(Image.Load(storage.ReadBaseline(testStep)), testStep) : null;
+
+	/// <summary>
 	/// Compares an image against a baseline at full resolution and disposes it. Mask regions are
 	/// in the image's pixel coordinates. When a baseline is first written, the mask regions are
 	/// stored in the baseline PNG's metadata; on later comparisons they are unioned with the live
@@ -80,33 +90,10 @@ public sealed class ScreenshotManager(ScreenshotStorage storage)
 				return new(false, 100, storage.GetReportPath(testStep));
 			}
 
-			// The live mask comes from the actual image; union it with the baseline's own mask
-			// (stored when the baseline was written) so content that differs in size between the
-			// two images stays masked in both.
-			var baselineMasks = ImageHelpers.GetMaskMetadata(baseline);
-			var effectiveMasks = baselineMasks.Length > 0 ? [.. maskRegions, .. baselineMasks] : maskRegions;
+			var effectiveMasks = EffectiveMasks(baseline, maskRegions);
+			var diff = CalcDiff(actual, baseline, testStep, effectiveMasks);
 
-			ICompareResult diff;
-			if (effectiveMasks is { Length: > 0 })
-			{
-				using var mask = ImageHelpers.CreateExclusionMask(actual.Width, actual.Height, effectiveMasks);
-				diff = ImageSharpCompare.CalcDiff(
-					actual,
-					baseline,
-					mask,
-					pixelColorShiftTolerance: testStep.Config.ColorTolerance
-				);
-			}
-			else
-			{
-				diff = ImageSharpCompare.CalcDiff(
-					actual,
-					baseline,
-					pixelColorShiftTolerance: testStep.Config.ColorTolerance
-				);
-			}
-
-			var passed = diff.PixelErrorPercentage == 0;
+			var passed = diff.PixelErrorPercentage <= testStep.Config.MaxDiffPixelPercentage;
 			if (!passed)
 			{
 				storage.WriteNewScreenshot(testStep, ToPngBytes(actual));
@@ -117,7 +104,12 @@ public sealed class ScreenshotManager(ScreenshotStorage storage)
 					pixelColorShiftTolerance: testStep.Config.ColorTolerance
 				);
 				ImageHelpers.RecolorDiff(diffImage, effectiveMasks);
-				storage.WriteDiffImage(testStep, diff.PixelErrorPercentage, ToPngBytes((Image<Rgb24>)diffImage));
+				storage.WriteDiffImage(
+					testStep,
+					diff.PixelErrorPercentage,
+					diff.PixelErrorCount,
+					ToPngBytes((Image<Rgb24>)diffImage)
+				);
 			}
 
 			return new(passed, diff.PixelErrorPercentage, passed ? null : storage.GetReportPath(testStep));
@@ -133,6 +125,48 @@ public sealed class ScreenshotManager(ScreenshotStorage storage)
 		storage.HasFailureArtifacts(config, journey);
 
 	public void WriteCrashLog(TestStep testStep, string content) => storage.WriteCrashLog(testStep, content);
+
+	/// <summary>
+	/// The live mask regions unioned with the baseline's own (stored when it was written), so content
+	/// that differs in size between the two images stays masked in both.
+	/// </summary>
+	/// <param name="baseline">The baseline image carrying the stored mask metadata.</param>
+	/// <param name="maskRegions">The regions measured from the actual image.</param>
+	internal static Rectangle[] EffectiveMasks(Image baseline, Rectangle[] maskRegions)
+	{
+		var baselineMasks = ImageHelpers.GetMaskMetadata(baseline);
+		return baselineMasks.Length > 0 ? [.. maskRegions, .. baselineMasks] : maskRegions;
+	}
+
+	/// <summary>Pixel-diffs an image against a baseline, excluding the given regions.</summary>
+	/// <param name="actual">The screenshot image at full device resolution.</param>
+	/// <param name="baseline">The baseline to compare against, of identical dimensions.</param>
+	/// <param name="testStep">Supplies the fixture's colour tolerance.</param>
+	/// <param name="effectiveMasks">Regions to exclude, in the images' pixel coordinates.</param>
+	internal static ICompareResult CalcDiff(
+		Image<Rgb24> actual,
+		Image baseline,
+		TestStep testStep,
+		Rectangle[] effectiveMasks
+	)
+	{
+		if (effectiveMasks is not { Length: > 0 })
+		{
+			return ImageSharpCompare.CalcDiff(
+				actual,
+				baseline,
+				pixelColorShiftTolerance: testStep.Config.ColorTolerance
+			);
+		}
+
+		using var mask = ImageHelpers.CreateExclusionMask(actual.Width, actual.Height, effectiveMasks);
+		return ImageSharpCompare.CalcDiff(
+			actual,
+			baseline,
+			mask,
+			pixelColorShiftTolerance: testStep.Config.ColorTolerance
+		);
+	}
 
 	private static byte[] ToPngBytes(Image<Rgb24> image)
 	{

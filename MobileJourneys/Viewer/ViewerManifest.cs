@@ -109,6 +109,7 @@ internal static class ViewerManifest
 							journey = parsed.JourneyName,
 							kind = parsed.Kind,
 							percent = parsed.DiffPercent,
+							pixels = parsed.DiffPixelCount,
 							details = parsed.Kind == "fail"
 								? ReadFailureDetails(config.Storage, platform, container, fileName)
 								: string.Empty,

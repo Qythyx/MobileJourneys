@@ -111,10 +111,6 @@ public static class Dsl
 	/// <summary>Creates a <see cref="Actions.DismissKeyboard"/> action.</summary>
 	public static DismissKeyboard DismissKeyboard() => new();
 
-	/// <summary>Creates a <see cref="Actions.ScrollToElement"/> action.</summary>
-	/// <param name="automationId">AutomationId of the element to scroll into view.</param>
-	public static ScrollToElement ScrollToElement(string automationId) => new(automationId);
-
 	/// <summary>Creates a <see cref="Actions.SwipeLeft"/> action.</summary>
 	/// <param name="automationId">AutomationId of the element to swipe left on.</param>
 	public static SwipeLeft SwipeLeft(string automationId) => new(automationId);

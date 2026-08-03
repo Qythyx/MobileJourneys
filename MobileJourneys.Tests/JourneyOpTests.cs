@@ -10,7 +10,7 @@ public sealed class JourneyOpTests
 
 	private sealed record OverridingOp(string? Target = null) : JourneyOp(Target)
 	{
-		protected override string Name => "ParentName";
+		public override string Name => "ParentName";
 	}
 
 	[Test]

@@ -89,9 +89,9 @@ public sealed class FilesystemScreenshotStorageTests
 	[Test]
 	public void WriteDiffImageEncodesPercentageInFileName()
 	{
-		_storage.WriteDiffImage(K("Journey", "01 Step"), pixelErrorPercentage: 5.123, [0]);
+		_storage.WriteDiffImage(K("Journey", "01 Step"), pixelErrorPercentage: 5.123, pixelErrorCount: 42, [0]);
 
-		_ = File.Exists(FilePath("Journey", "01 Step [Journey]_diff_5.123%.png")).Should().BeTrue();
+		_ = File.Exists(FilePath("Journey", "01 Step [Journey]_diff_5.123%_42px.png")).Should().BeTrue();
 	}
 
 	[Test]
@@ -131,7 +131,7 @@ public sealed class FilesystemScreenshotStorageTests
 	{
 		_storage.WriteBaseline(K("Journey", "01 Step"), [0]);
 		_storage.WriteNewScreenshot(K("Journey", "01 Step"), [0]);
-		_storage.WriteDiffImage(K("Journey", "01 Step"), 1.0, [0]);
+		_storage.WriteDiffImage(K("Journey", "01 Step"), 1.0, 1, [0]);
 		_storage.WriteFailScreenshot(K("Journey", "01 Step"), "CRASH", [0]);
 		_storage.WriteCrashLog(K("Journey", "01 Step"), "boom");
 		_storage.WriteNewScreenshot(K("Journey", "02 Other"), [0]);

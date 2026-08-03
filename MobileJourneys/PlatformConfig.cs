@@ -27,6 +27,23 @@ public abstract record PlatformConfig(
 	internal const int AvdLaunchTimeoutMs = 120_000;
 	internal const int AppWaitDurationMs = 30_000;
 
+	/// <summary>The uiautomator2 setting that bounds how long a lookup waits for the UI to go quiet.</summary>
+	internal const string WaitForIdleSetting = "waitForIdleTimeout";
+
+	/// <summary>
+	/// How long a lookup may wait for the device to become idle. The driver's own default is 10s,
+	/// which a screen holding a progress spinner never reaches — the animation is exactly what "not
+	/// idle" means — so every lookup taken while one is up costs the full 10s, and a step that means
+	/// to inspect an overlay outlives the overlay. Journeys wait through their own polling
+	/// expectations and screenshot-stability checks, so nothing here depends on the driver's.
+	/// <para/>
+	/// The trade-off is staleness: a lookup that returns mid-transition hands back an element the
+	/// screen is about to replace, which a step then fails on. Raising this to soften that made
+	/// things worse when measured, so it stays low and the staleness is worth handling where an
+	/// element is used rather than by waiting longer everywhere.
+	/// </summary>
+	internal const int WaitForIdleTimeoutMs = 100;
+
 	/// <summary>The mobile platform of this fixture.</summary>
 	public abstract TestPlatform Platform { get; }
 
@@ -38,6 +55,16 @@ public abstract record PlatformConfig(
 	/// The number is the sum of the delta for each component, R, G, and B.
 	/// </summary>
 	public abstract int ColorTolerance { get; init; }
+
+	/// <summary>
+	/// Percentage of pixels permitted to exceed <see cref="ColorTolerance"/> before a step fails.
+	/// A handful of pixels along a high-contrast edge can flip between near-black and near-white
+	/// when the device decodes a photo at a different scale, which no colour threshold can separate
+	/// from a real change; this budget absorbs them. It is a percentage rather than a count so that
+	/// a regression of a given size in device-independent pixels stays equally detectable on every
+	/// device — a real change scales with area, while this noise only scales with edge length.
+	/// </summary>
+	public abstract double MaxDiffPixelPercentage { get; init; }
 
 	/// <summary>Human-readable identifier used as the screenshot subdirectory name.</summary>
 	public string DisplayName => $"{Platform} · {PlatformVersion} · {DeviceName} · {(IsLightTheme ? "light" : "dark")}";

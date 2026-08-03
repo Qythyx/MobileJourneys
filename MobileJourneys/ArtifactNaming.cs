@@ -12,6 +12,8 @@ internal static class ArtifactNaming
 	internal const string BaselineExtension = ".png";
 	private const string NewSuffix = ".new.png";
 	private const string DiffPrefix = "_diff_";
+	private const string PixelCountPrefix = "_";
+	private const string PixelCountSuffix = "px";
 	private const string DiffExtension = ".png";
 	private const string FailPrefix = "_FAIL_";
 	private const string FailExtension = ".png";
@@ -25,11 +27,15 @@ internal static class ArtifactNaming
 	/// <param name="testStep">The step the capture belongs to.</param>
 	internal static string NewFileName(TestStep testStep) => Attributed(testStep) + NewSuffix;
 
-	/// <summary>Filename for the diff visualization image, tagged with the pixel-error percentage.</summary>
+	/// <summary>Filename for the diff visualization image, tagged with the pixel-error percentage and count.</summary>
 	/// <param name="testStep">The step the diff belongs to.</param>
 	/// <param name="pixelErrorPercentage">Percentage of differing pixels, embedded in the filename.</param>
-	internal static string DiffFileName(TestStep testStep, double pixelErrorPercentage) =>
-		$"{Attributed(testStep)}{DiffPrefix}{pixelErrorPercentage:F3}%{DiffExtension}";
+	/// <param name="pixelErrorCount">
+	/// Number of differing pixels. Carried alongside the percentage because a failure of a few pixels
+	/// rounds to 0.000%, which reads as "nothing differs" and hides how near the budget the step ran.
+	/// </param>
+	internal static string DiffFileName(TestStep testStep, double pixelErrorPercentage, int pixelErrorCount) =>
+		$"{Attributed(testStep)}{DiffPrefix}{pixelErrorPercentage:F3}%{PixelCountPrefix}{pixelErrorCount}{PixelCountSuffix}{DiffExtension}";
 
 	/// <summary>Filename for a FAIL screenshot (written when a step throws).</summary>
 	/// <param name="testStep">The step the screenshot belongs to.</param>
@@ -84,7 +90,17 @@ internal static class ArtifactNaming
 	/// <param name="JourneyName">The journey the artifact is attributed to.</param>
 	/// <param name="Kind">The artifact kind: <c>"new"</c>, <c>"diff"</c>, <c>"fail"</c>, or <c>"crash"</c>.</param>
 	/// <param name="DiffPercent">Pixel-error percentage parsed from a diff image's filename; <c>null</c> for other kinds.</param>
-	internal sealed record ParsedFailureArtifact(string StepName, string JourneyName, string Kind, double? DiffPercent);
+	/// <param name="DiffPixelCount">
+	/// Number of differing pixels parsed from a diff image's filename. <c>null</c> for other kinds, and
+	/// for diff images written before the count was recorded.
+	/// </param>
+	internal sealed record ParsedFailureArtifact(
+		string StepName,
+		string JourneyName,
+		string Kind,
+		double? DiffPercent,
+		int? DiffPixelCount
+	);
 
 	/// <summary>Parses a failure artifact's filename into its step, journey, kind, and diff percentage. Returns <c>null</c> when the filename is not an attributed failure artifact.</summary>
 	/// <param name="fileName">The filename to parse.</param>
@@ -107,12 +123,12 @@ internal static class ArtifactNaming
 		var suffix = fileName[(close + 1)..];
 		if (suffix == NewSuffix)
 		{
-			return new(stepName, journeyName, "new", null);
+			return new(stepName, journeyName, "new", null, null);
 		}
 
 		if (suffix == CrashLogExtension)
 		{
-			return new(stepName, journeyName, "crash", null);
+			return new(stepName, journeyName, "crash", null, null);
 		}
 
 		if (suffix.StartsWith(DiffPrefix, StringComparison.Ordinal))
@@ -130,12 +146,40 @@ internal static class ArtifactNaming
 					out var percent
 				)
 					? percent
-					: null
+					: null,
+				ParsePixelCount(percentText, percentEnd)
 			);
 		}
 
 		return suffix.StartsWith(FailPrefix, StringComparison.Ordinal)
-			? new(stepName, journeyName, "fail", null)
+			? new(stepName, journeyName, "fail", null, null)
+			: null;
+	}
+
+	/// <summary>
+	/// Reads the <c>_{count}px</c> tag that follows the percentage in a diff filename.
+	/// </summary>
+	/// <param name="percentText">The diff suffix with <see cref="DiffPrefix"/> already removed.</param>
+	/// <param name="percentEnd">Index of the '%' the tag follows; negative when there was no percentage.</param>
+	/// <returns>The count, or <c>null</c> when the filename carries no such tag.</returns>
+	private static int? ParsePixelCount(string percentText, int percentEnd)
+	{
+		if (percentEnd < 0)
+		{
+			return null;
+		}
+
+		var tag = percentText[(percentEnd + 1)..];
+		var countEnd = tag.IndexOf(PixelCountSuffix, StringComparison.Ordinal);
+		return
+			tag.StartsWith(PixelCountPrefix, StringComparison.Ordinal)
+			&& countEnd > PixelCountPrefix.Length
+			&& int.TryParse(
+				tag[PixelCountPrefix.Length..countEnd],
+				System.Globalization.CultureInfo.InvariantCulture,
+				out var count
+			)
+			? count
 			: null;
 	}
 

@@ -130,12 +130,7 @@ public sealed class TestFramework(
 					Task.Run(
 						async () =>
 						{
-							var driver = new TestDriver(
-								group.Key.CreateAppiumDriver(),
-								group.Key,
-								config.DeepLinkScheme,
-								manager
-							);
+							var driver = new TestDriver(group.Key.CreateAppiumDriver(), group.Key, manager);
 							var cases = (IReadOnlyList<TestCase>)[.. group];
 							if (driver.IsAppCrashed())
 							{

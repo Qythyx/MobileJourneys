@@ -70,10 +70,10 @@ public sealed class InMemoryScreenshotStorageTests
 	[Test]
 	public void WriteDiffImageEncodesPercentageInFileName()
 	{
-		_storage.WriteDiffImage(K("Journey", "01 Step"), pixelErrorPercentage: 5.123, [0]);
+		_storage.WriteDiffImage(K("Journey", "01 Step"), pixelErrorPercentage: 5.123, pixelErrorCount: 42, [0]);
 
 		_ = _storage.DiffImageExists(K("Journey", "01 Step")).Should().BeTrue();
-		_ = _storage.ListAllFiles(_config, "Journey").Should().Contain("01 Step [Journey]_diff_5.123%.png");
+		_ = _storage.ListAllFiles(_config, "Journey").Should().Contain("01 Step [Journey]_diff_5.123%_42px.png");
 	}
 
 	[Test]
@@ -101,7 +101,7 @@ public sealed class InMemoryScreenshotStorageTests
 	public void HasFailureArtifactsTrueForEachKind()
 	{
 		_storage.WriteNewScreenshot(K("JNew", "01 Step"), [0]);
-		_storage.WriteDiffImage(K("JDiff", "01 Step"), 1.0, [0]);
+		_storage.WriteDiffImage(K("JDiff", "01 Step"), 1.0, 1, [0]);
 		_storage.WriteFailScreenshot(K("JFail", "01 Step"), "CRASH", [0]);
 		_storage.WriteCrashLog(K("JCrash", "01 Step"), "boom");
 
@@ -128,7 +128,7 @@ public sealed class InMemoryScreenshotStorageTests
 	{
 		_storage.WriteBaseline(K("Journey", "01 Step"), [0]);
 		_storage.WriteNewScreenshot(K("Journey", "01 Step"), [0]);
-		_storage.WriteDiffImage(K("Journey", "01 Step"), 5.0, [0]);
+		_storage.WriteDiffImage(K("Journey", "01 Step"), 5.0, 1, [0]);
 		_storage.WriteFailScreenshot(K("Journey", "01 Step"), "CRASH", [0]);
 		_storage.WriteCrashLog(K("Journey", "01 Step"), "boom");
 		// A different step's artifacts must not be touched.
@@ -157,7 +157,7 @@ public sealed class InMemoryScreenshotStorageTests
 		_storage.WriteBaseline(K("Journey", "01 Step"), [0]);
 		_storage.WriteBaseline(K("Journey", "02 Step"), [0]);
 		_storage.WriteNewScreenshot(K("Journey", "01 Step"), [0]);
-		_storage.WriteDiffImage(K("Journey", "01 Step"), 5.0, [0]);
+		_storage.WriteDiffImage(K("Journey", "01 Step"), 5.0, 1, [0]);
 		_storage.WriteFailScreenshot(K("Journey", "02 Step"), "CRASH", [0]);
 		_storage.WriteCrashLog(K("Journey", "02 Step"), "boom");
 

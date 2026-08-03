@@ -27,7 +27,7 @@ public sealed class ScreenshotStorageTests
 			[],
 			"PrimaryJourney"
 		);
-		_config = new("Tests", "Tests", "MobileJourneys.Tests", "test", [_platform], [_journey]);
+		_config = new("Tests", "Tests", "MobileJourneys.Tests", [_platform], [_journey]);
 	}
 
 	private string InitialStep => $"01 {_journey.InitialName}";
@@ -80,7 +80,7 @@ public sealed class ScreenshotStorageTests
 	{
 		_storage.WriteBaseline(K(_journey.Name, InitialStep), [0]);
 		_storage.WriteNewScreenshot(K(_journey.Name, InitialStep), [0]);
-		_storage.WriteDiffImage(K(_journey.Name, InitialStep), 5.0, [0]);
+		_storage.WriteDiffImage(K(_journey.Name, InitialStep), 5.0, 1, [0]);
 		_storage.WriteFailScreenshot(K(_journey.Name, InitialStep), "oops", [0]);
 		_storage.WriteCrashLog(K(_journey.Name, InitialStep), "boom");
 
@@ -124,14 +124,7 @@ public sealed class ScreenshotStorageTests
 			null,
 			"Root"
 		);
-		var config = new FrameworkConfig(
-			"Tests",
-			"Tests",
-			"MobileJourneys.Tests",
-			"test",
-			[_platform],
-			[.. tree.Flatten()]
-		);
+		var config = new FrameworkConfig("Tests", "Tests", "MobileJourneys.Tests", [_platform], [.. tree.Flatten()]);
 		foreach (var journey in config.Journeys)
 		{
 			foreach (var (container, stepName) in journey.ExpectedStepLocations())
