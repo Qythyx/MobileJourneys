@@ -165,7 +165,15 @@ public static class SuiteRunner
 						.GroupBy(testCase => testCase.Config)
 						.Select(group =>
 							Task.Run(
-								() => StartAndRunFixture(group.Key, [.. group], reporter, manager, cancellation.Token),
+								() =>
+									StartAndRunFixture(
+										group.Key,
+										[.. group],
+										config.CreateBackend,
+										reporter,
+										manager,
+										cancellation.Token
+									),
 								cancellation.Token
 							)
 						)
@@ -206,12 +214,14 @@ public static class SuiteRunner
 	/// </summary>
 	/// <param name="config">The platform fixture to bring up.</param>
 	/// <param name="cases">The journeys selected for it.</param>
+	/// <param name="createBackend">Builds the fixture's stand-in backend, or <c>null</c> for none.</param>
 	/// <param name="reporter">Told what the fixture is doing, and when it has to be abandoned.</param>
 	/// <param name="manager">Screenshot storage the driver writes through.</param>
 	/// <param name="cancellationToken">Cancelled when the reader interrupts the run.</param>
 	private static void StartAndRunFixture(
 		PlatformConfig config,
 		IReadOnlyList<TestCase> cases,
+		Func<PlatformConfig, string, IJourneyBackend>? createBackend,
 		RunReporter reporter,
 		ScreenshotManager manager,
 		CancellationToken cancellationToken
@@ -224,8 +234,28 @@ public static class SuiteRunner
 			return;
 		}
 
-		reporter.FixtureReady(config);
-		RunFixture(new FixtureSession(config, cases, start.Driver), reporter, manager, cancellationToken);
+		// The backend is built after the session, not before it, because it may have to bind itself to
+		// the device it serves and only a live session names that device.
+		IJourneyBackend? backend;
+		try
+		{
+			backend = createBackend?.Invoke(config, start.Driver.GetDeviceId());
+		}
+		catch (Exception ex)
+		{
+			// Abandon the fixture rather than the run, as a failed session start does — and rather than
+			// escaping to the runtime, which would skip disposing the Appium server.
+			QuitDriver(start.Driver);
+			reporter.FixtureSkipped(config, cases.Count, $"its backend failed to start: {ex.Message}");
+			return;
+		}
+
+		using (backend)
+		{
+			start.Driver.Backend = backend;
+			reporter.FixtureReady(config);
+			RunFixture(new FixtureSession(config, cases, start.Driver), reporter, manager, cancellationToken);
+		}
 	}
 
 	private static FixtureStart StartFixture(

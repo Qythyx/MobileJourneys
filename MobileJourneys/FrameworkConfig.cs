@@ -30,6 +30,12 @@ public sealed record FrameworkConfig(
 	public ScreenshotStorage Storage { get; init; } = FilesystemScreenshotStorage.Default();
 
 	/// <summary>
+	/// Creates the stand-in backend one fixture's journeys run against, given the fixture and the id
+	/// of the device hosting it. <c>null</c> for a suite whose app needs no backend.
+	/// </summary>
+	public Func<PlatformConfig, string, IJourneyBackend>? CreateBackend { get; init; }
+
+	/// <summary>
 	/// Finds screenshot files no journey references — see <see cref="ScreenshotStorage.FindExtraneous"/>.
 	/// </summary>
 	/// <param name="deleteExtraneous">When <c>true</c>, deletes the extraneous files after collecting them.</param>

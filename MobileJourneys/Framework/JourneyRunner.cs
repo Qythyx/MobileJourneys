@@ -20,7 +20,8 @@ internal static class JourneyRunner
 
 		var totalSteps = journey.Steps.Length + 1;
 
-		driver.CurrentJourneyEnv = journey.Scenario.ForFixture(config);
+		var environment = journey.Scenario.ForFixture(config);
+		driver.CurrentJourneyEnv = driver.Backend?.PrepareFor(environment) ?? environment;
 		driver.ClearAppLogs();
 		driver.RelaunchApp(driver.CurrentJourneyEnv);
 

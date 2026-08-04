@@ -54,6 +54,13 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, Screensh
 	/// </summary>
 	public IJourneyEnvironment CurrentJourneyEnv { get; set; } = null!;
 
+	/// <summary>
+	/// The stand-in backend this fixture's app talks to, or <c>null</c> when the suite declares none.
+	/// Set by <c>SuiteRunner</c> once the fixture is up; consumer-side actions reach through it to
+	/// drive backend state part-way through a journey.
+	/// </summary>
+	public IJourneyBackend? Backend { get; set; }
+
 	private Rectangle[] SystemMasks =>
 		field ??= [
 			.. new Rectangle[] { GetStatusBarMask(), GetHomeIndicatorMask() }.Where(rect =>
