@@ -55,13 +55,13 @@ internal static class InteractiveMenu
 	private static RunOptions? ToOptions(Choice choice, FrameworkConfig config) =>
 		choice switch
 		{
-			Choice.RunAll => new RunOptions(RunMode.Run, [], [], false, null),
+			Choice.RunAll => new RunOptions(RunMode.Run, [], [], false, null, null),
 			Choice.RunSome => PromptForSelection(config),
-			Choice.RerunFailed => new RunOptions(RunMode.Run, [], [], true, null),
-			Choice.Review => new RunOptions(RunMode.Review, [], [], false, null),
-			Choice.ListExtraneous => new RunOptions(RunMode.ListExtraneous, [], [], false, null),
-			Choice.DeleteExtraneous => new RunOptions(RunMode.DeleteExtraneous, [], [], false, null),
-			Choice.Quit => new RunOptions(RunMode.Quit, [], [], false, null),
+			Choice.RerunFailed => new RunOptions(RunMode.Run, [], [], true, null, null),
+			Choice.Review => new RunOptions(RunMode.Review, [], [], false, null, null),
+			Choice.ListExtraneous => new RunOptions(RunMode.ListExtraneous, [], [], false, null, null),
+			Choice.DeleteExtraneous => new RunOptions(RunMode.DeleteExtraneous, [], [], false, null, null),
+			Choice.Quit => new RunOptions(RunMode.Quit, [], [], false, null, null),
 			_ => throw new ArgumentOutOfRangeException(nameof(choice)),
 		};
 
@@ -88,7 +88,9 @@ internal static class InteractiveMenu
 	private static RunOptions? PromptForSelection(FrameworkConfig config)
 	{
 		var journeys = PromptForJourneys(config);
-		return journeys.Count == 0 ? null : new RunOptions(RunMode.Run, PromptForFilters(), journeys, false, null);
+		return journeys.Count == 0
+			? null
+			: new RunOptions(RunMode.Run, PromptForFilters(), journeys, false, null, null);
 	}
 
 	/// <summary>Offers every journey by name, with a group header that takes the lot.</summary>

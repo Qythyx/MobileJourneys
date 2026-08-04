@@ -8,8 +8,7 @@ internal static class JourneyRunner
 		TestDriver driver,
 		TestCase testCase,
 		ScreenshotManager manager,
-		RunReporter reporter,
-		ProgressLog? progress
+		RunReporter reporter
 	)
 	{
 		var journey = testCase.Journey;
@@ -97,8 +96,7 @@ internal static class JourneyRunner
 				failures.Add(new JourneyFailureException(message, journey, journeyStep, number, totalSteps, name, ex));
 			}
 
-			reporter.StepCompleted(testCase, number, totalSteps, name, stepPassed, detail);
-			progress?.StepCompleted(testStep, stepPassed);
+			reporter.StepCompleted(testStep, number, totalSteps, name, stepPassed, detail);
 		}
 
 		stopwatch.Stop();

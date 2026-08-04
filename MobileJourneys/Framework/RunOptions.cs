@@ -34,12 +34,14 @@ public enum RunMode
 /// <param name="JourneyNames">Journey names, matched whole and case-insensitively; a journey need only be one
 /// of them. Empty means every journey.</param>
 /// <param name="Rerun">Whether to restrict the run to journeys with failure artifacts on disk.</param>
+/// <param name="ReportTo">URL to POST run events to, or <c>null</c> to report to the console instead.</param>
 /// <param name="Error">The parse error to report, or <c>null</c> when the command line was valid.</param>
 public sealed record RunOptions(
 	RunMode Mode,
 	IReadOnlyList<string> Filters,
 	IReadOnlyList<string> JourneyNames,
 	bool Rerun,
+	string? ReportTo,
 	string? Error
 )
 {
@@ -52,6 +54,7 @@ public sealed record RunOptions(
 		var journeyNames = new List<string>();
 		RunMode? mode = null;
 		var rerun = false;
+		string? reportTo = null;
 
 		// An editor that substitutes an unset filter into an argument array leaves a blank element
 		// behind rather than dropping it, and a blank is never a real argument or a useful filter
@@ -84,6 +87,14 @@ public sealed record RunOptions(
 					rerun = true;
 					break;
 
+				case "--report-to":
+					if (i + 1 >= args.Length || args[i + 1].StartsWith("--", StringComparison.Ordinal))
+					{
+						return Invalid("--report-to needs a URL.");
+					}
+					reportTo = args[++i];
+					break;
+
 				case "--list-extraneous":
 					mode = RunMode.ListExtraneous;
 					break;
@@ -111,13 +122,13 @@ public sealed record RunOptions(
 			// A run occupies every configured device for as long as it takes, so it has to be asked
 			// for by name — a narrowing flag on its own is not a request to run.
 			return args.Length == 0
-				? new RunOptions(RunMode.Interactive, [], [], false, null)
+				? new RunOptions(RunMode.Interactive, [], [], false, null, null)
 				: Invalid("Add --run to run journeys, or pass no arguments at all to choose from a menu.");
 		}
 
-		return new RunOptions(mode.Value, filters, journeyNames, rerun, null);
+		return new RunOptions(mode.Value, filters, journeyNames, rerun, reportTo, null);
 
-		static RunOptions Invalid(string error) => new(RunMode.Help, [], [], false, error);
+		static RunOptions Invalid(string error) => new(RunMode.Help, [], [], false, null, error);
 
 		// Both repeated flags and several values after one flag, since both read naturally at a call
 		// site. False when the flag was given nothing to collect.
@@ -150,6 +161,8 @@ public sealed record RunOptions(
 			  --filter <text>...    Case-insensitive substring match against '{PlatformConfig}.{JourneyName}'.
 			                        Repeatable; every filter must match.
 			  --rerun               Restrict the run to journeys with failure artifacts on disk.
+			  --report-to <url>     POST run events to this URL instead of writing progress to the
+			                        console. Set by the review server when it launches a rerun.
 			  --list-extraneous     List screenshots no journey references, then exit.
 			  --delete-extraneous   Delete screenshots no journey references, then exit.
 			  --review              Serve the screenshot viewer with review actions, instead of running.

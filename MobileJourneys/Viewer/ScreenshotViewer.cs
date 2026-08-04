@@ -19,7 +19,11 @@ public static class ScreenshotViewer
 {
 	private const int FirstPort = 8017;
 
-	/// <summary>Most recent lines of a rerun's console output kept for the page to display.</summary>
+	/// <summary>
+	/// Most recent lines of a rerun's console output kept as evidence. The page's live display is
+	/// driven by the events the child posts back, but a child that fails to build posts none — so
+	/// its output is retained and handed over when the process exits non-zero.
+	/// </summary>
 	private const int MaxJobLines = 400;
 
 	private static readonly JsonSerializerOptions RequestOptions = new() { PropertyNameCaseInsensitive = true };
@@ -158,8 +162,11 @@ public static class ScreenshotViewer
 			case ["api", "ping"]:
 				TryRespond(context, 200, "text/plain", Encoding.UTF8.GetBytes("ok"));
 				return;
-			case ["api", "rerun-status"]:
-				ServeRerunStatus(context);
+			case ["api", "run-events"] when context.Request.HttpMethod == "POST":
+				ReceiveRunEvent(context);
+				return;
+			case ["api", "events"]:
+				StreamEvents(context);
 				return;
 			case ["api", var action] when context.Request.HttpMethod == "POST":
 				HandleApi(context, config, storage, action);
@@ -205,27 +212,81 @@ public static class ScreenshotViewer
 		TryRespond(context, 200, contentType, File.ReadAllBytes(path), cacheControl);
 	}
 
-	private static void ServeRerunStatus(HttpListenerContext context)
+	private static RerunJob? FindJob(HttpListenerContext context, string parameterName)
 	{
-		var id = context.Request.QueryString["id"];
-		RerunJob? job;
+		var id = context.Request.QueryString[parameterName];
 		lock (RerunGate)
 		{
-			job = id is not null && jobs.TryGetValue(id, out var found) ? found : null;
+			return id is not null && jobs.TryGetValue(id, out var found) ? found : null;
+		}
+	}
+
+	/// <summary>
+	/// Takes one event from a running rerun and records it against that job, from where every open
+	/// page picks it up. The body is the child's own JSON and is relayed unread — this server routes
+	/// events, and the page is what interprets them.
+	/// </summary>
+	/// <param name="context">The request to read the event from and answer.</param>
+	private static void ReceiveRunEvent(HttpListenerContext context)
+	{
+		using var reader = new StreamReader(context.Request.InputStream, Encoding.UTF8);
+		var body = reader.ReadToEnd().Trim();
+		if (FindJob(context, "job") is not { } job || body.Length == 0)
+		{
+			TryRespond(context, 400, "text/plain", Encoding.UTF8.GetBytes("unknown job"));
+			return;
 		}
 
-		if (job is null)
+		// Record before answering: the child posts its events one at a time and waits for each
+		// response, so recording first is what makes the order it sends them the order they arrive in.
+		job.Publish(body);
+		TryRespond(context, 200, "text/plain", Encoding.UTF8.GetBytes("ok"));
+	}
+
+	/// <summary>
+	/// Streams a job's events to the page as Server-Sent Events, replaying from the beginning so a
+	/// reconnecting browser rebuilds the whole picture rather than resuming mid-run. The stream ends
+	/// when the child process does, and the page closes it on the terminal event.
+	/// </summary>
+	/// <param name="context">The request to stream the events over.</param>
+	private static void StreamEvents(HttpListenerContext context)
+	{
+		if (FindJob(context, "id") is not { } job)
 		{
 			TryRespond(context, 404, "text/plain", Encoding.UTF8.GetBytes("unknown job"));
 			return;
 		}
 
-		TryRespond(
-			context,
-			200,
-			"application/json",
-			Encoding.UTF8.GetBytes(job.ToJson(context.Request.QueryString["config"]))
-		);
+		try
+		{
+			context.Response.StatusCode = 200;
+			context.Response.ContentType = "text/event-stream";
+			context.Response.Headers["Cache-Control"] = "no-store";
+			context.Response.SendChunked = true;
+			for (var sent = 0; ; )
+			{
+				var (events, more) = job.Since(sent);
+				foreach (var payload in events)
+				{
+					context.Response.OutputStream.Write(Encoding.UTF8.GetBytes($"data: {payload}\n\n"));
+				}
+
+				context.Response.OutputStream.Flush();
+				sent += events.Count;
+				if (more is null)
+				{
+					break;
+				}
+
+				more.Wait();
+			}
+		}
+		catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException or IOException)
+		{
+			// The page navigated away or was closed mid-stream.
+		}
+
+		TryClose(context);
 	}
 
 	private static void HandleApi(
@@ -303,12 +364,7 @@ public static class ScreenshotViewer
 				StartRerun(context, config, storage, JsonSerializer.Deserialize<RerunRequest>(body, RequestOptions));
 				return;
 			case "rerun-all":
-				StartRerunAll(
-					context,
-					config,
-					storage,
-					JsonSerializer.Deserialize<RerunAllRequest>(body, RequestOptions)
-				);
+				StartRerunAll(context, JsonSerializer.Deserialize<RerunAllRequest>(body, RequestOptions));
 				return;
 			default:
 				TryRespond(context, 404, "text/plain", Encoding.UTF8.GetBytes("unknown action"));
@@ -352,8 +408,6 @@ public static class ScreenshotViewer
 			return;
 		}
 
-		// --rerun re-derives the failing fixtures from the same predicate that built the platform list
-		// above, so the run and the progress totals cannot disagree.
 		List<string> scopeArgs = request.Scope switch
 		{
 			"all" => [],
@@ -361,14 +415,11 @@ public static class ScreenshotViewer
 			_ => ["--filter", platforms[0].DisplayName],
 		};
 
-		var stepsPerJourney = journey.ExpectedStepLocations().Count();
 		LaunchRerun(
 			context,
 			$"{journey.Name} on {string.Join(", ", platforms.Select(p => p.DisplayName))}",
 			[],
-			["--journey", journey.Name, .. scopeArgs],
-			platforms.Count,
-			platforms.Count * stepsPerJourney
+			["--journey", journey.Name, .. scopeArgs]
 		);
 	}
 
@@ -380,42 +431,17 @@ public static class ScreenshotViewer
 	/// changes). The two combine.
 	/// </summary>
 	/// <param name="context">The request to respond to.</param>
-	/// <param name="config">Framework configuration providing the journeys and platforms, for the progress totals.</param>
-	/// <param name="storage">Storage consulted (when <c>Failed</c>) for which journeys still have failures.</param>
 	/// <param name="request">Whether to limit to failing journeys and/or rebuild the app first.</param>
-	private static void StartRerunAll(
-		HttpListenerContext context,
-		FrameworkConfig config,
-		FilesystemScreenshotStorage storage,
-		RerunAllRequest? request
-	)
+	private static void StartRerunAll(HttpListenerContext context, RerunAllRequest? request)
 	{
 		var failed = request?.Failed ?? false;
 		var embed = request?.Embed ?? false;
-
-		List<string> buildArgs = embed ? ["-p:EmbedAssemblies=true"] : [];
-		List<string> runnerArgs = failed ? ["--rerun"] : [];
-
-		int totalJourneys;
-		int totalSteps;
-		if (failed)
-		{
-			// Mirror the framework's own --rerun selection so the progress totals match what actually runs.
-			var journeys = config
-				.PlatformConfigs.SelectMany(p => config.Journeys.Where(j => storage.HasFailureArtifacts(p, j)))
-				.ToList();
-			totalJourneys = journeys.Count;
-			totalSteps = journeys.Sum(j => j.ExpectedStepLocations().Count());
-		}
-		else
-		{
-			var platformCount = config.PlatformConfigs.Count;
-			totalJourneys = config.Journeys.Count * platformCount;
-			totalSteps = platformCount * config.Journeys.Sum(j => j.ExpectedStepLocations().Count());
-		}
-
-		var description = (failed ? "failed journeys" : "all journeys") + (embed ? " (rebuilding app)" : "");
-		LaunchRerun(context, description, buildArgs, runnerArgs, totalJourneys, totalSteps);
+		LaunchRerun(
+			context,
+			(failed ? "failed journeys" : "all journeys") + (embed ? " (rebuilding app)" : ""),
+			embed ? ["-p:EmbedAssemblies=true"] : [],
+			failed ? ["--rerun"] : []
+		);
 	}
 
 	/// <summary>
@@ -427,15 +453,11 @@ public static class ScreenshotViewer
 	/// <param name="description">Human-readable summary of what is being rerun, shown on the page.</param>
 	/// <param name="buildArgs">MSBuild properties for <c>dotnet run</c> itself, before the <c>--</c>.</param>
 	/// <param name="runnerArgs">Arguments for the runner, after the <c>--</c> — the journey selection, or <c>--rerun</c>.</param>
-	/// <param name="totalJourneys">Total journey runs this rerun will perform (journeys × platforms), for the progress counter.</param>
-	/// <param name="totalSteps">Total screenshot steps this rerun will perform, for the progress counter.</param>
 	private static void LaunchRerun(
 		HttpListenerContext context,
 		string description,
 		IEnumerable<string> buildArgs,
-		IEnumerable<string> runnerArgs,
-		int totalJourneys,
-		int totalSteps
+		IEnumerable<string> runnerArgs
 	)
 	{
 		var projectPath = Directory.GetFiles(TestAssembly.ProjectRootPath, "*.csproj").FirstOrDefault();
@@ -445,12 +467,7 @@ public static class ScreenshotViewer
 			return;
 		}
 
-		// The running test process appends per-step/per-journey progress here (see ProgressLog); the
-		// page polls rerun-status, which reads it back. A file side-channel rather than the console
-		// output we already capture, because the page needs to identify the exact screenshot each
-		// event belongs to, which structured lines give it and prose does not.
-		var progressPath = Path.Combine(Path.GetTempPath(), $"mj-progress-{Guid.NewGuid():N}.tsv");
-		var job = new RerunJob(description, progressPath, totalJourneys, totalSteps);
+		var job = new RerunJob();
 		lock (RerunGate)
 		{
 			if (jobs.Values.Any(j => j.Running))
@@ -469,7 +486,6 @@ public static class ScreenshotViewer
 			RedirectStandardError = true,
 			UseShellExecute = false,
 		};
-		startInfo.Environment["MJ_PROGRESS_FILE"] = progressPath;
 		startInfo.ArgumentList.Add("run");
 		startInfo.ArgumentList.Add("--project");
 		startInfo.ArgumentList.Add(projectPath);
@@ -480,6 +496,13 @@ public static class ScreenshotViewer
 		// Everything after this belongs to the runner, not to `dotnet run` itself.
 		startInfo.ArgumentList.Add("--");
 		startInfo.ArgumentList.Add("--run");
+		startInfo.ArgumentList.Add("--report-to");
+		// Report back to the address the page reached this server on, which the request carries.
+		startInfo.ArgumentList.Add(
+			new UriBuilder(context.Request.Url!) { Path = "/api/run-events", Query = $"job={job.Id}" }
+				.Uri
+				.AbsoluteUri
+		);
 		foreach (var arg in runnerArgs)
 		{
 			startInfo.ArgumentList.Add(arg);
@@ -491,15 +514,10 @@ public static class ScreenshotViewer
 		process.ErrorDataReceived += (_, e) => job.Append(e.Data);
 		process.Exited += (_, _) =>
 		{
+			// Exited can fire while the output handlers still have buffered lines to deliver, and those
+			// lines are the whole evidence when the child died without reporting.
+			process.WaitForExit();
 			job.Complete(process.ExitCode);
-			try
-			{
-				File.Delete(progressPath);
-			}
-			catch (IOException)
-			{
-				// Best-effort cleanup of the temp progress file; a leftover in TEMP is harmless.
-			}
 			process.Dispose();
 		};
 
@@ -516,7 +534,12 @@ public static class ScreenshotViewer
 			process.Dispose();
 		}
 
-		TryRespond(context, 200, "application/json", Encoding.UTF8.GetBytes($$"""{"id":"{{job.Id}}"}"""));
+		TryRespond(
+			context,
+			200,
+			"application/json",
+			Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { id = job.Id, description }, ResponseOptions))
+		);
 	}
 
 	private static string Quote(string argument) => argument.Contains(' ') ? $"\"{argument}\"" : argument;
@@ -550,6 +573,18 @@ public static class ScreenshotViewer
 		}
 	}
 
+	private static void TryClose(HttpListenerContext context)
+	{
+		try
+		{
+			context.Response.Close();
+		}
+		catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException or IOException)
+		{
+			// Already gone; closing it is all that was left to do anyway.
+		}
+	}
+
 	private static string ReadIndexHtml()
 	{
 		using var stream = typeof(ScreenshotViewer).Assembly.GetManifestResourceStream(
@@ -567,23 +602,24 @@ public static class ScreenshotViewer
 
 	private sealed record RerunAllRequest(bool Failed, bool Embed);
 
-	/// <summary>A running or finished <c>dotnet run</c> rerun, and the console output collected from it.</summary>
-	/// <param name="description">Human-readable summary of what is being rerun, shown on the page.</param>
-	/// <param name="progressPath">File the test process appends per-step/per-journey progress lines to.</param>
-	/// <param name="totalJourneys">Total journey runs this rerun performs, for the progress counter.</param>
-	/// <param name="totalSteps">Total screenshot steps this rerun performs, for the progress counter.</param>
-	private sealed class RerunJob(string description, string progressPath, int totalJourneys, int totalSteps)
+	/// <summary>
+	/// A running or finished <c>dotnet run</c> rerun: the events it has reported so far, and the
+	/// console output collected from it.
+	/// </summary>
+	private sealed class RerunJob
 	{
 		private readonly List<string> lines = [];
-		private readonly object gate = new();
+		private readonly List<string> events = [];
+		private readonly Lock gate = new();
 
-		/// <summary>Identifier the page polls status with.</summary>
+		/// <summary>Completed and replaced whenever an event arrives, so listeners can wait on the next one.</summary>
+		private TaskCompletionSource arrived = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		/// <summary>Identifier the page subscribes to the event stream with.</summary>
 		internal string Id { get; } = Guid.NewGuid().ToString("N");
 
 		/// <summary><c>true</c> until the process exits.</summary>
 		internal bool Running { get; private set; } = true;
-
-		private int ExitCode { get; set; }
 
 		/// <summary>
 		/// Appends one console line, discarding the oldest once the cap is reached. The rerun's
@@ -608,87 +644,62 @@ public static class ScreenshotViewer
 			}
 		}
 
-		/// <summary>Marks the job finished with the process's exit code.</summary>
+		/// <summary>Records an event the run reported, and wakes everyone waiting for one.</summary>
+		/// <param name="json">The event as the run serialized it.</param>
+		internal void Publish(string json)
+		{
+			lock (gate)
+			{
+				events.Add(json);
+				Wake();
+			}
+		}
+
+		/// <summary>
+		/// Closes the job with a final event of the server's own: the process is gone, and this is the
+		/// exit code it left. A run that reported nothing — one that failed to build, say — is only
+		/// explicable from its console output, so a failing exit carries that too.
+		/// </summary>
 		/// <param name="exitCode">The exit code <c>dotnet run</c> returned.</param>
 		internal void Complete(int exitCode)
 		{
 			lock (gate)
 			{
-				ExitCode = exitCode;
 				Running = false;
-			}
-		}
-
-		/// <summary>Serializes the current status, output, and progress for the page.</summary>
-		/// <param name="config">Platform whose per-screenshot progress the page wants; counts stay global.</param>
-		internal string ToJson(string? config)
-		{
-			lock (gate)
-			{
-				return JsonSerializer.Serialize(
-					new
-					{
-						id = Id,
-						description,
-						running = Running,
-						exitCode = ExitCode,
-						lines,
-						progress = ReadProgress(config),
-					},
-					ResponseOptions
+				events.Add(
+					JsonSerializer.Serialize(
+						new
+						{
+							type = "process-exited",
+							exitCode,
+							output = exitCode == 0 ? null : lines,
+						},
+						ResponseOptions
+					)
 				);
+				Wake();
 			}
 		}
 
 		/// <summary>
-		/// Reads the progress file the test process is appending to: overall journeys/steps completed
-		/// (across all platforms, for the counter) plus a per-screenshot pass/fail map for the requested
-		/// platform (for recoloring the graph). Missing/partly-written lines are ignored, so a torn read
-		/// mid-append just yields slightly stale progress.
+		/// The events recorded since a listener's position, and a task completing when the next one
+		/// arrives — <c>null</c> once the process has exited and everything has been handed over.
 		/// </summary>
-		/// <param name="config">Platform whose step results to include; <c>null</c> includes all.</param>
-		private object ReadProgress(string? config)
+		/// <param name="sent">How many events the listener already has.</param>
+		/// <returns>The events it does not, and what to wait on for more.</returns>
+		internal (IReadOnlyList<string> Events, Task? More) Since(int sent)
 		{
-			var steps = new Dictionary<string, string>(StringComparer.Ordinal);
-			var doneJourneys = 0;
-			var doneSteps = 0;
-			string text;
-			try
+			lock (gate)
 			{
-				using var stream = new FileStream(progressPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-				using var reader = new StreamReader(stream, Encoding.UTF8);
-				text = reader.ReadToEnd();
+				return ([.. events.Skip(sent)], Running ? arrived.Task : null);
 			}
-			catch (IOException)
-			{
-				text = "";
-			}
+		}
 
-			foreach (var line in text.Split('\n'))
-			{
-				switch (line.Split('\t'))
-				{
-					case ["step", var cfg, var container, var step, var result]:
-						doneSteps++;
-						if (config is null || cfg == config)
-						{
-							steps[$"{container}/{step}"] = result;
-						}
-						break;
-					case ["journey", _, _, _]:
-						doneJourneys++;
-						break;
-				}
-			}
-
-			return new
-			{
-				doneJourneys,
-				totalJourneys,
-				doneSteps,
-				totalSteps,
-				steps,
-			};
+		private void Wake()
+		{
+			var waiting = arrived;
+			arrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+			_ = waiting.TrySetResult();
 		}
 	}
 }

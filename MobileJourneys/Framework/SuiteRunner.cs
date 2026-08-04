@@ -134,8 +134,10 @@ public static class SuiteRunner
 			return 0;
 		}
 
-		var reporter = IsInteractive ? (RunReporter)new LiveStatusReporter(selected) : new ConsoleReporter();
-		var progress = ProgressLog.FromEnvironment();
+		RunReporter reporter =
+			options.ReportTo is { } reportUrl ? new WebReporter(reportUrl, selected)
+			: IsInteractive ? new LiveStatusReporter(selected)
+			: new ConsoleReporter();
 
 		using var cancellation = new CancellationTokenSource();
 		Console.CancelKeyPress += (_, e) =>
@@ -163,15 +165,7 @@ public static class SuiteRunner
 						.GroupBy(testCase => testCase.Config)
 						.Select(group =>
 							Task.Run(
-								() =>
-									StartAndRunFixture(
-										group.Key,
-										[.. group],
-										reporter,
-										manager,
-										progress,
-										cancellation.Token
-									),
+								() => StartAndRunFixture(group.Key, [.. group], reporter, manager, cancellation.Token),
 								cancellation.Token
 							)
 						)
@@ -214,14 +208,12 @@ public static class SuiteRunner
 	/// <param name="cases">The journeys selected for it.</param>
 	/// <param name="reporter">Told what the fixture is doing, and when it has to be abandoned.</param>
 	/// <param name="manager">Screenshot storage the driver writes through.</param>
-	/// <param name="progress">The review server's progress side-channel, when a rerun supplied one.</param>
 	/// <param name="cancellationToken">Cancelled when the reader interrupts the run.</param>
 	private static void StartAndRunFixture(
 		PlatformConfig config,
 		IReadOnlyList<TestCase> cases,
 		RunReporter reporter,
 		ScreenshotManager manager,
-		ProgressLog? progress,
 		CancellationToken cancellationToken
 	)
 	{
@@ -233,7 +225,7 @@ public static class SuiteRunner
 		}
 
 		reporter.FixtureReady(config);
-		RunFixture(new FixtureSession(config, cases, start.Driver), reporter, manager, progress, cancellationToken);
+		RunFixture(new FixtureSession(config, cases, start.Driver), reporter, manager, cancellationToken);
 	}
 
 	private static FixtureStart StartFixture(
@@ -276,7 +268,6 @@ public static class SuiteRunner
 		FixtureSession session,
 		RunReporter reporter,
 		ScreenshotManager manager,
-		ProgressLog? progress,
 		CancellationToken cancellationToken
 	)
 	{
@@ -294,9 +285,7 @@ public static class SuiteRunner
 
 				try
 				{
-					var result = JourneyRunner.Run(driver, testCase, manager, reporter, progress);
-					reporter.JourneyCompleted(result);
-					progress?.JourneyCompleted(testCase, result.Passed);
+					reporter.JourneyCompleted(JourneyRunner.Run(driver, testCase, manager, reporter));
 				}
 				catch when (cancellationToken.IsCancellationRequested)
 				{
@@ -309,7 +298,6 @@ public static class SuiteRunner
 					// SIGABRT the process and skip the finally block that disposes the Appium server,
 					// orphaning its child process.
 					reporter.JourneyCompleted(new JourneyResult(testCase, false, TimeSpan.Zero, ex.Message, ex));
-					progress?.JourneyCompleted(testCase, false);
 				}
 			}
 		}

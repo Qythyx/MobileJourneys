@@ -72,7 +72,7 @@ internal sealed class LiveStatusReporter(IReadOnlyList<TestCase> selected) : Run
 
 	/// <inheritdoc/>
 	public override void StepCompleted(
-		TestCase testCase,
+		TestStep step,
 		int stepNumber,
 		int totalSteps,
 		string stepName,
@@ -82,9 +82,9 @@ internal sealed class LiveStatusReporter(IReadOnlyList<TestCase> selected) : Run
 	{
 		lock (Gate)
 		{
-			if (fixtures.TryGetValue(testCase.Config, out var fixture))
+			if (fixtures.TryGetValue(step.Config, out var fixture))
 			{
-				fixture.Current = $"{testCase.Journey.Name} {stepNumber}/{totalSteps} {stepName}";
+				fixture.Current = $"{step.JourneyName} {stepNumber}/{totalSteps} {stepName}";
 			}
 		}
 	}

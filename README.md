@@ -23,10 +23,10 @@ rather than publishing progress to a test host.
 - Screenshot-baseline comparison via `SixLabors.ImageSharp` + `Codeuctivity.ImageSharpCompare` with
   maskable regions for animated UI elements.
 - A `SuiteRunner` that runs the cross-product of platform fixtures and journeys from a plain console
-  entry point, with `--run`, `--journey`, `--filter`, `--rerun`, `--list-extraneous`,
-  `--delete-extraneous`, `--review` CLI flags — a live
+  entry point, with `--run`, `--journey`, `--filter`, `--rerun`, `--report-to`,
+  `--list-extraneous`, `--delete-extraneous`, `--review` CLI flags — a live
   [Spectre.Console](https://spectreconsole.net/) status table at a terminal, plain per-step lines
-  when stdout is redirected.
+  when stdout is redirected, and JSON events POSTed to a listener when `--report-to` names one.
 - An interactive front door: with no arguments the runner offers its modes as a menu, and after a
   run it offers each failure for inspection — message, stack trace, failing step, artifact paths.
 - A screenshot viewer web page (static after every run, or served live via `--review`): a
@@ -264,6 +264,10 @@ dotnet run --project test/MyApp.UITests -- --run --journey Login --filter "iPhon
 # Re-run only journeys with failure artifacts on disk
 dotnet run --project test/MyApp.UITests -- --run --rerun
 
+# Report progress as JSON events instead of to the console. Machine-facing: the review
+# server passes its own endpoint here when it launches a rerun.
+dotnet run --project test/MyApp.UITests -- --run --report-to http://localhost:8017/api/run-events?job=<id>
+
 # Maintenance: detect / clean up orphaned baselines after journey renames
 dotnet run --project test/MyApp.UITests -- --list-extraneous
 dotnet run --project test/MyApp.UITests -- --delete-extraneous
@@ -323,10 +327,32 @@ at once, and rerunning a journey — on the current fixture, all fixtures, or on
 it currently fails. A rerun covers the selected journey only — the scopes differ in which fixtures
 it runs on, not in how many journeys run. It shells out to `dotnet run … -- --run --journey <name>`,
 narrowed by `--filter` for the current fixture or by `--rerun` for the fixtures that currently fail,
-with its output redirected so the runner falls back to plain per-step lines; it streams that into
-the page and reloads the view when it finishes. Only one rerun runs at a time, since concurrent runs
-would fight over the simulators. Press `u` to reload from disk by hand if a run's completion is ever
+and reloads the view when it finishes. Only one rerun runs at a time, since concurrent runs would
+fight over the simulators. Press `u` to reload from disk by hand if a run's completion is ever
 missed.
+
+### How a rerun reports back
+
+The rerun stays a separate process — a crash there must not take the review server with it — and
+tells the server what it is doing over HTTP. The server passes its own `api/run-events` endpoint to
+the child as `--report-to`, the child's `WebReporter` POSTs one JSON object per event (run started
+with each fixture's journey and step counts, fixture ready, fixture skipped with its reason, step
+completed, journey completed, run finished with the exit code), and the server relays each to the
+page over Server-Sent Events on `api/events`. A step event names the fixture, the screenshot
+container and the numbered step, which is what lets the page recolour that one screenshot the
+moment it is known: green as it passes, red the instant it fails, yellow for everything still to
+come. A post that fails is swallowed by the child — the listener is a spectator and must never fail
+the run it is watching.
+
+Posting is synchronous and the server records an event before answering, so events reach the page
+in the order the run produced them. The stream replays from the first event on every connection,
+so a reloaded or reconnected page rebuilds the whole picture rather than resuming mid-run — nothing
+on the page is accumulated by counting.
+
+The child's console output is still captured, because a child that fails to _build_ posts no events
+at all and its stdout is then the only evidence. It is held back while the run is live and handed
+over with the terminal `process-exited` event when the exit code is non-zero, where the page appends
+it under the event log.
 
 Resolving the selected failure — a rerun passing, or Accept/Discard — deliberately does not advance
 the selection. Snapping to whatever failure fell into the vacated slot is disorienting and hides the

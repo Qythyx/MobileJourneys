@@ -14,7 +14,7 @@ internal sealed class ConsoleReporter : RunReporter
 
 	/// <inheritdoc/>
 	public override void StepCompleted(
-		TestCase testCase,
+		TestStep step,
 		int stepNumber,
 		int totalSteps,
 		string stepName,
@@ -23,9 +23,9 @@ internal sealed class ConsoleReporter : RunReporter
 	)
 	{
 		var mark = passed ? "[green]✓[/]" : "[red]✗[/]";
-		var name = Markup.Escape(testCase.Journey.Name).PadRight(18);
+		var name = Markup.Escape(step.JourneyName).PadRight(18);
 		var line =
-			$"  {mark} [dim]{Markup.Escape(Tag(testCase))}[/] {name} [dim]{stepNumber}/{totalSteps}[/]  {Markup.Escape(stepName)}";
+			$"  {mark} [dim]{Markup.Escape(Tag(step.Config))}[/] {name} [dim]{stepNumber}/{totalSteps}[/]  {Markup.Escape(stepName)}";
 		lock (Gate)
 		{
 			AnsiConsole.MarkupLine(passed || detail is null ? line : $"{line} — [red]{Markup.Escape(detail)}[/]");
@@ -40,7 +40,7 @@ internal sealed class ConsoleReporter : RunReporter
 		var name = Markup.Escape(result.TestCase.Journey.Name).PadRight(18);
 		lock (Gate)
 		{
-			AnsiConsole.MarkupLine($"{mark} {Markup.Escape(Tag(result.TestCase))} {name} [dim]{seconds}s[/]");
+			AnsiConsole.MarkupLine($"{mark} {Markup.Escape(Tag(result.TestCase.Config))} {name} [dim]{seconds}s[/]");
 		}
 	}
 
@@ -55,5 +55,5 @@ internal sealed class ConsoleReporter : RunReporter
 		}
 	}
 
-	private static string Tag(TestCase testCase) => FixtureLabel(testCase.Config).PadRight(TagWidth);
+	private static string Tag(PlatformConfig config) => FixtureLabel(config).PadRight(TagWidth);
 }

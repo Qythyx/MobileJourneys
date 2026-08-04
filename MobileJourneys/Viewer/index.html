@@ -940,13 +940,16 @@
 			let selected = 0;        // index into currentFailures(); -1 = nothing selected
 			let resolved = null;     // a failure just cleared (rerun passed / accepted / discarded), shown in place
 			let zoomed = false;      // the z view is open
-			let chord = null, chordTimer = null, pollTimer = null, liveTimer = null;
-			// While a "rerun all" runs: { active, steps: Map("container/step" -> "pass"|"fail") }. Absent
-			// entries render as pending (yellow). Only rerun-all sets this — a single-journey rerun would
-			// wrongly paint the whole tree pending.
-			let liveProgress = null;
+			let chord = null, chordTimer = null, runEvents = null;
+			// The rerun being watched, built from the events its process reports. `steps` maps a fixture
+			// to that fixture's "container/step" results; absent entries render as pending (yellow).
+			// `overlay` is set only by a rerun-all — a single-journey rerun would wrongly paint the whole
+			// tree pending.
+			let run = null;
+			const NO_STEPS = new Map();
 			const paneKind = new Map();   // failure key -> artifact shown in the rotating pane
 			const $ = (sel) => document.querySelector(sel);
+			const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 			// ---------- data ----------
 			const splitPath = (p) => {
@@ -1052,9 +1055,6 @@
 				const prev = selectedFailure();
 				config = next;
 				resolved = null;
-				// Step keys (container/step) are shared across devices, so the previous device's results
-				// don't apply here — drop them so this device reads pending until its next poll fills in.
-				if (liveProgress && liveProgress.active) { liveProgress.steps.clear(); }
 				// Keep the same failure selected when this device fails at that same step too (so triaging a
 				// screen follows you device to device); otherwise select nothing.
 				const fails = currentFailures();
@@ -1543,15 +1543,15 @@
 			// Per-screenshot state from a running rerun-all: absent key = pending (yellow), "pass" =
 			// normal grey, "fail" = red at once (before the manifest re-scan writes the artifact).
 			function progressState(container, step) {
-				if (!liveProgress || !liveProgress.active) { return null; }
+				if (!run || !run.overlay) { return null; }
 				const key = container + "/" + step;
-				const r = liveProgress.steps.get(key);
+				const r = (run.steps.get(config) || NO_STEPS).get(key);
 				if (r === "fail") { return "fail"; }
 				if (r === "pass") { return "pass"; }
 				// Not yet reported → pending if in scope. scope null = the whole tree ("all"); a Map keyed
 				// by device = only that device's was-failing steps ("failures").
-				if (liveProgress.scope === null) { return "pending"; }
-				const set = liveProgress.scope.get(config);
+				if (run.overlay.scope === null) { return "pending"; }
+				const set = run.overlay.scope.get(config);
 				return set && set.has(key) ? "pending" : null;
 			}
 			function applyShotProgress(fig) {
@@ -1574,7 +1574,7 @@
 					body: JSON.stringify(body),
 				}).catch((e) => ({ ok: false, text: async () => e.message }));
 				if (!res.ok) { toast("rerun failed: " + (await res.text())); return; }
-				const { id } = await res.json();
+				const job = await res.json();
 				const r = $("#runner");
 				r.style.display = "flex";
 				r.classList.add("collapsed");
@@ -1586,6 +1586,7 @@
 				// whole tree. "failures" reruns just the failing journeys, so pre-mark only each device's
 				// currently-failing steps pending — snapshot them per device now, before the run starts
 				// clearing artifacts. "all" marks the whole tree pending (scope = null). render() paints it.
+				let overlay = null;
 				if (live) {
 					let scope = null;
 					if (body.failed) {
@@ -1594,16 +1595,18 @@
 							scope.set(cfg, new Set(failureGroups(cfg).map((f) => f.container + "/" + f.step)));
 						}
 					}
-					liveProgress = { active: true, steps: new Map(), scope };
-					render();
+					overlay = { scope };
 				}
-				pollJob(id, live, endpoint, body);
+				run = { description: job.description, endpoint, body, live, overlay, ...emptyRunProgress() };
+				updateRunner();
+				render();
+				watchRun(job.id);
 			}
 			// One journey finishes fast enough that a single refresh at the end suffices.
 			const rerun = (journey, scope) => startRerun("rerun", { config, journey, scope }, false);
-			// The whole suite runs for many minutes, so watch the disk and tick the graph forward as
-			// journeys finish rather than making the user stare at a spinner (live = true). failed =
-			// only currently-failing journeys; embed = rebuild the app first. The two combine.
+			// The whole suite runs for many minutes, so tick the graph forward as journeys finish rather
+			// than making the user stare at a spinner (live = true). failed = only currently-failing
+			// journeys; embed = rebuild the app first. The two combine.
 			const rerunAll = (failed, embed) => startRerun("rerun-all", { failed, embed }, true);
 			$("#runner .close").addEventListener("click", (e) => { e.stopPropagation(); $("#runner").style.display = "none"; });
 			$("#runner .rhd").addEventListener("click", () => {
@@ -1612,76 +1615,129 @@
 				$("#runner .rtoggle").textContent = r.classList.contains("collapsed") ? "▸" : "▾";
 			});
 
-			function pollJob(id, live, endpoint, body) {
-				clearTimeout(pollTimer);
-				clearInterval(liveTimer);
-				// While a long "rerun all" runs, re-scan the manifest so journeys that finish appear on the
-				// graph in real time. The single-journey rerun ends quickly, so it opts out (live = false).
-				if (live) { liveTimer = setInterval(softRefresh, 3000); }
-				// A poll can fail transiently while the child process hammers the disk; giving up on the
-				// first miss would strand the run as permanently "in progress" and skip the refresh.
-				let misses = 0;
-				const tick = async () => {
-					const url = "api/rerun-status?id=" + encodeURIComponent(id) + "&config=" + encodeURIComponent(config);
-					const res = await fetch(url, { cache: "no-store" }).catch(() => null);
-					if (!res || !res.ok) {
-						if (++misses < 15) { pollTimer = setTimeout(tick, 1000); }
-						else { clearInterval(liveTimer); toast("lost contact with the rerun; press u to refresh"); }
-						return;
-					}
-					misses = 0;
-					const job = await res.json();
-					const runner = $("#runner");
-					const p = job.progress;
-					runner.querySelector("b").textContent = job.description
-						+ (p ? ` — Journey ${p.doneJourneys}/${p.totalJourneys}, Step ${p.doneSteps}/${p.totalSteps}` : "");
-					if (liveProgress && liveProgress.active && p) {
-						liveProgress.steps = new Map(Object.entries(p.steps || {}));
-						applyProgress();
-					}
-					const pre = runner.querySelector("pre");
-					const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
-					pre.textContent = job.lines.join("\n");
-					if (atBottom) { pre.scrollTop = pre.scrollHeight; }
-					if (job.running) {
-						pollTimer = setTimeout(tick, 1000);
-					} else {
-						clearInterval(liveTimer);
-						// Hand coloring back to the manifest — refresh() re-renders with the real failure state.
-						liveProgress = null;
-						const passed = job.exitCode === 0;
-						// The framework emits this exact line only when the app crashed at launch because the
-						// on-device assemblies are stale (Fast Deploy) — distinct from a genuine app crash, which
-						// prints the crash log instead. That's the one case a rebuild-and-rerun actually fixes.
-						const stale = !passed && job.lines.some((l) => l.includes("Rebuild with -p:EmbedAssemblies=true"));
-						runner.dataset.state = passed ? "pass" : "fail";
-						runner.querySelector(".status").innerHTML = passed
-							? `<span class="pass">✓</span>`
-							: `<span class="fail">✕</span>`;
-						if (stale && !body.embed) {
-							runner.querySelector("b").textContent =
-								`${job.description} — app crashed on startup (stale assemblies); rebuilding & rerunning…`;
-							toast("Stale app on device — rebuilding with EmbedAssemblies and rerunning");
-							// Corrective rebuild forces an embedded build. A single-journey rerun can't embed, so
-							// escalate it to a rebuild of every currently-failing journey. The escalated run carries
-							// embed:true, so it can't re-escalate — no loop.
-							if (endpoint === "rerun-all") { startRerun("rerun-all", { ...body, embed: true }, live); }
-							else { startRerun("rerun-all", { failed: true, embed: true }, true); }
-							return;
-						}
-						if (stale) {
-							runner.querySelector("b").textContent =
-								`${job.description} — app still crashed on startup after rebuild`;
-						}
-						refresh(
-							passed ? "Rerun passed"
-								: stale ? "App crashed on startup — see the console output"
-									: `Rerun finished with exit code ${job.exitCode}`,
-							passed ? "passed on rerun" : null
-						);
+			// Everything the event stream fills in. A dropped connection replays the run from its first
+			// event, so this is reset on every (re)connect and rebuilt rather than added to.
+			function emptyRunProgress() {
+				return { fixtures: null, steps: new Map(), journeys: new Map(), lines: [], stale: false };
+			}
+			function watchRun(id) {
+				closeRun();
+				const es = new EventSource("api/events?id=" + encodeURIComponent(id));
+				runEvents = es;
+				es.onopen = () => { Object.assign(run, emptyRunProgress()); };
+				es.onmessage = (e) => { applyRunEvent(JSON.parse(e.data)); };
+				// The browser retries a dropped stream by itself; CLOSED means it has given up.
+				es.onerror = () => {
+					if (runEvents === es && es.readyState === EventSource.CLOSED) {
+						closeRun();
+						toast("lost contact with the rerun; press u to refresh");
 					}
 				};
-				tick();
+			}
+			function closeRun() {
+				if (runEvents) { runEvents.close(); runEvents = null; }
+			}
+
+			function applyRunEvent(ev) {
+				switch (ev.type) {
+					case "run-started":
+						run.fixtures = ev.fixtures;
+						for (const f of ev.fixtures) {
+							run.lines.push(`${f.config} — ${plural(f.journeys, "journey")}, ${plural(f.steps, "step")}`);
+						}
+						break;
+					case "fixture-ready":
+						run.lines.push(`${ev.config} — device ready`);
+						break;
+					case "fixture-skipped":
+						// The runner words a stale-assemblies crash exactly this way, and it is the one failure
+						// a rebuild-and-rerun actually fixes.
+						run.stale = run.stale || ev.reason.includes("Rebuild with -p:EmbedAssemblies=true");
+						run.lines.push(`SKIP ${ev.config} — ${plural(ev.journeys, "journey")} skipped because ${ev.reason}`);
+						break;
+					case "step-completed": {
+						let steps = run.steps.get(ev.config);
+						if (!steps) { steps = new Map(); run.steps.set(ev.config, steps); }
+						steps.set(ev.container + "/" + ev.step, ev.passed ? "pass" : "fail");
+						run.lines.push(`${ev.passed ? "✓" : "✗"} ${ev.config} · ${ev.journey} ${ev.number}/${ev.totalSteps} ${ev.name}`
+							+ (ev.detail ? ` — ${ev.detail}` : ""));
+						if (run.overlay) { applyProgress(); }
+						break;
+					}
+					case "journey-completed":
+						run.journeys.set(ev.config + " " + ev.journey, ev.passed);
+						run.lines.push(`${ev.passed ? "PASS" : "FAIL"} ${ev.config} · ${ev.journey} (${ev.seconds.toFixed(1)}s)`);
+						// A finished journey is what puts new artifacts on disk.
+						if (run.overlay) { softRefresh(); }
+						break;
+					case "run-finished":
+						run.lines.push(`Runner finished with exit code ${ev.exitCode}`);
+						break;
+					case "process-exited":
+						finishRun(ev);
+						return;
+				}
+				updateRunner();
+			}
+
+			function runTotals() {
+				let doneSteps = 0;
+				for (const steps of run.steps.values()) { doneSteps += steps.size; }
+				const totals = (run.fixtures || []).reduce(
+					(a, f) => ({ journeys: a.journeys + f.journeys, steps: a.steps + f.steps }),
+					{ journeys: 0, steps: 0 });
+				return { doneJourneys: run.journeys.size, doneSteps, ...totals };
+			}
+			function updateRunner() {
+				const runner = $("#runner");
+				const t = runTotals();
+				runner.querySelector("b").textContent = run.description
+					+ (run.fixtures ? ` — Journey ${t.doneJourneys}/${t.journeys}, Step ${t.doneSteps}/${t.steps}` : "");
+				const pre = runner.querySelector("pre");
+				const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
+				pre.textContent = run.lines.join("\n");
+				if (atBottom) { pre.scrollTop = pre.scrollHeight; }
+			}
+
+			// The process is gone: every event is in, and its console output comes with this one when the
+			// run failed — the only account there is of a child that died before reporting anything.
+			function finishRun(ev) {
+				closeRun();
+				if (ev.output && ev.output.length) {
+					if (run.lines.length) { run.lines.push(""); }
+					run.lines.push("-- process output --", ...ev.output);
+				}
+				const passed = ev.exitCode === 0;
+				const stale = !passed
+					&& (run.stale || (ev.output || []).some((l) => l.includes("Rebuild with -p:EmbedAssemblies=true")));
+				// Hand coloring back to the manifest — refresh() re-renders with the real failure state.
+				run.overlay = null;
+				updateRunner();
+				const runner = $("#runner");
+				runner.dataset.state = passed ? "pass" : "fail";
+				runner.querySelector(".status").innerHTML = passed
+					? `<span class="pass">✓</span>`
+					: `<span class="fail">✕</span>`;
+				if (stale && !run.body.embed) {
+					runner.querySelector("b").textContent =
+						`${run.description} — app crashed on startup (stale assemblies); rebuilding & rerunning…`;
+					toast("Stale app on device — rebuilding with EmbedAssemblies and rerunning");
+					// Corrective rebuild forces an embedded build. A single-journey rerun can't embed, so
+					// escalate it to a rebuild of every currently-failing journey. The escalated run carries
+					// embed:true, so it can't re-escalate — no loop.
+					if (run.endpoint === "rerun-all") { startRerun("rerun-all", { ...run.body, embed: true }, run.live); }
+					else { startRerun("rerun-all", { failed: true, embed: true }, true); }
+					return;
+				}
+				if (stale) {
+					runner.querySelector("b").textContent = `${run.description} — app still crashed on startup after rebuild`;
+				}
+				refresh(
+					passed ? "Rerun passed"
+						: stale ? "App crashed on startup — see the console output"
+							: `Rerun finished with exit code ${ev.exitCode}`,
+					passed ? "passed on rerun" : null
+				);
 			}
 
 			// ---------- overlays ----------
@@ -1915,7 +1971,7 @@
 						if (steps > 0) {
 							const s = document.createElement("span");
 							s.className = "badge split";
-							s.title = `${journeys} journey${journeys === 1 ? "" : "s"} · ${steps} failed step${steps === 1 ? "" : "s"}`;
+							s.title = `${plural(journeys, "journey")} · ${plural(steps, "failed step")}`;
 							const j = document.createElement("span");
 							j.className = "part journeys";
 							j.textContent = journeys;

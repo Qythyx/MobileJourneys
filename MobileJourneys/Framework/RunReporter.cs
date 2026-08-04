@@ -3,10 +3,11 @@ using Spectre.Console;
 namespace MobileJourneys.Framework;
 
 /// <summary>
-/// Collects what a run produced and renders it. Subclasses differ only in how progress reaches the
-/// screen — <see cref="ConsoleReporter"/> writes a line per step, <see cref="LiveStatusReporter"/>
-/// redraws a per-fixture table in place. The tally, the failure recording, and the end-of-run
-/// verdict are the same either way and live here.
+/// Collects what a run produced and renders it. Subclasses differ only in where progress goes —
+/// <see cref="ConsoleReporter"/> writes a line per step, <see cref="LiveStatusReporter"/> redraws a
+/// per-fixture table in place, and <see cref="WebReporter"/> POSTs it to the process that launched
+/// the run. The tally, the failure recording, and the end-of-run verdict are the same either way
+/// and live here.
 /// </summary>
 /// <remarks>
 /// The platform fixtures run concurrently and report from different threads, so every write takes
@@ -75,14 +76,15 @@ internal abstract class RunReporter
 	}
 
 	/// <summary>Reports a step that has finished.</summary>
-	/// <param name="testCase">The journey and fixture the step belongs to.</param>
+	/// <param name="step">Which screenshot the step produced — its fixture, container, numbered name,
+	/// and journey.</param>
 	/// <param name="stepNumber">The step's 1-based position.</param>
 	/// <param name="totalSteps">How many steps the journey has.</param>
-	/// <param name="stepName">The step's name.</param>
+	/// <param name="stepName">The step's bare name, without the number <see cref="TestStep.StepName"/> carries.</param>
 	/// <param name="passed">Whether the step's screenshot matched its baseline.</param>
 	/// <param name="detail">What went wrong, or <c>null</c> when the step passed.</param>
 	public abstract void StepCompleted(
-		TestCase testCase,
+		TestStep step,
 		int stepNumber,
 		int totalSteps,
 		string stepName,
@@ -171,8 +173,14 @@ internal abstract class RunReporter
 				? $"[green]All {results.Count} {journeys} passed.[/]"
 				: $"[red]{failed.Count} of {results.Count} {journeys} failed.{abandoned}[/]"
 		);
-		return failed.Count == 0 && skippedFixtures == 0 ? 0 : 1;
+		var exitCode = failed.Count == 0 && skippedFixtures == 0 ? 0 : 1;
+		ReportRunFinished(exitCode);
+		return exitCode;
 	}
+
+	/// <summary>Renders the verdict the run is about to exit with.</summary>
+	/// <param name="exitCode">The process exit code — 0 when everything passed.</param>
+	protected virtual void ReportRunFinished(int exitCode) { }
 
 	/// <summary>
 	/// Prints every failure's explanation in full. Overridden to print nothing where the failures

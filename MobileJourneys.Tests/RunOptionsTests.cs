@@ -33,6 +33,52 @@ public sealed class RunOptionsTests
 		_ = options.Filters.Should().BeEmpty();
 		_ = options.JourneyNames.Should().BeEmpty();
 		_ = options.Rerun.Should().BeFalse();
+		_ = options.ReportTo.Should().BeNull();
+	}
+
+	[Test]
+	public void ReportToCarriesItsUrl()
+	{
+		var options = RunOptions.Parse(["--run", "--report-to", "http://localhost:8017/api/run-events?job=abc"]);
+
+		_ = options.Mode.Should().Be(RunMode.Run);
+		_ = options.ReportTo.Should().Be("http://localhost:8017/api/run-events?job=abc");
+	}
+
+	[Test]
+	public void ReportToWithoutRunIsRejected()
+	{
+		var options = RunOptions.Parse(["--report-to", "http://localhost:8017/api/run-events?job=abc"]);
+
+		_ = options.Mode.Should().Be(RunMode.Help);
+		_ = options.Error.Should().Contain("--run");
+	}
+
+	[Test]
+	public void ReportToWithoutAValueIsRejected()
+	{
+		var options = RunOptions.Parse(["--run", "--report-to"]);
+
+		_ = options.Mode.Should().Be(RunMode.Help);
+		_ = options.Error.Should().Contain("--report-to");
+	}
+
+	[Test]
+	public void ReportToDoesNotSwallowTheFlagAfterIt()
+	{
+		var options = RunOptions.Parse(["--run", "--report-to", "--journey", "About"]);
+
+		_ = options.Mode.Should().Be(RunMode.Help);
+		_ = options.Error.Should().Contain("--report-to");
+	}
+
+	[Test]
+	public void ReportToTakesOnlyOneValue()
+	{
+		var options = RunOptions.Parse(["--run", "--report-to", "http://localhost:8017/", "extra"]);
+
+		_ = options.Mode.Should().Be(RunMode.Help);
+		_ = options.Error.Should().Contain("extra");
 	}
 
 	[Test]
@@ -122,6 +168,14 @@ public sealed class RunOptionsTests
 		var usage = RunOptions.Usage("My Suite");
 
 		_ = usage.Should().Contain("--journey");
+	}
+
+	[Test]
+	public void UsageDocumentsTheReportToFlag()
+	{
+		var usage = RunOptions.Usage("My Suite");
+
+		_ = usage.Should().Contain("--report-to");
 	}
 
 	[Test]
