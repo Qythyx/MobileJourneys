@@ -30,7 +30,7 @@ public sealed class InMemoryScreenshotStorageTests
 	{
 		public string Name => "Test";
 
-		public IReadOnlyDictionary<string, string> GetEnvVars() => new Dictionary<string, string>();
+		public string BackendUrl => "";
 
 		public IJourneyEnvironment ForFixture(PlatformConfig config) => this;
 	}

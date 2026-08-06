@@ -44,10 +44,14 @@ public sealed record IosPlatformConfig(
 
 	internal override AppiumDriver CreateDriver(AppiumOptions options) => new IOSDriver(options);
 
-	internal override void LaunchApp(AppiumDriver driver, IJourneyEnvironment environment) =>
+	internal override void LaunchApp(AppiumDriver driver, IJourneyEnvironment environment, string backendUrlVariable) =>
 		_ = driver.ExecuteScript(
 			"mobile: launchApp",
-			new Dictionary<string, object> { ["bundleId"] = AppIdentifier, ["environment"] = environment.GetEnvVars() }
+			new Dictionary<string, object>
+			{
+				["bundleId"] = AppIdentifier,
+				["environment"] = new Dictionary<string, string> { [backendUrlVariable] = environment.BackendUrl },
+			}
 		);
 
 	internal override void TerminateApp(AppiumDriver driver) =>

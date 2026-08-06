@@ -18,7 +18,13 @@ namespace MobileJourneys;
 /// <param name="app">The underlying Appium driver.</param>
 /// <param name="config">Platform fixture (drives platform-specific branches).</param>
 /// <param name="screenshotManager">Instance used for baseline capture and comparison.</param>
-public sealed class TestDriver(AppiumDriver app, PlatformConfig config, ScreenshotManager screenshotManager)
+/// <param name="backendUrlVariable">The name the app reads the backend's address under.</param>
+public sealed class TestDriver(
+	AppiumDriver app,
+	PlatformConfig config,
+	ScreenshotManager screenshotManager,
+	string backendUrlVariable
+)
 {
 	private enum Phase
 	{
@@ -90,9 +96,24 @@ public sealed class TestDriver(AppiumDriver app, PlatformConfig config, Screensh
 	public void RelaunchApp(IJourneyEnvironment environment)
 	{
 		Config.TerminateApp(App);
-		Config.LaunchApp(App, environment);
+		// The app is now running this environment, so steps deriving their next one from
+		// CurrentJourneyEnv build on it rather than on whatever the journey started with.
+		CurrentJourneyEnv = environment;
+		Backend?.ServeEnvironment(environment);
+		Config.LaunchApp(App, environment, backendUrlVariable);
 		WaitUntilAppIsSettled();
+
+		// A permission prompt the app raises on first launch covers the screen, so the first journey on
+		// a freshly installed fixture fails on every step behind it. Answered once per fixture, because
+		// the answer sticks for the install and this wait costs its full timeout when nothing appears.
+		if (!_firstLaunchAlertHandled)
+		{
+			_firstLaunchAlertHandled = true;
+			DismissAlertIfPresent(TimeSpan.FromSeconds(3));
+		}
 	}
+
+	private bool _firstLaunchAlertHandled;
 
 	/// <summary>
 	/// Blocks until the freshly launched app is in the foreground and its accessibility tree has

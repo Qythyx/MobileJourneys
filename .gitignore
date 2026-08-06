@@ -147,8 +147,6 @@ csx/
 ecf/
 rcf/
 
-# Local MSBuild override — toggle mock mode via scripts/toggle-mock.sh
-local.build.props
 
 # Microsoft Azure Function local settings
 local.settings*.json

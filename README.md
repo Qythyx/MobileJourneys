@@ -72,9 +72,12 @@ checkout. NuGet packaging is on the roadmap.
 
 ### 2. Implement `IJourneyEnvironment`
 
-Define a record that captures your app's mock state (the fields each journey can override) and
-converts them to environment variables your app's mock service reads. `ForFixture` lets you
-specialize the environment per-platform fixture (e.g., pin language to match the fixture's theme).
+Define a record that captures your app's per-journey state (the fields each journey can override).
+`BackendUrl` is the one value handed to the app at launch — as a process environment variable on
+iOS and an intent string extra on Android — under the name `FrameworkConfig.Backend` names.
+Everything else reaches the app from the backend, so it needs no launch plumbing. `ForFixture` lets
+you specialize the environment per-platform fixture (e.g., pin language to match the fixture's
+theme).
 
 ```csharp
 public record MyAppEnvironment : IJourneyEnvironment
@@ -83,18 +86,29 @@ public record MyAppEnvironment : IJourneyEnvironment
     public bool ShowOnboarding { get; init; }
     public string Name { get; init; } = "Default";
 
-    public IReadOnlyDictionary<string, string> GetEnvVars() =>
-        // Convert your properties to env vars your app's mock service reads,
-        // e.g., MOCK_LOGGED_IN=true MOCK_SHOW_ONBOARDING=false.
-        new Dictionary<string, string>
-        {
-            ["MOCK_LOGGED_IN"] = LoggedIn ? "true" : "false",
-            ["MOCK_SHOW_ONBOARDING"] = ShowOnboarding ? "true" : "false",
-        };
+    /// Filled in by your IJourneyBackend.PrepareFor once it knows the address it is serving on.
+    public string ServiceUrl { get; init; } = "";
+
+    public string BackendUrl => ServiceUrl;
 
     public IJourneyEnvironment ForFixture(PlatformConfig config) => this;
 }
 ```
+
+Declare the backend and the name its address arrives under together, so a suite cannot launch the
+app under a name it does not read:
+
+```csharp
+new FrameworkConfig(...)
+{
+    Backend = new(
+        (config, deviceId) => new MyAppBackend(config, deviceId),
+        MyApp.LaunchVariables.BackendUrl),
+}
+```
+
+The name is owned by the consumer rather than the framework, because the app reading it cannot
+reference this assembly.
 
 ### 3. Define platform fixtures
 

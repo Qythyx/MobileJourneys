@@ -26,14 +26,26 @@ public sealed record FrameworkConfig(
 	/// <see cref="FilesystemScreenshotStorage"/> rooted at the consumer test project's
 	/// <c>Screenshots/</c> directory when <c>null</c>.
 	/// </summary>
-	// public ScreenshotStorage Storage => field ??= storage ?? FilesystemScreenshotStorage.Default();
 	public ScreenshotStorage Storage { get; init; } = FilesystemScreenshotStorage.Default();
 
 	/// <summary>
-	/// Creates the stand-in backend one fixture's journeys run against, given the fixture and the id
-	/// of the device hosting it. <c>null</c> for a suite whose app needs no backend.
+	/// The stand-in backend this suite's app talks to, or <c>null</c> for an app that needs none.
 	/// </summary>
-	public Func<PlatformConfig, string, IJourneyBackend>? CreateBackend { get; init; }
+	public BackendSetup? Backend { get; init; }
+
+	/// <summary>
+	/// How to create the backend, and the name the app reads its address under. One value rather than
+	/// two, so a suite cannot declare a backend and then launch the app under a name it does not read
+	/// — which leaves the app waiting on a backend it never finds, with nothing to say so.
+	/// </summary>
+	/// <param name="Create">
+	/// Builds the backend for one fixture, given that fixture and the id of the device hosting it.
+	/// </param>
+	/// <param name="UrlVariable">
+	/// The name <see cref="IJourneyEnvironment.BackendUrl"/> arrives under. Named by the consumer,
+	/// because the app reading it cannot reference this assembly.
+	/// </param>
+	public sealed record BackendSetup(Func<PlatformConfig, string, IJourneyBackend> Create, string UrlVariable);
 
 	/// <summary>
 	/// Finds screenshot files no journey references — see <see cref="ScreenshotStorage.FindExtraneous"/>.

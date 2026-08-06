@@ -106,7 +106,7 @@ public abstract record PlatformConfig(
 
 	// --- App lifecycle ---
 
-	internal abstract void LaunchApp(AppiumDriver driver, IJourneyEnvironment environment);
+	internal abstract void LaunchApp(AppiumDriver driver, IJourneyEnvironment environment, string backendUrlVariable);
 
 	internal abstract void TerminateApp(AppiumDriver driver);
 
@@ -119,6 +119,22 @@ public abstract record PlatformConfig(
 	internal abstract void OpenDeepLink(AppiumDriver driver, string url);
 
 	internal abstract void PressHomeButton(AppiumDriver driver);
+
+	// --- Host reachability ---
+
+	/// <summary>
+	/// Makes a port on this machine reachable from the device at the same port number. Does nothing
+	/// where the device already shares the host's loopback; an Android emulator has one of its own,
+	/// so the port has to be forwarded onto it.
+	/// </summary>
+	/// <param name="deviceId">The device to forward on.</param>
+	/// <param name="port">The port number, the same on both sides.</param>
+	public virtual void StartForwardingPort(string deviceId, int port) { }
+
+	/// <summary>Undoes <see cref="StartForwardingPort"/>.</summary>
+	/// <param name="deviceId">The device to stop forwarding on.</param>
+	/// <param name="port">The port number that was forwarded.</param>
+	public virtual void StopForwardingPort(string deviceId, int port) { }
 
 	// --- Keyboard / alerts ---
 

@@ -169,7 +169,7 @@ public static class SuiteRunner
 									StartAndRunFixture(
 										group.Key,
 										[.. group],
-										config.CreateBackend,
+										config.Backend,
 										reporter,
 										manager,
 										cancellation.Token
@@ -214,20 +214,20 @@ public static class SuiteRunner
 	/// </summary>
 	/// <param name="config">The platform fixture to bring up.</param>
 	/// <param name="cases">The journeys selected for it.</param>
-	/// <param name="createBackend">Builds the fixture's stand-in backend, or <c>null</c> for none.</param>
+	/// <param name="backendSetup">The suite's backend, or <c>null</c> for an app that needs none.</param>
 	/// <param name="reporter">Told what the fixture is doing, and when it has to be abandoned.</param>
 	/// <param name="manager">Screenshot storage the driver writes through.</param>
 	/// <param name="cancellationToken">Cancelled when the reader interrupts the run.</param>
 	private static void StartAndRunFixture(
 		PlatformConfig config,
 		IReadOnlyList<TestCase> cases,
-		Func<PlatformConfig, string, IJourneyBackend>? createBackend,
+		FrameworkConfig.BackendSetup? backendSetup,
 		RunReporter reporter,
 		ScreenshotManager manager,
 		CancellationToken cancellationToken
 	)
 	{
-		var start = StartFixture(config, cases, manager);
+		var start = StartFixture(config, cases, manager, backendSetup?.UrlVariable ?? string.Empty);
 		if (start.Driver is null)
 		{
 			reporter.FixtureSkipped(config, cases.Count, start.Failure ?? "the app did not start.");
@@ -239,7 +239,7 @@ public static class SuiteRunner
 		IJourneyBackend? backend;
 		try
 		{
-			backend = createBackend?.Invoke(config, start.Driver.GetDeviceId());
+			backend = backendSetup?.Create(config, start.Driver.GetDeviceId());
 		}
 		catch (Exception ex)
 		{
@@ -261,13 +261,14 @@ public static class SuiteRunner
 	private static FixtureStart StartFixture(
 		PlatformConfig config,
 		IReadOnlyList<TestCase> cases,
-		ScreenshotManager manager
+		ScreenshotManager manager,
+		string backendUrlVariable
 	)
 	{
 		TestDriver driver;
 		try
 		{
-			driver = new TestDriver(config.CreateAppiumDriver(), config, manager);
+			driver = new TestDriver(config.CreateAppiumDriver(), config, manager, backendUrlVariable);
 		}
 		catch (Exception ex) when (ex is WebDriverException or FileNotFoundException or TimeoutException)
 		{

@@ -95,13 +95,19 @@ public sealed record AndroidPlatformConfig(
 
 	internal override AppiumDriver CreateDriver(AppiumOptions options) => new AndroidDriver(options);
 
-	internal override void LaunchApp(AppiumDriver driver, IJourneyEnvironment environment)
+	internal override void LaunchApp(AppiumDriver driver, IJourneyEnvironment environment, string backendUrlVariable)
 	{
-		var amArgs = new List<string>(
-			new string[] { "start-activity", "-S", "-n", $"{AppIdentifier}/{ResolvedMainActivity}" }.Concat(
-				environment.GetEnvVars().SelectMany(kv => new string[] { "--es", kv.Key, $"'{kv.Value}'" })
-			)
-		);
+		// Android has no way to hand an app environment variables, so it travels as an intent extra.
+		List<string> amArgs =
+		[
+			"start-activity",
+			"-S",
+			"-n",
+			$"{AppIdentifier}/{ResolvedMainActivity}",
+			"--es",
+			backendUrlVariable,
+			$"'{environment.BackendUrl}'",
+		];
 
 		_ = driver.ExecuteScript(
 			"mobile: shell",
@@ -290,6 +296,25 @@ public sealed record AndroidPlatformConfig(
 			"*:S"
 		);
 		return string.IsNullOrWhiteSpace(result?.Output) ? null : result.Output.Trim();
+	}
+
+	/// <inheritdoc/>
+	public override void StartForwardingPort(string deviceId, int port) =>
+		RunAdbOrThrow(deviceId, "reverse", $"tcp:{port}", $"tcp:{port}");
+
+	/// <inheritdoc/>
+	public override void StopForwardingPort(string deviceId, int port) =>
+		RunAdbOrThrow(deviceId, "reverse", "--remove", $"tcp:{port}");
+
+	private static void RunAdbOrThrow(string deviceId, params string[] arguments)
+	{
+		var result = RunAdb(deviceId, arguments);
+		if (result is null || result.ExitCode != 0)
+		{
+			throw new InvalidOperationException(
+				$"adb {string.Join(' ', arguments)} failed: {result?.Error.Trim() ?? "adb could not be started."}"
+			);
+		}
 	}
 
 	private static ProcessRunner.ShellResult? RunAdb(string deviceId, params string[] arguments)

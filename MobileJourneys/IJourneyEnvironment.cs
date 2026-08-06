@@ -1,9 +1,7 @@
 namespace MobileJourneys;
 
 /// <summary>
-/// Per-journey app environment passed to the device on launch. Implementations encode
-/// app-specific mock state (e.g., logged-in flag, language, theme) and convert it to
-/// environment variables read by the app's mock service.
+/// Per-journey app state. Implementations hold whatever one journey needs arranged.
 /// </summary>
 public interface IJourneyEnvironment
 {
@@ -13,10 +11,11 @@ public interface IJourneyEnvironment
 	string Name { get; }
 
 	/// <summary>
-	/// Returns the environment variables to pass to the app on launch. Keys are
-	/// already prefixed/cased per the app's mock-env convention.
+	/// The address of the backend this journey's app should talk to, handed over at launch as a
+	/// process environment variable on iOS and as an intent string extra on Android, under the name
+	/// <see cref="FrameworkConfig.BackendSetup.UrlVariable"/> gives.
 	/// </summary>
-	IReadOnlyDictionary<string, string> GetEnvVars();
+	string BackendUrl { get; }
 
 	/// <summary>
 	/// Returns a copy of this environment specialized for the given fixture (platform +
