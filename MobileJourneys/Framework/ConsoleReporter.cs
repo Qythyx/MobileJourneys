@@ -45,6 +45,15 @@ internal sealed class ConsoleReporter : RunReporter
 	}
 
 	/// <inheritdoc/>
+	public override void FixtureRetrying(PlatformConfig config, string reason)
+	{
+		lock (Gate)
+		{
+			AnsiConsole.MarkupLine($"[yellow]RETRY[/] {Markup.Escape($"{config} — {reason}")}");
+		}
+	}
+
+	/// <inheritdoc/>
 	protected override void ReportFixtureSkipped(PlatformConfig config, int journeyCount, string reason)
 	{
 		lock (Gate)

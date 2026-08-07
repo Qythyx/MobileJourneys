@@ -63,6 +63,26 @@ public sealed class AndroidPlatformConfigTests
 	}
 
 	[Test]
+	public void ParseAttachedDevicesReadsSerialsAndSkipsTheHeader() =>
+		_ = AndroidPlatformConfig
+			.ParseAttachedDevices("List of devices attached\nemulator-5554\tdevice\nemulator-5556\tdevice\n")
+			.Should()
+			.Equal("emulator-5554", "emulator-5556");
+
+	[Test]
+	public void ParseAttachedDevicesIncludesAnOfflineDeviceBecauseItMayStillBeBooting() =>
+		_ = AndroidPlatformConfig
+			.ParseAttachedDevices("List of devices attached\nemulator-5554\toffline\n")
+			.Should()
+			.Equal("emulator-5554");
+
+	[TestCase("List of devices attached\n")]
+	[TestCase("List of devices attached\n0123456789ABCDEF\tunauthorized\n")]
+	[TestCase("List of devices attached\n0123456789ABCDEF\tno permissions; see [https://developer.android.com]\n")]
+	public void ParseAttachedDevicesIgnoresDevicesThatWillNotBecomeUsable(string output) =>
+		_ = AndroidPlatformConfig.ParseAttachedDevices(output).Should().BeEmpty();
+
+	[Test]
 	public void GetAlertButtonLocatorSimpleLabelProducesValidXPath() => _ = Compile(Config.GetAlertButtonLocator("OK"));
 
 	[Test]

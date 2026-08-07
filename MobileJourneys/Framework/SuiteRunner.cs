@@ -20,6 +20,12 @@ public static class SuiteRunner
 	/// <summary>What an Android crash log says when the APK was built without embedded assemblies.</summary>
 	private const string MissingAssembliesMarker = "No assemblies found";
 
+	/// <summary>How many times to try opening a fixture's Appium session before abandoning it.</summary>
+	private const int SessionStartAttempts = 2;
+
+	/// <summary>How long to give a device to finish booting before retrying its session.</summary>
+	private static readonly TimeSpan DeviceReadyTimeout = TimeSpan.FromSeconds(90);
+
 	/// <summary>Runs whatever the command line asked for.</summary>
 	/// <param name="config">The suite's journeys, fixtures, and storage.</param>
 	/// <param name="args">The arguments as passed to <c>Main</c>.</param>
@@ -227,7 +233,7 @@ public static class SuiteRunner
 		CancellationToken cancellationToken
 	)
 	{
-		var start = StartFixture(config, cases, manager, backendSetup?.UrlVariable ?? string.Empty);
+		var start = StartFixture(config, cases, manager, backendSetup?.UrlVariable ?? string.Empty, reporter);
 		if (start.Driver is null)
 		{
 			reporter.FixtureSkipped(config, cases.Count, start.Failure ?? "the app did not start.");
@@ -262,17 +268,14 @@ public static class SuiteRunner
 		PlatformConfig config,
 		IReadOnlyList<TestCase> cases,
 		ScreenshotManager manager,
-		string backendUrlVariable
+		string backendUrlVariable,
+		RunReporter reporter
 	)
 	{
-		TestDriver driver;
-		try
+		var driver = TryStartSession(config, manager, backendUrlVariable, reporter, out var sessionError);
+		if (driver is null)
 		{
-			driver = new TestDriver(config.CreateAppiumDriver(), config, manager, backendUrlVariable);
-		}
-		catch (Exception ex) when (ex is WebDriverException or FileNotFoundException or TimeoutException)
-		{
-			return new FixtureStart(config, cases, null, $"the Appium session failed to start: {ex.Message}");
+			return new FixtureStart(config, cases, null, sessionError);
 		}
 
 		if (!driver.IsAppCrashed())
@@ -293,6 +296,46 @@ public static class SuiteRunner
 						: $"Crash log:\n{crashLog}"
 				)
 		);
+	}
+
+	/// <summary>
+	/// Opens the Appium session, retrying once. A session started against a device that has only just
+	/// come up races the tail of its boot, and the failure that produces is transient — waiting for
+	/// the device to finish and asking again costs one attempt and saves the whole fixture.
+	/// </summary>
+	/// <param name="config">The platform fixture to open a session on.</param>
+	/// <param name="manager">Screenshot storage the driver writes through.</param>
+	/// <param name="backendUrlVariable">Name the app reads its backend URL from.</param>
+	/// <param name="reporter">Told when an attempt failed and another is coming.</param>
+	/// <param name="error">Why every attempt failed, ready to print; empty on success.</param>
+	/// <returns>The live session, or <c>null</c> when it could not be opened.</returns>
+	private static TestDriver? TryStartSession(
+		PlatformConfig config,
+		ScreenshotManager manager,
+		string backendUrlVariable,
+		RunReporter reporter,
+		out string error
+	)
+	{
+		error = string.Empty;
+		for (var attempt = 1; attempt <= SessionStartAttempts; attempt++)
+		{
+			try
+			{
+				return new TestDriver(config.CreateAppiumDriver(), config, manager, backendUrlVariable);
+			}
+			catch (Exception ex) when (ex is WebDriverException or FileNotFoundException or TimeoutException)
+			{
+				error = $"the Appium session failed to start after {SessionStartAttempts} attempts: {ex.Message}";
+				if (attempt < SessionStartAttempts)
+				{
+					reporter.FixtureRetrying(config, $"attempt {attempt} failed: {ex.Message}");
+					config.WaitUntilDevicesAreReady(DeviceReadyTimeout);
+				}
+			}
+		}
+
+		return null;
 	}
 
 	private static void RunFixture(

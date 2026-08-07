@@ -146,6 +146,14 @@ internal abstract class RunReporter
 	public virtual void FixtureReady(PlatformConfig config) { }
 
 	/// <summary>
+	/// Notes that a fixture's session start failed and is being tried again. A retry waits out the
+	/// device's boot, so without this the fixture reads as merely slow to start for a minute or more.
+	/// </summary>
+	/// <param name="config">The fixture being retried.</param>
+	/// <param name="reason">Why the attempt failed, ready to print.</param>
+	public virtual void FixtureRetrying(PlatformConfig config, string reason) { }
+
+	/// <summary>
 	/// Runs the fixture fan-out inside whatever display this reporter keeps on screen for its
 	/// duration.
 	/// </summary>

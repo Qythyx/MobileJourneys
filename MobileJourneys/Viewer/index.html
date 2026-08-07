@@ -71,6 +71,13 @@
 			white-space: nowrap;
 		}
 
+		#run-clock {
+			font-size: 11px;
+			color: var(--muted);
+			white-space: nowrap;
+			font-variant-numeric: tabular-nums;
+		}
+
 		#actions {
 			margin-left: auto;
 			display: flex;
@@ -176,6 +183,46 @@
 		.seg .badge.split .steps {
 			background: var(--fail2);
 			border-left: 1px solid rgba(0, 0, 0, .3);
+		}
+
+		/* A running fixture's progress wears the failure badge's shape in the accent colour. */
+		.seg .badge.progress {
+			background: var(--accent);
+		}
+
+		.seg .badge.progress .steps {
+			background: #2f7ad6;
+		}
+
+		.seg .badge.progress.starting {
+			background: var(--accent);
+		}
+
+		.seg .badge.progress.failing {
+			background: var(--fail);
+		}
+
+		.seg .badge.progress.failing .steps {
+			background: var(--fail2);
+		}
+
+		.seg .badge.progress.done {
+			background: var(--ok);
+			color: #10331b;
+		}
+
+		.seg .badge.progress.done .steps {
+			background: #45ab61;
+		}
+
+		.seg .badge.progress.retrying {
+			background: var(--extra);
+			color: #402800;
+		}
+
+		.seg .badge.progress.skipped {
+			background: var(--muted);
+			color: var(--panel);
 		}
 
 		.keyhint {
@@ -787,6 +834,8 @@
 			border-color: var(--accent);
 		}
 
+		/* Only ever shown for a runner that died without reporting anything, so it opens expanded and
+		   wears the failure colour. */
 		#runner {
 			position: fixed;
 			right: 14px;
@@ -795,19 +844,11 @@
 			max-height: 46vh;
 			z-index: 65;
 			background: var(--panel);
-			border: 1px solid var(--accent);
+			border: 1px solid var(--fail);
 			border-radius: 10px;
 			display: none;
 			flex-direction: column;
 			overflow: hidden;
-		}
-
-		#runner[data-state="pass"] {
-			border-color: var(--ok);
-		}
-
-		#runner[data-state="fail"] {
-			border-color: var(--fail);
 		}
 
 		#runner .rhd {
@@ -816,21 +857,6 @@
 			gap: 8px;
 			padding: 8px 12px;
 			border-bottom: 1px solid var(--border);
-			cursor: pointer;
-		}
-
-		#runner.collapsed .rhd {
-			border-bottom: 0;
-		}
-
-		#runner.collapsed pre {
-			display: none;
-		}
-
-		#runner .rtoggle {
-			color: var(--muted);
-			font-size: 10px;
-			width: 10px;
 		}
 
 		#runner .rhd b {
@@ -840,20 +866,6 @@
 			overflow: hidden;
 			text-overflow: ellipsis;
 			white-space: nowrap;
-		}
-
-		#runner .status {
-			width: 13px;
-			text-align: center;
-			font-weight: 700;
-		}
-
-		#runner .status.pass {
-			color: var(--ok);
-		}
-
-		#runner .status.fail {
-			color: var(--fail);
 		}
 
 		#runner .rhd .close {
@@ -873,22 +885,6 @@
 			white-space: pre-wrap;
 		}
 
-		.spin {
-			display: inline-block;
-			vertical-align: middle;
-			width: 11px;
-			height: 11px;
-			border: 2px solid var(--border);
-			border-top-color: var(--accent);
-			border-radius: 50%;
-			animation: spin 0.8s linear infinite;
-		}
-
-		@keyframes spin {
-			to {
-				transform: rotate(360deg);
-			}
-		}
 	</style>
 </head>
 
@@ -899,6 +895,7 @@
 			<span id="server-status"></span>
 		</div>
 		<div class="seg" id="config-seg"></div>
+		<span id="run-clock"></span>
 		<div id="actions">
 			<span id="rerun-all-group" style="display:none">
 				<button class="btn" id="rerun-all-btn" title="Rerun the whole suite (Shift+R)">Rerun all ▾</button>
@@ -923,9 +920,8 @@
 	<div id="help">
 		<div class="sheet"></div>
 	</div>
-	<div id="runner" class="collapsed">
-		<div class="rhd"><span class="status"><span class="spin"></span></span><span class="rtoggle"
-				title="Show / hide console output">▸</span><b></b><span class="close" title="Close (Esc)">✕</span></div>
+	<div id="runner">
+		<div class="rhd"><b></b><span class="close" title="Close (Esc)">✕</span></div>
 		<pre></pre>
 	</div>
 	<div id="toast"></div>
@@ -940,7 +936,7 @@
 			let selected = 0;        // index into currentFailures(); -1 = nothing selected
 			let resolved = null;     // a failure just cleared (rerun passed / accepted / discarded), shown in place
 			let zoomed = false;      // the z view is open
-			let chord = null, chordTimer = null, runEvents = null;
+			let chord = null, chordTimer = null, runEvents = null, clockTimer = null;
 			// The rerun being watched, built from the events its process reports. `steps` maps a fixture
 			// to that fixture's "container/step" results; absent entries render as pending (yellow).
 			// `overlay` is set only by a rerun-all — a single-journey rerun would wrongly paint the whole
@@ -1575,13 +1571,7 @@
 				}).catch((e) => ({ ok: false, text: async () => e.message }));
 				if (!res.ok) { toast("rerun failed: " + (await res.text())); return; }
 				const job = await res.json();
-				const r = $("#runner");
-				r.style.display = "flex";
-				r.classList.add("collapsed");
-				$("#runner .rtoggle").textContent = "▸";
-				r.removeAttribute("data-state");
-				r.querySelector("pre").textContent = "";
-				r.querySelector(".status").innerHTML = `<span class="spin"></span>`;
+				closeRunnerPanel();
 				// Only rerun-all (live) drives the overlay; a single-journey rerun would wrongly paint the
 				// whole tree. "failures" reruns just the failing journeys, so pre-mark only each device's
 				// currently-failing steps pending — snapshot them per device now, before the run starts
@@ -1597,28 +1587,34 @@
 					}
 					overlay = { scope };
 				}
-				run = { description: job.description, endpoint, body, live, overlay, ...emptyRunProgress() };
-				updateRunner();
+				run = { description: job.description, endpoint, body, live, overlay, startedAt: Date.now(), endedAt: null, ...emptyRunProgress() };
+				startClock();
 				render();
 				watchRun(job.id);
 			}
 			// One journey finishes fast enough that a single refresh at the end suffices.
 			const rerun = (journey, scope) => startRerun("rerun", { config, journey, scope }, false);
-			// The whole suite runs for many minutes, so tick the graph forward as journeys finish rather
-			// than making the user stare at a spinner (live = true). failed = only currently-failing
-			// journeys; embed = rebuild the app first. The two combine.
+			// The whole suite runs for many minutes, so tick the graph forward as journeys finish
+			// (live = true). failed = only currently-failing journeys; embed = rebuild the app first.
+			// The two combine.
 			const rerunAll = (failed, embed) => startRerun("rerun-all", { failed, embed }, true);
-			$("#runner .close").addEventListener("click", (e) => { e.stopPropagation(); $("#runner").style.display = "none"; });
-			$("#runner .rhd").addEventListener("click", () => {
-				const r = $("#runner");
-				r.classList.toggle("collapsed");
-				$("#runner .rtoggle").textContent = r.classList.contains("collapsed") ? "▸" : "▾";
-			});
+			$("#runner .close").addEventListener("click", () => { closeRunnerPanel(); });
 
 			// Everything the event stream fills in. A dropped connection replays the run from its first
 			// event, so this is reset on every (re)connect and rebuilt rather than added to.
 			function emptyRunProgress() {
-				return { fixtures: null, steps: new Map(), journeys: new Map(), lines: [], stale: false };
+				return { fixtures: null, steps: new Map(), progress: new Map(), skipped: [], stale: false, finished: false };
+			}
+			// One fixture's counts, keyed by device. `steps` above is keyed by container/step because it
+			// paints thumbnails, which collapses a step several journeys share into one entry — so it can
+			// never count how many steps ran. These are plain counters, one bump per event.
+			function fixtureProgress(cfg) {
+				let p = run.progress.get(cfg);
+				if (!p) {
+					p = { journeysTotal: 0, stepsTotal: 0, journeysDone: 0, stepsDone: 0, failed: 0, ready: false, skipReason: null, retryReason: null, firstStepAt: 0 };
+					run.progress.set(cfg, p);
+				}
+				return p;
 			}
 			function watchRun(id) {
 				closeRun();
@@ -1643,84 +1639,66 @@
 					case "run-started":
 						run.fixtures = ev.fixtures;
 						for (const f of ev.fixtures) {
-							run.lines.push(`${f.config} — ${plural(f.journeys, "journey")}, ${plural(f.steps, "step")}`);
+							Object.assign(fixtureProgress(f.config), { journeysTotal: f.journeys, stepsTotal: f.steps });
 						}
 						break;
 					case "fixture-ready":
-						run.lines.push(`${ev.config} — device ready`);
+						fixtureProgress(ev.config).ready = true;
+						break;
+					case "fixture-retrying":
+						fixtureProgress(ev.config).retryReason = ev.reason;
 						break;
 					case "fixture-skipped":
 						// The runner words a stale-assemblies crash exactly this way, and it is the one failure
 						// a rebuild-and-rerun actually fixes.
 						run.stale = run.stale || ev.reason.includes("Rebuild with -p:EmbedAssemblies=true");
-						run.lines.push(`SKIP ${ev.config} — ${plural(ev.journeys, "journey")} skipped because ${ev.reason}`);
+						fixtureProgress(ev.config).skipReason = ev.reason;
+						// A whole device dropping out of the run is worth reading, and a toast is gone before
+						// it can be. The panel holds every skip until it is dismissed.
+						run.skipped.push({ config: ev.config, journeys: ev.journeys, reason: ev.reason });
+						showRunProblems();
 						break;
 					case "step-completed": {
 						let steps = run.steps.get(ev.config);
 						if (!steps) { steps = new Map(); run.steps.set(ev.config, steps); }
 						steps.set(ev.container + "/" + ev.step, ev.passed ? "pass" : "fail");
-						run.lines.push(`${ev.passed ? "✓" : "✗"} ${ev.config} · ${ev.journey} ${ev.number}/${ev.totalSteps} ${ev.name}`
-							+ (ev.detail ? ` — ${ev.detail}` : ""));
+						const p = fixtureProgress(ev.config);
+						// Each fixture's own clock: they reach their first step minutes apart, so a rate
+						// measured from the run's start would badly underestimate a late starter.
+						if (!p.firstStepAt) { p.firstStepAt = Date.now(); }
+						p.stepsDone++;
+						if (!ev.passed) { p.failed++; }
 						if (run.overlay) { applyProgress(); }
 						break;
 					}
 					case "journey-completed":
-						run.journeys.set(ev.config + " " + ev.journey, ev.passed);
-						run.lines.push(`${ev.passed ? "PASS" : "FAIL"} ${ev.config} · ${ev.journey} (${ev.seconds.toFixed(1)}s)`);
+						fixtureProgress(ev.config).journeysDone++;
 						// A finished journey is what puts new artifacts on disk.
 						if (run.overlay) { softRefresh(); }
-						break;
-					case "run-finished":
-						run.lines.push(`Runner finished with exit code ${ev.exitCode}`);
 						break;
 					case "process-exited":
 						finishRun(ev);
 						return;
 				}
-				updateRunner();
-			}
-
-			function runTotals() {
-				let doneSteps = 0;
-				for (const steps of run.steps.values()) { doneSteps += steps.size; }
-				const totals = (run.fixtures || []).reduce(
-					(a, f) => ({ journeys: a.journeys + f.journeys, steps: a.steps + f.steps }),
-					{ journeys: 0, steps: 0 });
-				return { doneJourneys: run.journeys.size, doneSteps, ...totals };
-			}
-			function updateRunner() {
-				const runner = $("#runner");
-				const t = runTotals();
-				runner.querySelector("b").textContent = run.description
-					+ (run.fixtures ? ` — Journey ${t.doneJourneys}/${t.journeys}, Step ${t.doneSteps}/${t.steps}` : "");
-				const pre = runner.querySelector("pre");
-				const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
-				pre.textContent = run.lines.join("\n");
-				if (atBottom) { pre.scrollTop = pre.scrollHeight; }
+				renderConfigBadges();
+				renderClock();
 			}
 
 			// The process is gone: every event is in, and its console output comes with this one when the
 			// run failed — the only account there is of a child that died before reporting anything.
 			function finishRun(ev) {
 				closeRun();
-				if (ev.output && ev.output.length) {
-					if (run.lines.length) { run.lines.push(""); }
-					run.lines.push("-- process output --", ...ev.output);
-				}
 				const passed = ev.exitCode === 0;
 				const stale = !passed
 					&& (run.stale || (ev.output || []).some((l) => l.includes("Rebuild with -p:EmbedAssemblies=true")));
-				// Hand coloring back to the manifest — refresh() re-renders with the real failure state.
+				// Hand coloring back to the manifest — refresh() re-renders with the real failure state,
+				// and the badges go back to reporting what is on disk.
 				run.overlay = null;
-				updateRunner();
-				const runner = $("#runner");
-				runner.dataset.state = passed ? "pass" : "fail";
-				runner.querySelector(".status").innerHTML = passed
-					? `<span class="pass">✓</span>`
-					: `<span class="fail">✕</span>`;
+				run.finished = true;
+				run.endedAt = Date.now();
+				stopClock();
+				renderConfigBadges();
 				if (stale && !run.body.embed) {
-					runner.querySelector("b").textContent =
-						`${run.description} — app crashed on startup (stale assemblies); rebuilding & rerunning…`;
 					toast("Stale app on device — rebuilding with EmbedAssemblies and rerunning");
 					// Corrective rebuild forces an embedded build. A single-journey rerun can't embed, so
 					// escalate it to a rebuild of every currently-failing journey. The escalated run carries
@@ -1729,15 +1707,40 @@
 					else { startRerun("rerun-all", { failed: true, embed: true }, true); }
 					return;
 				}
-				if (stale) {
-					runner.querySelector("b").textContent = `${run.description} — app still crashed on startup after rebuild`;
-				}
+				// A run that failed because journeys failed is already accounted for by the badges and the
+				// tree. One that reported no step at all is not, and the process output is the only
+				// account of it.
+				const ranNothing = [...run.progress.values()].every((p) => p.stepsDone === 0);
+				run.output = !passed && ranNothing ? ev.output || [] : null;
+				run.exitCode = ev.exitCode;
+				if (run.skipped.length > 0 || run.output) { showRunProblems(); }
 				refresh(
 					passed ? "Rerun passed"
 						: stale ? "App crashed on startup — see the console output"
 							: `Rerun finished with exit code ${ev.exitCode}`,
 					passed ? "passed on rerun" : null
 				);
+			}
+
+			// Everything about the run that needs reading rather than glancing at: fixtures that dropped
+			// out, and the output of a runner that died without reporting a step. Stays up until dismissed.
+			function showRunProblems() {
+				const parts = run.skipped.map((s) =>
+					`${s.config} — ${plural(s.journeys, "journey")} skipped\n  ${s.reason}`);
+				if (run.output) { parts.push(`-- process output (exit code ${run.exitCode}) --\n${run.output.join("\n")}`); }
+				const heading = run.skipped.length > 0
+					? `${run.description} — ${plural(run.skipped.length, "fixture")} skipped`
+					: `${run.description} — exit code ${run.exitCode}`;
+				const runner = $("#runner");
+				runner.querySelector("b").textContent = heading;
+				runner.querySelector("pre").textContent = parts.join("\n\n");
+				runner.style.display = "flex";
+			}
+
+			function closeRunnerPanel() {
+				const runner = $("#runner");
+				runner.style.display = "none";
+				runner.querySelector("pre").textContent = "";
 			}
 
 			// ---------- overlays ----------
@@ -1855,7 +1858,7 @@
 					chord = null;
 					$("#help").style.display = "none";
 					$("#lightbox").style.display = "none";
-					$("#runner").style.display = "none";
+					closeRunnerPanel();
 					closeZoom();
 					return;
 				}
@@ -1957,29 +1960,76 @@
 			}
 
 			// ---------- render ----------
-			function render() {
+			function splitBadge(cls, left, right, title) {
+				const s = document.createElement("span");
+				s.className = "badge split " + cls;
+				s.title = title;
+				const l = document.createElement("span");
+				l.className = "part journeys";
+				l.textContent = left;
+				const r = document.createElement("span");
+				r.className = "part steps";
+				r.textContent = right;
+				s.append(l, r);
+				return s;
+			}
+
+			function wordBadge(cls, text, title) {
+				const s = document.createElement("span");
+				s.className = "badge progress " + cls;
+				s.textContent = text;
+				s.title = title;
+				return s;
+			}
+
+			// A live run owns the badges: what is on disk is mid-rewrite, and the tree is already painting
+			// this run's passes and failures per thumbnail. Bringing the devices up takes minutes, so the
+			// badge says so from the moment the run is requested rather than waiting for a first result.
+			function progressBadge(cfg) {
+				const p = run.progress.get(cfg);
+				if (!p) { return wordBadge("starting", "starting…", "waiting for the runner to start"); }
+				if (p.skipReason) { return wordBadge("skipped", "skipped", p.skipReason); }
+				if (p.retryReason && !p.ready) { return wordBadge("retrying", "retrying…", p.retryReason); }
+				if (!p.ready) { return wordBadge("starting", "starting…", `${cfg} — bringing the device up`); }
+				const badge = splitBadge(
+					"progress",
+					`${p.journeysDone}/${p.journeysTotal}`,
+					`${p.stepsDone}/${p.stepsTotal}`,
+					`${p.journeysDone}/${p.journeysTotal} journeys · ${p.stepsDone}/${p.stepsTotal} steps`
+						+ (p.failed > 0 ? ` · ${p.failed} failed` : "")
+				);
+				if (p.failed > 0) { badge.classList.add("failing"); }
+				else if (p.journeysDone === p.journeysTotal) { badge.classList.add("done"); }
+				return badge;
+			}
+
+			// Which devices this run covers. Known exactly once run-started arrives; before that, a
+			// single-journey rerun names its device and a whole-suite rerun means all of them.
+			function runConfigs() {
+				if (run.fixtures) { return run.fixtures.map((f) => f.config); }
+				return run.endpoint === "rerun" ? [run.body.config] : M.configs;
+			}
+
+			function renderConfigBadges() {
+				const running = run && !run.finished;
+				const inRun = running ? new Set(runConfigs()) : null;
 				document.querySelectorAll("#config-seg button").forEach((b) => {
 					b.classList.toggle("active", b.dataset.config === config);
-					const cfgFails = failureGroups(b.dataset.config);
-					const journeys = new Set(cfgFails.map((f) => f.journey)).size;
-					const steps = cfgFails.length;
-					const extra = filesFor(b.dataset.config).extraneous.length;
 					b.querySelector(".badges")?.remove();
-					if (steps > 0 || extra > 0) {
-						const box = document.createElement("span");
-						box.className = "badges";
+					const box = document.createElement("span");
+					box.className = "badges";
+					if (running && inRun.has(b.dataset.config)) {
+						box.appendChild(progressBadge(b.dataset.config));
+					} else if (running) {
+						// In a run it takes no part in — say nothing rather than report stale disk state.
+					} else {
+						const cfgFails = failureGroups(b.dataset.config);
+						const journeys = new Set(cfgFails.map((f) => f.journey)).size;
+						const steps = cfgFails.length;
+						const extra = filesFor(b.dataset.config).extraneous.length;
 						if (steps > 0) {
-							const s = document.createElement("span");
-							s.className = "badge split";
-							s.title = `${plural(journeys, "journey")} · ${plural(steps, "failed step")}`;
-							const j = document.createElement("span");
-							j.className = "part journeys";
-							j.textContent = journeys;
-							const st = document.createElement("span");
-							st.className = "part steps";
-							st.textContent = steps;
-							s.append(j, st);
-							box.appendChild(s);
+							box.appendChild(splitBadge("", journeys, steps,
+								`${plural(journeys, "journey")} · ${plural(steps, "failed step")}`));
 						}
 						if (extra > 0) {
 							const s = document.createElement("span");
@@ -1987,9 +2037,51 @@
 							s.textContent = extra;
 							box.appendChild(s);
 						}
-						b.appendChild(box);
 					}
+					if (box.children.length > 0) { b.appendChild(box); }
 				});
+			}
+
+			// ---------- run clock ----------
+			function startClock() {
+				stopClock();
+				clockTimer = setInterval(renderClock, 1000);
+				renderClock();
+			}
+			function stopClock() {
+				if (clockTimer) { clearInterval(clockTimer); clockTimer = null; }
+			}
+			const mmss = (ms) => {
+				const total = Math.max(0, Math.round(ms / 1000));
+				return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+			};
+
+			// How much longer the run needs: the slowest fixture decides, since they finish independently
+			// and the run is over when the last one is. One with no steps behind it yet predicts nothing,
+			// so it sits the estimate out.
+			function remainingMs() {
+				let slowest = null;
+				for (const p of run.progress.values()) {
+					if (p.skipReason || !p.firstStepAt || p.stepsDone === 0 || p.stepsDone >= p.stepsTotal) { continue; }
+					const perStep = (Date.now() - p.firstStepAt) / p.stepsDone;
+					slowest = Math.max(slowest ?? 0, (p.stepsTotal - p.stepsDone) * perStep);
+				}
+				return slowest;
+			}
+
+			function renderClock() {
+				const clock = $("#run-clock");
+				if (!run) { clock.textContent = ""; return; }
+				const elapsed = (run.endedAt ?? Date.now()) - run.startedAt;
+				if (run.finished) { clock.textContent = `ran ${mmss(elapsed)}`; return; }
+				const remaining = remainingMs();
+				clock.textContent = mmss(elapsed) + " elapsed"
+					+ (remaining === null ? "" : ` · ~${mmss(remaining)} left`);
+			}
+
+			function render() {
+				renderConfigBadges();
+				renderClock();
 				const extraCount = filesFor(config).extraneous.length;
 				const del = $("#del-extra");
 				del.style.display = extraCount > 0 && serverMode ? "" : "none";

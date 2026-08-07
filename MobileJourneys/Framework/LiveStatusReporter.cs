@@ -125,6 +125,18 @@ internal sealed class LiveStatusReporter(IReadOnlyList<TestCase> selected) : Run
 	}
 
 	/// <inheritdoc/>
+	public override void FixtureRetrying(PlatformConfig config, string reason)
+	{
+		lock (Gate)
+		{
+			if (fixtures.TryGetValue(config, out var fixture))
+			{
+				fixture.Current = $"retrying — {reason}";
+			}
+		}
+	}
+
+	/// <inheritdoc/>
 	/// <remarks>
 	/// The row carries the reason, and nothing is written to the console: fixtures are abandoned
 	/// while the table is live now, and writing under a live display corrupts it.

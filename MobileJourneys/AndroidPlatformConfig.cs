@@ -306,6 +306,61 @@ public sealed record AndroidPlatformConfig(
 	public override void StopForwardingPort(string deviceId, int port) =>
 		RunAdbOrThrow(deviceId, "reverse", "--remove", $"tcp:{port}");
 
+	/// <inheritdoc/>
+	/// <remarks>
+	/// An emulator answers <c>adb devices</c> well before Android is usable: the package manager is
+	/// still settling, and a session started in that window fails installing or launching a helper
+	/// app — most visibly as <c>Activity class {io.appium.settings/…} does not exist</c>. Waiting for
+	/// the boot to actually complete closes that window.
+	/// </remarks>
+	internal override void WaitUntilDevicesAreReady(TimeSpan timeout)
+	{
+		var deadline = DateTime.UtcNow + timeout;
+		// A failure early enough in the launch leaves nothing attached yet, so give one a chance to
+		// appear before concluding there is nothing to wait for.
+		while (DateTime.UtcNow < deadline && !AttachedDevices().Any())
+		{
+			Thread.Sleep(BootPollInterval);
+		}
+
+		foreach (var deviceId in AttachedDevices())
+		{
+			while (DateTime.UtcNow < deadline && !IsBootComplete(deviceId))
+			{
+				Thread.Sleep(BootPollInterval);
+			}
+		}
+	}
+
+	private static readonly TimeSpan BootPollInterval = TimeSpan.FromSeconds(2);
+
+	private static bool IsBootComplete(string deviceId) =>
+		GetProperty(deviceId, "sys.boot_completed") == "1"
+		&& GetProperty(deviceId, "init.svc.bootanim") == "stopped"
+		// The package manager is the part that is not ready yet when the boot flags already say it is.
+		&& RunAdb(deviceId, "shell", "pm", "path", "android") is { ExitCode: 0 };
+
+	private static string GetProperty(string deviceId, string name) =>
+		RunAdb(deviceId, "shell", "getprop", name) is { ExitCode: 0 } result ? result.Output.Trim() : string.Empty;
+
+	private static IEnumerable<string> AttachedDevices() =>
+		ProcessRunner.RunWithResult(AdbPath, ["devices"]) is { ExitCode: 0 } result
+			? ParseAttachedDevices(result.Output)
+			: [];
+
+	/// <summary>
+	/// Reads the device serials out of <c>adb devices</c> output, skipping its header and any device
+	/// in a state that will never become usable on its own (<c>unauthorized</c>, <c>no permissions</c>).
+	/// </summary>
+	/// <param name="adbDevicesOutput">Standard output of <c>adb devices</c>.</param>
+	internal static IEnumerable<string> ParseAttachedDevices(string adbDevicesOutput) =>
+		adbDevicesOutput
+			.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+			.Select(line => line.Split('\t', StringSplitOptions.RemoveEmptyEntries))
+			// A device still coming up reports "offline", which is exactly what this waits out.
+			.Where(parts => parts is [_, "device" or "offline"])
+			.Select(parts => parts[0].Trim());
+
 	private static void RunAdbOrThrow(string deviceId, params string[] arguments)
 	{
 		var result = RunAdb(deviceId, arguments);

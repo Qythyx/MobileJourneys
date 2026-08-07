@@ -136,6 +136,16 @@ public abstract record PlatformConfig(
 	/// <param name="port">The port number that was forwarded.</param>
 	public virtual void StopForwardingPort(string deviceId, int port) { }
 
+	// --- Device readiness ---
+
+	/// <summary>
+	/// Blocks until this platform's devices are far enough through boot that a session can be started
+	/// against them, or until <paramref name="timeout"/> elapses. Does nothing where a device reports
+	/// itself attached only once it is genuinely usable.
+	/// </summary>
+	/// <param name="timeout">How long to wait before giving up and letting the caller try anyway.</param>
+	internal virtual void WaitUntilDevicesAreReady(TimeSpan timeout) { }
+
 	// --- Keyboard / alerts ---
 
 	internal virtual void DismissKeyboard(AppiumDriver driver) => driver.HideKeyboard();

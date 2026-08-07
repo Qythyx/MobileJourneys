@@ -50,6 +50,17 @@ internal sealed class WebReporter(string url, IReadOnlyList<TestCase> selected) 
 		Post(new { type = "fixture-ready", config = config.DisplayName });
 
 	/// <inheritdoc/>
+	public override void FixtureRetrying(PlatformConfig config, string reason) =>
+		Post(
+			new
+			{
+				type = "fixture-retrying",
+				config = config.DisplayName,
+				reason,
+			}
+		);
+
+	/// <inheritdoc/>
 	protected override void ReportFixtureSkipped(PlatformConfig config, int journeyCount, string reason) =>
 		Post(
 			new
