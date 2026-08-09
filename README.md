@@ -18,6 +18,10 @@ rather than publishing progress to a test host.
 - Built-in actions: `Tap`, `TypeText`, `SwipeLeft`/`Right`, `DismissAlert`, `DismissKeyboard`,
   `TapAlertButton`, `TapNotification`, `InvertSystemTheme`, `SetSystemFontSize`, `None`.
 - Built-in expectations: `Found`, `NotFound`, `FoundWithText`, `AlertFound`, `WaitForNotification`.
+  `WaitForNotification` recognises a banner by comparing the rows named by
+  `NotificationBannerTop`/`NotificationBannerBottom` against an empty capture of those same rows, so
+  the action that triggers the notification must call `TestDriver.CaptureEmptyBannerRegion()` after
+  backgrounding the app and **before** scheduling the notification.
 - An Appium-driven `TestDriver` with element-finding (with stale-element retry), gestures, alerts,
   deep links, hardware-keyboard control, and crash detection.
 - Screenshot-baseline comparison via `SixLabors.ImageSharp` + `Codeuctivity.ImageSharpCompare` with

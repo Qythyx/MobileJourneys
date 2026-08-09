@@ -26,13 +26,6 @@ public sealed class TestDriver(
 	string backendUrlVariable
 )
 {
-	private enum Phase
-	{
-		HomeStabilizing = 0,
-		WaitingForChange = 1,
-		BannerStabilizing = 2,
-	}
-
 	/// <summary>
 	/// AutomationId the consumer's app should set on the content view immediately
 	/// below the notification banner. Used by the framework to mask out the banner
@@ -46,6 +39,9 @@ public sealed class TestDriver(
 	/// absorbs render lag rather than allowing for one to appear later.
 	/// </summary>
 	private static readonly TimeSpan MaskLookupTimeout = TimeSpan.FromSeconds(5);
+
+	/// <summary>How long <see cref="CaptureEmptyBannerRegion"/> waits for its region to stop changing.</summary>
+	private static readonly TimeSpan EmptyBannerRegionSettleTimeout = TimeSpan.FromSeconds(10);
 
 	/// <summary>The underlying Appium driver.</summary>
 	public AppiumDriver App { get; } = app;
@@ -94,6 +90,8 @@ public sealed class TestDriver(
 	/// (e.g., native notification banners captured via <c>xcrun simctl io</c>).
 	/// </summary>
 	private byte[]? _screenshotPngBytes;
+
+	private Image<Rgb24>? _emptyBannerRegion;
 
 	/// <summary>Returns the device UDID/transport-ID this driver is connected to.</summary>
 	public string GetDeviceId()
@@ -542,97 +540,93 @@ public sealed class TestDriver(
 		});
 
 	/// <summary>
-	/// Waits for a notification banner to appear on the device screen by polling device-level
-	/// screenshots. First waits for the home screen to stabilize (two identical captures),
-	/// then waits for the screen to change (notification arrived). Ignores changes that
-	/// coincide with a clock minute rollover to avoid false positives from the time display.
-	/// Stores the final screenshot in <see cref="_screenshotPngBytes"/> for baseline comparison.
+	/// Polls until the banner's region stops changing, and keeps that as what
+	/// <see cref="WaitForNotificationBanner"/> compares against.
+	/// <para/>
+	/// Must run before the notification is scheduled. Captured with the banner already up, it
+	/// describes the banner as the background, and the wait can no longer see it.
 	/// </summary>
-	/// <param name="timeout">Maximum time to wait.</param>
-	/// <exception cref="TimeoutException">Thrown when the notification banner does not appear within the timeout.</exception>
-	public void WaitForNotificationBanner(TimeSpan timeout)
+	public void CaptureEmptyBannerRegion()
 	{
-		const int BannerHeight = 300;
+		_emptyBannerRegion?.Dispose();
+		_emptyBannerRegion = null;
+
 		var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-		var previousImage = CropToTop(CaptureDeviceScreenshotBytes(), BannerHeight);
-		var previousMinute = DateTime.Now.Minute;
-		// Phase tracking: HomeStabilizing -> WaitingForChange -> BannerStabilizing
-		var phase = Phase.HomeStabilizing;
-
-		while (stopwatch.Elapsed < timeout)
+		var previous = CropToBannerRegion(CaptureDeviceScreenshotBytes());
+		while (stopwatch.Elapsed < EmptyBannerRegionSettleTimeout)
 		{
-			var fullBytes = CaptureDeviceScreenshotBytes();
-			var currentImage = CropToTop(fullBytes, BannerHeight);
-			var currentMinute = DateTime.Now.Minute;
-			var identical = ImageHelpers.AreImagesEqual(currentImage, previousImage, []);
-
-			switch (phase)
+			var current = CropToBannerRegion(CaptureDeviceScreenshotBytes());
+			if (ImageHelpers.AreImagesEqual(current, previous, []))
 			{
-				case Phase.HomeStabilizing:
-					// Phase 1: wait for the home screen to stabilize (two identical frames).
-					if (identical)
-					{
-						phase = Phase.WaitingForChange;
-						currentImage.Dispose();
-					}
-					else
-					{
-						previousImage.Dispose();
-						previousImage = currentImage;
-					}
-
-					previousMinute = currentMinute;
-					continue;
-
-				case Phase.WaitingForChange:
-					// Phase 2: wait for the screen to change (notification appearing).
-					if (!identical && currentMinute == previousMinute)
-					{
-						phase = Phase.BannerStabilizing;
-						previousImage.Dispose();
-						previousImage = currentImage;
-						previousMinute = currentMinute;
-						continue;
-					}
-
-					// Clock minute rolled over or still identical — update baseline.
-					previousImage.Dispose();
-					previousImage = currentImage;
-					previousMinute = currentMinute;
-					continue;
-
-				case Phase.BannerStabilizing:
-					// Phase 3: wait for the notification banner to finish animating
-					// (two identical frames after the initial change).
-					if (identical)
-					{
-						previousImage.Dispose();
-						currentImage.Dispose();
-						_screenshotPngBytes = fullBytes;
-						return;
-					}
-
-					// Still animating — update baseline.
-					previousImage.Dispose();
-					previousImage = currentImage;
-					previousMinute = currentMinute;
-					continue;
+				previous.Dispose();
+				_emptyBannerRegion = current;
+				return;
 			}
+
+			previous.Dispose();
+			previous = current;
 		}
 
-		previousImage.Dispose();
-		throw new TimeoutException($"Notification banner did not appear within {timeout.TotalSeconds}s");
+		// Never settled — the wait's own stability check still has to agree with whatever this is.
+		_emptyBannerRegion = previous;
 	}
 
 	/// <summary>
-	/// Crops a full-screen PNG to the top <paramref name="height"/> pixels and returns it.
+	/// Waits for a notification banner by polling the banner's region until it both differs from
+	/// <see cref="CaptureEmptyBannerRegion"/>'s capture and has stopped changing — so a banner already
+	/// on screen when the wait starts counts, rather than being taken for the background. Leaves the
+	/// winning screenshot for the step's baseline comparison.
 	/// </summary>
+	/// <param name="timeout">Maximum time to wait.</param>
+	/// <exception cref="InvalidOperationException">Thrown when no empty region was captured.</exception>
+	/// <exception cref="TimeoutException">Thrown when no banner appears within the timeout.</exception>
+	public void WaitForNotificationBanner(TimeSpan timeout)
+	{
+		// Consumed here, so a second wait cannot quietly measure against an earlier step's screen.
+		using var emptyRegion =
+			_emptyBannerRegion
+			?? throw new InvalidOperationException(
+				$"{nameof(CaptureEmptyBannerRegion)} has to run before the notification is "
+					+ "scheduled, so this wait has a banner-free view of the region to compare against."
+			);
+		_emptyBannerRegion = null;
+
+		var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+		var previous = CropToBannerRegion(CaptureDeviceScreenshotBytes());
+
+		while (stopwatch.Elapsed < timeout)
+		{
+			var currentBytes = CaptureDeviceScreenshotBytes();
+			var current = CropToBannerRegion(currentBytes);
+			var showsBanner = !ImageHelpers.AreImagesEqual(current, emptyRegion, []);
+			if (showsBanner && ImageHelpers.AreImagesEqual(current, previous, []))
+			{
+				previous.Dispose();
+				current.Dispose();
+				_screenshotPngBytes = currentBytes;
+				return;
+			}
+
+			previous.Dispose();
+			previous = current;
+		}
+
+		previous.Dispose();
+		throw new TimeoutException(
+			$"No notification banner appeared over rows {Config.NotificationBannerTop}-"
+				+ $"{Config.NotificationBannerBottom} within {timeout.TotalSeconds}s"
+		);
+	}
+
+	/// <summary>Crops a full-screen PNG to the rows this fixture's notification banner occupies.</summary>
 	/// <param name="pngBytes">Raw PNG bytes of the full screenshot.</param>
-	/// <param name="height">Number of pixels to keep from the top.</param>
-	private static Image<Rgb24> CropToTop(byte[] pngBytes, int height)
+	/// <returns>The banner's rows of that screenshot.</returns>
+	private Image<Rgb24> CropToBannerRegion(byte[] pngBytes)
 	{
 		var image = Image.Load<Rgb24>(pngBytes);
-		image.Mutate(x => x.Crop(image.Width, Math.Min(height, image.Height)));
+		var top = Math.Clamp(Config.NotificationBannerTop, 0, image.Height);
+		var bottom = Math.Clamp(Config.NotificationBannerBottom, top, image.Height);
+		image.Mutate(x => x.Crop(new SixLabors.ImageSharp.Rectangle(0, top, image.Width, bottom - top)));
 		return image;
 	}
 
