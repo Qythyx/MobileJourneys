@@ -12,6 +12,8 @@ namespace MobileJourneys;
 /// <param name="IsLightTheme">When <c>true</c>, the system theme is forced to light before each journey.</param>
 /// <param name="AppIdentifier">Bundle ID (e.g., "jp.beercats.beerbox").</param>
 /// <param name="AppBinaryPath">Absolute path to the .app bundle.</param>
+/// <param name="NotificationBannerTop">Where a notification banner's top edge sits on this device, in screenshot pixels.</param>
+/// <param name="NotificationBannerBottom">Where a notification banner's bottom edge sits on this device, in screenshot pixels.</param>
 /// <param name="ColorTolerance">Permitted per-pixel color delta (sum of R, G, B deltas) when comparing against baselines.</param>
 /// <param name="MaxDiffPixelPercentage">Percentage of pixels permitted to exceed <paramref name="ColorTolerance"/> before the step fails.</param>
 public sealed record IosPlatformConfig(
@@ -20,8 +22,10 @@ public sealed record IosPlatformConfig(
 	bool IsLightTheme,
 	string AppIdentifier,
 	string AppBinaryPath,
-	int ColorTolerance = 3 * 2,
-	double MaxDiffPixelPercentage = 0.005
+	int NotificationBannerTop,
+	int NotificationBannerBottom,
+	int ColorTolerance,
+	double MaxDiffPixelPercentage
 ) : PlatformConfig(PlatformVersion, DeviceName, IsLightTheme, AppIdentifier, AppBinaryPath)
 {
 	/// <inheritdoc/>
@@ -144,10 +148,6 @@ public sealed record IosPlatformConfig(
 	// Can't probe the home indicator height from Appium — hardcode the standard 34pt.
 	internal override int GetHomeIndicatorHeight(AppiumDriver driver) => 34;
 
-	internal override int NotificationBannerMaskHeight => 110;
-
-	internal override int NotificationBannerTapYOffset => 100;
-
 	internal override void SetSystemTheme(string deviceId, bool isLightTheme) =>
 		ProcessRunner.Run("xcrun", ["simctl", "ui", deviceId, "appearance", isLightTheme ? "light" : "dark"]);
 
@@ -160,6 +160,12 @@ public sealed record IosPlatformConfig(
 			"--version",
 			"Install Xcode command-line tools: `xcode-select --install`."
 		);
+
+	internal override void KillStaleHelperProcesses() =>
+		// The XCUITest driver's WebDriverAgent runner outlives an Appium server that goes away without
+		// tearing it down. The path is unique to it, so no other xcodebuild matches. It ignores the
+		// default SIGTERM, so this has to be SIGKILL to land.
+		ProcessRunner.Run("pkill", ["-9", "-f", "appium-webdriveragent"]);
 
 	internal override void OnBeforeTests(TestDriver driver, string deviceId)
 	{

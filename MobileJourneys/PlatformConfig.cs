@@ -168,9 +168,16 @@ public abstract record PlatformConfig(
 
 	internal abstract int GetHomeIndicatorHeight(AppiumDriver driver);
 
-	internal abstract int NotificationBannerMaskHeight { get; }
+	/// <summary>
+	/// Where a notification banner's top edge sits on this device, in screenshot pixels.
+	/// </summary>
+	public abstract int NotificationBannerTop { get; init; }
 
-	internal abstract int NotificationBannerTapYOffset { get; }
+	/// <summary>
+	/// Where a notification banner's bottom edge sits on this device, in screenshot pixels. A step
+	/// comparing only the banner masks everything below this line.
+	/// </summary>
+	public abstract int NotificationBannerBottom { get; init; }
 
 	// --- System state setup ---
 
@@ -183,6 +190,14 @@ public abstract record PlatformConfig(
 	// --- Dependency verification (called once at session start by DependencyChecker) ---
 
 	internal abstract void VerifyDependencies();
+
+	// --- Stale process cleanup (called once before the Appium server starts) ---
+
+	/// <summary>
+	/// Kills helper processes an earlier run left behind, so this one starts against a clean machine.
+	/// Does nothing on a platform whose helpers do not outlive the run that started them.
+	/// </summary>
+	internal virtual void KillStaleHelperProcesses() { }
 
 	internal static int FindFreePort()
 	{

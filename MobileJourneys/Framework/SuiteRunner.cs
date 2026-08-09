@@ -23,6 +23,9 @@ public static class SuiteRunner
 	/// <summary>How many times to try opening a fixture's Appium session before abandoning it.</summary>
 	private const int SessionStartAttempts = 2;
 
+	/// <summary>How many lines of the Appium server's output to keep back for a post-mortem.</summary>
+	private const int AppiumOutputTailLines = 200;
+
 	/// <summary>How long to give a device to finish booting before retrying its session.</summary>
 	private static readonly TimeSpan DeviceReadyTimeout = TimeSpan.FromSeconds(90);
 
@@ -154,38 +157,67 @@ public static class SuiteRunner
 			cancellation.Cancel();
 		};
 
+		// Before the server starts, so the sweep cannot reach the helpers this run is about to spawn.
+		foreach (var platformConfig in config.PlatformConfigs.DistinctBy(p => p.Platform))
+		{
+			platformConfig.KillStaleHelperProcesses();
+		}
+
 		using var appiumService = new AppiumServiceBuilder()
 			.WithIPAddress(AppiumHostAddress)
 			.UsingPort(AppiumHostPort)
 			.WithArguments(new OptionCollector().AddArguments(new("--allow-insecure", "*:adb_shell")))
 			.Build();
+
+		// The display owns the console for the run's duration, so the server's output has nowhere to go
+		// and is kept here instead, to be printed only if the run ends in a way nothing else explains.
+		var appiumOutput = new Queue<string>();
+		appiumService.OutputDataReceived += (_, args) => RecordAppiumOutput(appiumOutput, args.Data);
+		appiumService.ErrorDataReceived += (_, args) => RecordAppiumOutput(appiumOutput, args.Data);
 		appiumService.Start();
 
 		// Each fixture brings its own device up and then runs on it, all inside the reporter's display
 		// — so the table is on screen from the first moment, showing devices starting rather than
 		// leaving the reader watching a spinner until the slowest one is ready.
-		await reporter
-			.RunAsync(() =>
-				Task.WhenAll(
-					selected
-						.GroupBy(testCase => testCase.Config)
-						.Select(group =>
-							Task.Run(
-								() =>
-									StartAndRunFixture(
-										group.Key,
-										[.. group],
-										config.Backend,
-										reporter,
-										manager,
-										cancellation.Token
-									),
-								cancellation.Token
+		// The runtime tears the process down without unwinding, so an exception that reaches it skips
+		// the summary below and the Appium server's disposal.
+		var interrupted = false;
+		try
+		{
+			await reporter
+				.RunAsync(() =>
+					Task.WhenAll(
+						selected
+							.GroupBy(testCase => testCase.Config)
+							.Select(group =>
+								Task.Run(
+									() =>
+										StartAndRunFixture(
+											group.Key,
+											[.. group],
+											config.Backend,
+											reporter,
+											manager,
+											cancellation.Token
+										),
+									cancellation.Token
+								)
 							)
-						)
+					)
 				)
-			)
-			.ConfigureAwait(false);
+				.ConfigureAwait(false);
+		}
+		catch (OperationCanceledException)
+		{
+			interrupted = true;
+			RunReporter.Note("The run was interrupted, so the results below cover only what finished.");
+		}
+		catch (Exception ex)
+		{
+			interrupted = true;
+			RunReporter.Fault($"The run was cut short by {ex.GetType().Name}: {ex.Message}");
+			ReportAppiumOutput(appiumOutput);
+		}
 
 		var exitCode = reporter.Summarize();
 		if (IsInteractive)
@@ -193,7 +225,7 @@ public static class SuiteRunner
 			FailureBrowser.Browse(config, reporter.Failures);
 		}
 
-		return exitCode;
+		return interrupted ? 1 : exitCode;
 	}
 
 	/// <summary>A fixture whose device is up, its app installed, and its journeys ready to run.</summary>
@@ -233,7 +265,14 @@ public static class SuiteRunner
 		CancellationToken cancellationToken
 	)
 	{
-		var start = StartFixture(config, cases, manager, backendSetup?.UrlVariable ?? string.Empty, reporter);
+		var start = StartFixture(
+			config,
+			cases,
+			manager,
+			backendSetup?.UrlVariable ?? string.Empty,
+			reporter,
+			cancellationToken
+		);
 		if (start.Driver is null)
 		{
 			reporter.FixtureSkipped(config, cases.Count, start.Failure ?? "the app did not start.");
@@ -251,16 +290,27 @@ public static class SuiteRunner
 		{
 			// Abandon the fixture rather than the run, as a failed session start does — and rather than
 			// escaping to the runtime, which would skip disposing the Appium server.
-			QuitDriver(start.Driver);
+			QuitDriver(start.Driver, cancellationToken);
 			reporter.FixtureSkipped(config, cases.Count, $"its backend failed to start: {ex.Message}");
 			return;
 		}
 
-		using (backend)
+		try
 		{
 			start.Driver.Backend = backend;
 			reporter.FixtureReady(config);
 			RunFixture(new FixtureSession(config, cases, start.Driver), reporter, manager, cancellationToken);
+		}
+		finally
+		{
+			try
+			{
+				backend?.Dispose();
+			}
+			catch (Exception ex)
+			{
+				RunReporter.Note($"{config}: the backend did not shut down cleanly — {ex.Message}");
+			}
 		}
 	}
 
@@ -269,7 +319,8 @@ public static class SuiteRunner
 		IReadOnlyList<TestCase> cases,
 		ScreenshotManager manager,
 		string backendUrlVariable,
-		RunReporter reporter
+		RunReporter reporter,
+		CancellationToken cancellationToken
 	)
 	{
 		var driver = TryStartSession(config, manager, backendUrlVariable, reporter, out var sessionError);
@@ -284,7 +335,7 @@ public static class SuiteRunner
 		}
 
 		var crashLog = driver.CaptureDeviceCrashLog() ?? "No crash log available.";
-		QuitDriver(driver);
+		QuitDriver(driver, cancellationToken);
 		return new FixtureStart(
 			config,
 			cases,
@@ -377,28 +428,74 @@ public static class SuiteRunner
 		}
 		finally
 		{
-			try
+			QuitDriver(driver, cancellationToken);
+		}
+	}
+
+	/// <summary>
+	/// Keeps the newest line the Appium server wrote, dropping the oldest once the tail is full.
+	/// Called from the server's own reader threads.
+	/// </summary>
+	/// <param name="output">The tail collected so far.</param>
+	/// <param name="line">What the server wrote, or <c>null</c> at the end of the stream.</param>
+	private static void RecordAppiumOutput(Queue<string> output, string? line)
+	{
+		if (string.IsNullOrWhiteSpace(line))
+		{
+			return;
+		}
+
+		lock (output)
+		{
+			output.Enqueue(line);
+			if (output.Count > AppiumOutputTailLines)
 			{
-				driver.App.Quit();
-				driver.App.Dispose();
-			}
-			catch when (cancellationToken.IsCancellationRequested)
-			{
-				// Appium HTTP calls may fail when interrupted; swallow on cancellation.
+				_ = output.Dequeue();
 			}
 		}
 	}
 
-	private static void QuitDriver(TestDriver driver)
+	/// <summary>
+	/// Prints what the Appium server said, for an ending the run's own artifacts cannot account for.
+	/// The output goes nowhere else, so this is the only chance to read it.
+	/// </summary>
+	/// <param name="output">The tail of the server's output.</param>
+	private static void ReportAppiumOutput(Queue<string> output)
+	{
+		string[] lines;
+		lock (output)
+		{
+			lines = [.. output];
+		}
+
+		if (lines.Length == 0)
+		{
+			return;
+		}
+
+		RunReporter.Note($"The Appium server's last {lines.Length} lines:\n{string.Join('\n', lines)}");
+	}
+
+	/// <summary>
+	/// Closes a fixture's session. Its journeys are already reported by this point, so a session that
+	/// cannot be closed is said out loud and does not fail the run.
+	/// </summary>
+	/// <param name="driver">The session to close.</param>
+	/// <param name="cancellationToken">Cancelled when the reader interrupts the run.</param>
+	private static void QuitDriver(TestDriver driver, CancellationToken cancellationToken)
 	{
 		try
 		{
 			driver.App.Quit();
 			driver.App.Dispose();
 		}
-		catch (WebDriverException)
+		catch when (cancellationToken.IsCancellationRequested)
 		{
-			// The session is already unusable — which is why it is being abandoned.
+			// Appium HTTP calls may fail when interrupted.
+		}
+		catch (WebDriverException ex)
+		{
+			RunReporter.Note($"{driver.Config}: the Appium session did not close cleanly — {ex.Message}");
 		}
 	}
 

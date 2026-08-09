@@ -63,6 +63,16 @@ internal abstract class RunReporter
 		}
 	}
 
+	/// <summary>Prints a fault that no journey produced, and which the run's verdict has to account for.</summary>
+	/// <param name="text">What went wrong, ready to print.</param>
+	public static void Fault(string text)
+	{
+		lock (Gate)
+		{
+			AnsiConsole.MarkupLine($"[red]FAULT[/] {Markup.Escape(text)}");
+		}
+	}
+
 	/// <summary>The journeys that failed, in the order they finished.</summary>
 	public IReadOnlyList<JourneyResult> Failures
 	{

@@ -15,6 +15,8 @@ namespace MobileJourneys;
 /// <param name="AppIdentifier">Package name (e.g., "jp.beercats.beerbox").</param>
 /// <param name="AppBinaryPath">Absolute path to the signed .apk.</param>
 /// <param name="MainActivity">Optional. Defaults to <c>$"{AppIdentifier}.MainActivity"</c>.</param>
+/// <param name="NotificationBannerTop">Where a notification banner's top edge sits on this device, in screenshot pixels.</param>
+/// <param name="NotificationBannerBottom">Where a notification banner's bottom edge sits on this device, in screenshot pixels.</param>
 /// <param name="ColorTolerance">Permitted per-pixel color delta (sum of R, G, B deltas) when comparing against baselines.</param>
 /// <param name="MaxDiffPixelPercentage">Percentage of pixels permitted to exceed <paramref name="ColorTolerance"/> before the step fails.</param>
 public sealed record AndroidPlatformConfig(
@@ -25,8 +27,10 @@ public sealed record AndroidPlatformConfig(
 	string AppIdentifier,
 	string AppBinaryPath,
 	string? MainActivity,
-	int ColorTolerance = 3 * 10,
-	double MaxDiffPixelPercentage = 0.005
+	int NotificationBannerTop,
+	int NotificationBannerBottom,
+	int ColorTolerance,
+	double MaxDiffPixelPercentage
 ) : PlatformConfig(PlatformVersion, DeviceName, IsLightTheme, AppIdentifier, AppBinaryPath)
 {
 	/// <inheritdoc/>
@@ -221,10 +225,6 @@ public sealed record AndroidPlatformConfig(
 	internal override int GetHomeIndicatorHeight(AppiumDriver driver) =>
 		driver.GetDict("mobile: getSystemBars").GetDict("navigationBar").GetInt("height");
 
-	internal override int NotificationBannerMaskHeight => 350;
-
-	internal override int NotificationBannerTapYOffset => 200;
-
 	internal override void SetSystemTheme(string deviceId, bool isLightTheme) =>
 		ProcessRunner.Run(AdbPath, ["-s", deviceId, "shell", "cmd", "uimode", "night", isLightTheme ? "no" : "yes"]);
 
@@ -303,8 +303,11 @@ public sealed record AndroidPlatformConfig(
 		RunAdbOrThrow(deviceId, "reverse", $"tcp:{port}", $"tcp:{port}");
 
 	/// <inheritdoc/>
+	/// <remarks>
+	/// adb treats an already-absent listener as a failure; here it is the intended end state.
+	/// </remarks>
 	public override void StopForwardingPort(string deviceId, int port) =>
-		RunAdbOrThrow(deviceId, "reverse", "--remove", $"tcp:{port}");
+		_ = RunAdb(deviceId, "reverse", "--remove", $"tcp:{port}");
 
 	/// <inheritdoc/>
 	/// <remarks>

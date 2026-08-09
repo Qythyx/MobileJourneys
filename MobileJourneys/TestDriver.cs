@@ -75,6 +75,20 @@ public sealed class TestDriver(
 		];
 
 	/// <summary>
+	/// Screenshot pixels per viewport unit, measured once per session. Positions taken off a
+	/// screenshot and positions handed to a tap are in different spaces on a device that renders
+	/// above 1x, so one has to be converted into the other. Measured rather than assumed per
+	/// platform, since the two spaces coincide on some devices and not on others.
+	/// <para/>
+	/// Any comparison the session has already made fills this in; measuring it here instead costs a
+	/// capture, which a caller racing a banner that dismisses itself cannot spare.
+	/// </summary>
+	private double _screenScale;
+
+	private void RecordScreenScale(int imageHeight, int windowHeight) =>
+		_screenScale = (double)imageHeight / windowHeight;
+
+	/// <summary>
 	/// When set, <see cref="DoActionAndCompareWithBaseline"/> uses these bytes instead of
 	/// taking an Appium screenshot. Cleared after use. Used for device-level screenshots
 	/// (e.g., native notification banners captured via <c>xcrun simctl io</c>).
@@ -321,14 +335,25 @@ public sealed class TestDriver(
 		// Measured before the capture, not after it. A step that masks an element is usually masking
 		// one that only exists while the action's work is in flight, and a screenshot is a slow round
 		// trip — taking it first spends the element's whole lifetime before anyone looks for it.
-		var maskElements = maskElementIds.Select(id => GetElementRectangle(windowSize, id)).ToArray();
+		var maskElements = maskElementIds
+			.Where(id => id != AutomationIdBelowNotification)
+			.Select(GetElementRectangle)
+			.ToArray();
+		var masksBelowNotification = maskElementIds.Contains(AutomationIdBelowNotification);
 
-		Rectangle[] MaskRegionsFor(Image image) =>
-			ImageHelpers.ScaleMaskRegions(
+		Rectangle[] MaskRegionsFor(Image image)
+		{
+			RecordScreenScale(image.Height, windowSize.Height);
+			var scaled = ImageHelpers.ScaleMaskRegions(
 				[.. maskElements.Concat(SystemMasks)],
 				windowSize,
 				new System.Drawing.Size(image.Width, image.Height)
 			);
+
+			// The banner's bounds are configured in the captured image's own pixels, so this region
+			// joins the others only once they have been scaled into that same space.
+			return masksBelowNotification ? [.. scaled, BelowNotificationMask(image)] : scaled;
+		}
 
 		if (prefetchMasks)
 		{
@@ -385,24 +410,17 @@ public sealed class TestDriver(
 		return screenshotManager.CompareWithBaselineAndDispose(previousImage!, testStep, maskRegions);
 	}
 
-	private Rectangle GetElementRectangle(System.Drawing.Size windowSize, string automationId)
+	private Rectangle GetElementRectangle(string automationId)
 	{
-		var notificationHeight = Config.NotificationBannerMaskHeight;
-
-		static Rectangle GetBounds(AppiumElement ele) =>
-			new(ele.Location.X, ele.Location.Y, ele.Size.Width, ele.Size.Height);
-
-		return automationId switch
-		{
-			AutomationIdBelowNotification => new(
-				0,
-				notificationHeight,
-				windowSize.Width,
-				windowSize.Height - notificationHeight
-			),
-			_ => GetBounds(FindElement(automationId, MaskLookupTimeout)),
-		};
+		var element = FindElement(automationId, MaskLookupTimeout);
+		return new(element.Location.X, element.Location.Y, element.Size.Width, element.Size.Height);
 	}
+
+	/// <summary>Everything under a notification banner, in the captured image's pixels.</summary>
+	/// <param name="image">The capture the region is being masked out of.</param>
+	/// <returns>The region spanning the full width from the banner's bottom edge down.</returns>
+	private Rectangle BelowNotificationMask(Image image) =>
+		new(0, Config.NotificationBannerBottom, image.Width, image.Height - Config.NotificationBannerBottom);
 
 	/// <summary>Performs a single-finger swipe from (startX, startY) to (endX, endY) in viewport coordinates.</summary>
 	public void SwipeScreen(int startX, int startY, int endX, int endY)
@@ -703,16 +721,29 @@ public sealed class TestDriver(
 
 	/// <summary>
 	/// Taps the notification banner at the top of the screen. The banner must be visible
-	/// (e.g., on the home screen after a push notification). Uses W3C Actions to tap at
-	/// the center-top of the viewport where notification banners appear on both platforms.
+	/// (e.g., on the home screen after a push notification). Uses W3C Actions to tap the
+	/// middle of where notification banners appear on this device.
 	/// </summary>
 	public void TapNotificationBanner()
 	{
 		var size = App.Manage().Window.Size;
 		var finger = new PointerInputDevice(PointerKind.Touch, "finger");
-		var yOffset = Config.NotificationBannerTapYOffset;
+		var bannerCenter = (Config.NotificationBannerTop + Config.NotificationBannerBottom) / 2.0;
+		if (_screenScale == 0)
+		{
+			using var screenshot = App.GetScreenshot().AsImage();
+			RecordScreenScale(screenshot.Height, App.Manage().Window.Size.Height);
+		}
+
 		var sequence = new ActionSequence(finger, 0)
-			.AddAction(finger.CreatePointerMove(CoordinateOrigin.Viewport, size.Width / 2, yOffset, TimeSpan.Zero))
+			.AddAction(
+				finger.CreatePointerMove(
+					CoordinateOrigin.Viewport,
+					size.Width / 2,
+					(int)Math.Round(bannerCenter / _screenScale),
+					TimeSpan.Zero
+				)
+			)
 			.AddAction(finger.CreatePointerDown(MouseButton.Left))
 			.AddAction(finger.CreatePointerUp(MouseButton.Left));
 		App.PerformActions([sequence]);
