@@ -48,7 +48,7 @@ public sealed class DependencyCheckerTests
 				DisplayName: "Test",
 				PlatformConfigs:
 				[
-					new AndroidPlatformConfig("15", "Pixel", "avd", true, "com.example", "/path/app.apk", null),
+					new AndroidPlatformConfig("15", "Pixel", "avd", true, "com.example", "/path/app.apk", null, 200, 550, 3 * 10, 0.005),
 				],
 				Journeys: [new JourneyDefinition(new TestEnv(), [new TestExpect()], [], [], "j")]
 			);

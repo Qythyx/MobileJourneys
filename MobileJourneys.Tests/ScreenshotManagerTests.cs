@@ -158,7 +158,7 @@ public sealed class ScreenshotManagerTests
 	// --- CompareWithBaselineAndDispose (instance API) ---
 
 	private static IosPlatformConfig BuildConfig() =>
-		new("26.2", "iPhone", IsLightTheme: true, "com.example.app", "/unused");
+		new("26.2", "iPhone", IsLightTheme: true, "com.example.app", "/unused", 100, 210, 3 * 2, 0.005);
 
 	[Test]
 	public void CompareWithBaselineAndDisposeWritesBaselineWhenAbsent()

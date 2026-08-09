@@ -21,7 +21,11 @@ public sealed class FailureSummaryTests
 		"iPhone 16",
 		IsLightTheme: true,
 		"com.example.app",
-		"/path/to/app.app"
+		"/path/to/app.app",
+		100,
+		210,
+		3 * 2,
+		0.005
 	);
 
 	private static readonly AndroidPlatformConfig AndroidFixture = new(
@@ -31,7 +35,11 @@ public sealed class FailureSummaryTests
 		IsLightTheme: false,
 		"com.example.app",
 		"/path/to/app.apk",
-		null
+		null,
+		200,
+		550,
+		3 * 10,
+		0.005
 	);
 
 	private sealed record TestEnv : IJourneyEnvironment

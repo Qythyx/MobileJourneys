@@ -13,7 +13,11 @@ public sealed class ArtifactNamingTests
 		IsLightTheme: true,
 		"com.example.app",
 		"/path/Signed.apk",
-		null
+		null,
+		200,
+		550,
+		3 * 10,
+		0.005
 	);
 
 	private static TestStep Step => new(Config, "Journey", "01 Step", "Journey");

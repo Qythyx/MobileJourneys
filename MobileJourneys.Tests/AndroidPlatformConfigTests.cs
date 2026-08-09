@@ -14,7 +14,11 @@ public sealed class AndroidPlatformConfigTests
 		IsLightTheme: true,
 		"com.example.app",
 		"/path/app.apk",
-		null
+		null,
+		200,
+		550,
+		3 * 10,
+		0.005
 	);
 
 	[TestCase(SystemFontSize.ExtraSmall, 0.82)]

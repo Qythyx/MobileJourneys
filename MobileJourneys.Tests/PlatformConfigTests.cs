@@ -11,7 +11,11 @@ public sealed class PlatformConfigTests
 		"iPhone 17 Pro",
 		IsLightTheme: true,
 		"com.example.app",
-		"/path/to/app.app"
+		"/path/to/app.app",
+		100,
+		210,
+		3 * 2,
+		0.005
 	);
 
 	private static readonly AndroidPlatformConfig AndroidDark = new(
@@ -21,7 +25,11 @@ public sealed class PlatformConfigTests
 		IsLightTheme: false,
 		"com.example.app",
 		"/path/Signed.apk",
-		null
+		null,
+		200,
+		550,
+		3 * 10,
+		0.005
 	);
 
 	[Test]

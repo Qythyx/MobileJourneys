@@ -9,7 +9,7 @@ public sealed class FrameworkConfigTests
 	[Test]
 	public void FrameworkConfigPreservesAllConstructorArguments()
 	{
-		var platform = new IosPlatformConfig("26.2", "iPhone", true, "com.example.app", "/path/app");
+		var platform = new IosPlatformConfig("26.2", "iPhone", true, "com.example.app", "/path/app", 100, 210, 3 * 2, 0.005);
 		var journey = new JourneyDefinition(new TestEnv(), [new TestExpectation()], [], [], "TestJourney");
 		var config = new FrameworkConfig("Display", [platform], [journey]);
 
@@ -21,7 +21,7 @@ public sealed class FrameworkConfigTests
 	[Test]
 	public void FrameworkConfigThrowsOnDuplicateJourneyNames()
 	{
-		var platform = new IosPlatformConfig("26.2", "iPhone", true, "com.example.app", "/path/app");
+		var platform = new IosPlatformConfig("26.2", "iPhone", true, "com.example.app", "/path/app", 100, 210, 3 * 2, 0.005);
 		var journeyA = new JourneyDefinition(new TestEnv(), [new TestExpectation()], [], [], "Dup");
 		var journeyB = new JourneyDefinition(new TestEnv(), [new TestExpectation()], [], [], "Dup");
 

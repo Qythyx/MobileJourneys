@@ -18,7 +18,7 @@ public sealed class InMemoryScreenshotStorageTests
 	public void SetUp()
 	{
 		_storage = new();
-		_config = new("26.2", "iPhone", IsLightTheme: true, "com.example.app", "/unused");
+		_config = new("26.2", "iPhone", IsLightTheme: true, "com.example.app", "/unused", 100, 210, 3 * 2, 0.005);
 	}
 
 	private TestStep K(string journey, string step) => new(_config, journey, step, journey);
