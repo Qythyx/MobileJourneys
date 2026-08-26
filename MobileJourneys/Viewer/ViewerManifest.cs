@@ -110,9 +110,12 @@ internal static class ViewerManifest
 							kind = parsed.Kind,
 							percent = parsed.DiffPercent,
 							pixels = parsed.DiffPixelCount,
-							details = parsed.Kind == "fail"
-								? ReadFailureDetails(config.Storage, platform, container, fileName)
-								: string.Empty,
+							details = parsed.Kind switch
+							{
+								"fail" => ReadFailureDetails(config.Storage, platform, container, fileName),
+								"error" => ReadErrorText(config.Storage, platform, container, fileName),
+								_ => string.Empty,
+							},
 						}
 					);
 				}
@@ -148,6 +151,23 @@ internal static class ViewerManifest
 		};
 		return $"window.MANIFEST = {JsonSerializer.Serialize(manifest, SerializerOptions)};";
 	}
+
+	/// <summary>
+	/// Reads the failure text written beside a step that failed without producing a screenshot.
+	/// </summary>
+	/// <param name="storage">Storage to read the artifact from.</param>
+	/// <param name="platform">Platform fixture the artifact belongs to.</param>
+	/// <param name="container">Container path holding the artifact.</param>
+	/// <param name="fileName">The error text's filename.</param>
+	private static string ReadErrorText(
+		ScreenshotStorage storage,
+		PlatformConfig platform,
+		string container,
+		string fileName
+	) =>
+		storage.ReadFile(platform, container, fileName) is { } bytes
+			? System.Text.Encoding.UTF8.GetString(bytes)
+			: string.Empty;
 
 	/// <summary>
 	/// Reads the full failure text embedded in a FAIL screenshot's PNG metadata. Returns empty for

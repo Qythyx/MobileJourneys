@@ -30,14 +30,16 @@ public sealed class ScreenshotManager(ScreenshotStorage storage)
 	/// <param name="testStep">Identifies the step the FAIL screenshot belongs to.</param>
 	/// <param name="suffix">Suffix appended after <c>_FAIL_</c> (e.g., <c>"CRASH"</c> or a sanitized exception message). The caller is responsible for sanitizing the suffix for filename use.</param>
 	/// <param name="pngBytes">The screenshot captured at the moment of failure; empty when the app was unreachable.</param>
-	/// <param name="details">Full failure text stored in the image's metadata, so the viewer can show
-	/// the whole message rather than the truncated, sanitized version the filename can hold.</param>
+	/// <param name="details">Full failure text, so the viewer can show the whole message rather than
+	/// the truncated, sanitized version the filename can hold. Stored in the image where there is
+	/// one, and beside it where there is not.</param>
 	/// <returns>Display path to the saved file (suitable for log messages).</returns>
 	public string WriteFailScreenshot(TestStep testStep, string suffix, byte[] pngBytes, string details)
 	{
 		if (pngBytes.Length == 0)
 		{
 			storage.WriteFailScreenshot(testStep, suffix, pngBytes);
+			storage.WriteErrorText(testStep, details);
 			return storage.GetReportPath(testStep);
 		}
 

@@ -2,7 +2,7 @@ namespace MobileJourneys;
 
 /// <summary>
 /// Persistence layer for screenshot baselines and journey artifacts (failure screenshots,
-/// diff images, crash logs). Step-scoped operations identify their target via
+/// diff images, crash logs, error text). Step-scoped operations identify their target via
 /// <see cref="TestStep"/>, whose container path locates the step's folder — the journey's
 /// own folder for flat journeys, a shared node path for tree-defined journeys. Failure
 /// artifacts are attributed to the journey that produced them, so several journeys can
@@ -44,6 +44,9 @@ public abstract class ScreenshotStorage
 
 	/// <summary>Writes a UTF-8 crash-log artifact for a step.</summary>
 	internal abstract void WriteCrashLog(TestStep testStep, string content);
+
+	/// <summary>Writes a step's failure text, for a failure that produced no screenshot to carry it.</summary>
+	internal abstract void WriteErrorText(TestStep testStep, string content);
 
 	/// <summary>Lists every stored file under the platform, recursively. Excludes dotfiles. Empty when the platform container is missing. The returned list is a snapshot — safe to mutate the storage during enumeration.</summary>
 	protected abstract IReadOnlyList<StoredFile> ListFiles(PlatformConfig config);

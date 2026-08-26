@@ -58,6 +58,10 @@ internal sealed class InMemoryScreenshotStorage : ScreenshotStorage
 		GetOrCreateContainer(testStep.Config, testStep.Container)[ArtifactNaming.CrashLogFileName(testStep)] =
 			Encoding.UTF8.GetBytes(content);
 
+	internal override void WriteErrorText(TestStep testStep, string content) =>
+		GetOrCreateContainer(testStep.Config, testStep.Container)[ArtifactNaming.ErrorTextFileName(testStep)] =
+			Encoding.UTF8.GetBytes(content);
+
 	protected override IReadOnlyList<StoredFile> ListFiles(PlatformConfig config) =>
 		_files.TryGetValue(config.DisplayName, out var platform)
 			?

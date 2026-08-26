@@ -3,7 +3,7 @@ namespace MobileJourneys;
 /// <summary>
 /// Filename layout shared by <see cref="ScreenshotStorage"/> backends: the baseline
 /// extension, the suffix patterns for failure artifacts (new capture, diff image, FAIL
-/// screenshot, crash log), and the <c>" [journey]"</c> attribution stamped into failure
+/// screenshot, crash log, error text), and the <c>" [journey]"</c> attribution stamped into failure
 /// artifacts so artifacts in a container shared by several journeys stay attributable —
 /// and cleanable — per journey.
 /// </summary>
@@ -18,6 +18,7 @@ internal static class ArtifactNaming
 	private const string FailPrefix = "_FAIL_";
 	private const string FailExtension = ".png";
 	private const string CrashLogExtension = ".CRASH.txt";
+	private const string ErrorTextExtension = ".ERROR.txt";
 
 	/// <summary>Baseline filename for a step.</summary>
 	/// <param name="testStep">The step the baseline belongs to.</param>
@@ -47,6 +48,10 @@ internal static class ArtifactNaming
 	/// <param name="testStep">The step the crash log belongs to.</param>
 	internal static string CrashLogFileName(TestStep testStep) => Attributed(testStep) + CrashLogExtension;
 
+	/// <summary>Filename for a step's failure text, written when there is no screenshot to carry it.</summary>
+	/// <param name="testStep">The step the text belongs to.</param>
+	internal static string ErrorTextFileName(TestStep testStep) => Attributed(testStep) + ErrorTextExtension;
+
 	/// <summary>Returns <c>true</c> when the filename is a baseline (not a dotfile or failure artifact).</summary>
 	/// <param name="fileName">The filename to classify.</param>
 	internal static bool IsBaseline(string fileName) =>
@@ -64,7 +69,8 @@ internal static class ArtifactNaming
 		fileName.EndsWith(NewSuffix, StringComparison.Ordinal)
 		|| fileName.Contains(DiffPrefix, StringComparison.Ordinal)
 		|| fileName.Contains(FailPrefix, StringComparison.Ordinal)
-		|| fileName.EndsWith(CrashLogExtension, StringComparison.Ordinal);
+		|| fileName.EndsWith(CrashLogExtension, StringComparison.Ordinal)
+		|| fileName.EndsWith(ErrorTextExtension, StringComparison.Ordinal);
 
 	/// <summary>Returns <c>true</c> when the filename is a failure artifact for the given step and journey.</summary>
 	/// <param name="fileName">The filename to classify.</param>
@@ -76,7 +82,8 @@ internal static class ArtifactNaming
 		return fileName.Equals(attributed + NewSuffix, StringComparison.Ordinal)
 			|| fileName.StartsWith(attributed + DiffPrefix, StringComparison.Ordinal)
 			|| fileName.StartsWith(attributed + FailPrefix, StringComparison.Ordinal)
-			|| fileName.Equals(attributed + CrashLogExtension, StringComparison.Ordinal);
+			|| fileName.Equals(attributed + CrashLogExtension, StringComparison.Ordinal)
+			|| fileName.Equals(attributed + ErrorTextExtension, StringComparison.Ordinal);
 	}
 
 	/// <summary>Returns <c>true</c> when the filename is a failure artifact attributed to the given journey.</summary>
@@ -88,7 +95,7 @@ internal static class ArtifactNaming
 	/// <summary>A failure artifact's filename decomposed into its parts.</summary>
 	/// <param name="StepName">The step's numbered name (without extension).</param>
 	/// <param name="JourneyName">The journey the artifact is attributed to.</param>
-	/// <param name="Kind">The artifact kind: <c>"new"</c>, <c>"diff"</c>, <c>"fail"</c>, or <c>"crash"</c>.</param>
+	/// <param name="Kind">The artifact kind: <c>"new"</c>, <c>"diff"</c>, <c>"fail"</c>, <c>"crash"</c>, or <c>"error"</c>.</param>
 	/// <param name="DiffPercent">Pixel-error percentage parsed from a diff image's filename; <c>null</c> for other kinds.</param>
 	/// <param name="DiffPixelCount">
 	/// Number of differing pixels parsed from a diff image's filename. <c>null</c> for other kinds, and
@@ -129,6 +136,11 @@ internal static class ArtifactNaming
 		if (suffix == CrashLogExtension)
 		{
 			return new(stepName, journeyName, "crash", null, null);
+		}
+
+		if (suffix == ErrorTextExtension)
+		{
+			return new(stepName, journeyName, "error", null, null);
 		}
 
 		if (suffix.StartsWith(DiffPrefix, StringComparison.Ordinal))

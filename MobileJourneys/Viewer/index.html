@@ -986,7 +986,7 @@
 					g.kinds[f.kind] = f.file;
 					if (f.percent != null) { g.percent = f.percent; }
 					if (f.pixels != null) { g.pixels = f.pixels; }
-					if (f.kind === "fail") { g.failureText = f.details || ""; }
+					if (f.details) { g.failureText = f.details; }
 				}
 				return [...groups.entries()].sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0).map((e) => e[1]);
 			};
@@ -1607,11 +1607,12 @@
 			}
 			// One fixture's counts, keyed by device. `steps` above is keyed by container/step because it
 			// paints thumbnails, which collapses a step several journeys share into one entry — so it can
-			// never count how many steps ran. These are plain counters, one bump per event.
+			// never count how many steps ran. `verdicts` keys by journey too, so it counts each step once
+			// even when a journey runs again after its session was replaced.
 			function fixtureProgress(cfg) {
 				let p = run.progress.get(cfg);
 				if (!p) {
-					p = { journeysTotal: 0, stepsTotal: 0, journeysDone: 0, stepsDone: 0, failed: 0, ready: false, skipReason: null, retryReason: null, firstStepAt: 0 };
+					p = { journeysTotal: 0, stepsTotal: 0, journeysDone: 0, stepsDone: 0, failed: 0, verdicts: new Map(), ready: false, skipReason: null, retryReason: null, firstStepAt: 0 };
 					run.progress.set(cfg, p);
 				}
 				return p;
@@ -1666,8 +1667,11 @@
 						// Each fixture's own clock: they reach their first step minutes apart, so a rate
 						// measured from the run's start would badly underestimate a late starter.
 						if (!p.firstStepAt) { p.firstStepAt = Date.now(); }
-						p.stepsDone++;
+						const verdictKey = ev.container + "/" + ev.step + "/" + ev.journey;
+						if (!p.verdicts.has(verdictKey)) { p.stepsDone++; }
+						else if (!p.verdicts.get(verdictKey)) { p.failed--; }
 						if (!ev.passed) { p.failed++; }
+						p.verdicts.set(verdictKey, ev.passed);
 						if (run.overlay) { applyProgress(); }
 						break;
 					}

@@ -55,12 +55,12 @@ internal sealed class FilesystemScreenshotStorage(string rootDir) : ScreenshotSt
 		WriteBytes(testStep, ArtifactNaming.FailFileName(testStep, suffix), pngBytes);
 
 	/// <inheritdoc/>
-	internal override void WriteCrashLog(TestStep testStep, string content)
-	{
-		var dir = ContainerDir(testStep.Config, testStep.Container);
-		_ = Directory.CreateDirectory(dir);
-		File.WriteAllText(Path.Combine(dir, ArtifactNaming.CrashLogFileName(testStep)), content);
-	}
+	internal override void WriteCrashLog(TestStep testStep, string content) =>
+		WriteText(testStep, ArtifactNaming.CrashLogFileName(testStep), content);
+
+	/// <inheritdoc/>
+	internal override void WriteErrorText(TestStep testStep, string content) =>
+		WriteText(testStep, ArtifactNaming.ErrorTextFileName(testStep), content);
 
 	/// <inheritdoc/>
 	protected override IReadOnlyList<StoredFile> ListFiles(PlatformConfig config)
@@ -199,6 +199,13 @@ internal sealed class FilesystemScreenshotStorage(string rootDir) : ScreenshotSt
 		var dir = ContainerDir(testStep.Config, testStep.Container);
 		_ = Directory.CreateDirectory(dir);
 		File.WriteAllBytes(Path.Combine(dir, fileName), bytes);
+	}
+
+	private void WriteText(TestStep testStep, string fileName, string content)
+	{
+		var dir = ContainerDir(testStep.Config, testStep.Container);
+		_ = Directory.CreateDirectory(dir);
+		File.WriteAllText(Path.Combine(dir, fileName), content);
 	}
 
 	private string PlatformDir(PlatformConfig config) => Path.Combine(RootDir, config.DisplayName);

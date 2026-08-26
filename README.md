@@ -242,6 +242,12 @@ starts. An Android app installed without embedded assemblies crashes at launch, 
 offers — at a terminal — to rebuild the consumer project with `-p:EmbedAssemblies=true` and try
 again; with stdout redirected it prints the same hint and abandons the fixture.
 
+A device's automation process can also die part-way through a fixture, while the app and the Appium
+server both stay up. Every command after that fails identically, so the fixture replaces the session
+and gives the interrupted journey the run it never got, keeping the rest of its journeys. Three lost
+sessions and the fixture is abandoned instead, with its remaining journeys counted as not run — a
+device needing more than that is reporting its own condition, not the app's.
+
 ### 6. Required csproj bits
 
 The consumer csproj must:
@@ -307,13 +313,17 @@ crash logs) land alongside the baseline, stamped with the producing journey's na
 shared node can't clobber each other's evidence, and are auto-cleaned when the step next passes.
 Filename layout is owned by the storage backend; with the default `FilesystemScreenshotStorage` they
 appear as `<step> [<journey>].new.png`, `<step> [<journey>]_diff_<pct>%.png`,
-`<step> [<journey>]_FAIL_<reason>.png`, and `<step> [<journey>].CRASH.txt`.
+`<step> [<journey>]_FAIL_<reason>.png`, `<step> [<journey>].CRASH.txt`, and
+`<step> [<journey>].ERROR.txt`.
 
 A FAIL screenshot records its cause twice, for two different readers. The filename keeps a
 sanitized, 80-char reason so a directory listing still tells you what happened, and the PNG's text
 metadata carries the untruncated original — exception type, message, and stack trace — which is what
-the viewer displays. The metadata is the only source the viewer reads; an artifact written by an
-older version simply shows no details until the journey is rerun.
+the viewer displays. A step whose failure also took the screenshot down — a dead session answers a
+capture request the same way it answers everything else — leaves a zero-byte FAIL marker with no
+metadata to carry, so the same text is written beside it as `<step> [<journey>].ERROR.txt` and the
+viewer reads whichever of the two exists. An artifact written by an older version shows no details
+until the journey is rerun.
 
 It is captured the instant the step fails, before the app-state query and device crash log run.
 Those diagnostics take seconds, which is long enough for a screen that was merely slow to finish

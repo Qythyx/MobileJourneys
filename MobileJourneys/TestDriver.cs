@@ -666,6 +666,24 @@ public sealed class TestDriver(
 	}
 
 	/// <summary>
+	/// Whether the session can still reach the device. The automation process on the device can die
+	/// while the Appium server and the app are both still up, so the question has to be put to a
+	/// command the device itself answers — one the server can serve alone says nothing.
+	/// </summary>
+	/// <returns><c>true</c> while the device still answers.</returns>
+	public bool IsSessionAlive()
+	{
+		try
+		{
+			return App.PageSource.Length > 0;
+		}
+		catch (Exception ex) when (ex is WebDriverException or InvalidOperationException)
+		{
+			return false;
+		}
+	}
+
+	/// <summary>
 	/// Retrieves the crash log written by the app's unhandled exception handler.
 	/// The app writes full exception details (including stack traces) to a crash.log
 	/// file in its cache directory. On Android, falls back to logcat if the crash log

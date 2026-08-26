@@ -23,6 +23,13 @@ public static class SuiteRunner
 	/// <summary>How many times to try opening a fixture's Appium session before abandoning it.</summary>
 	private const int SessionStartAttempts = 2;
 
+	/// <summary>
+	/// How many sessions a fixture may lose mid-run before it is abandoned. Sessions die
+	/// independently of each other, so a fixture needing several is one whose device is unwell, and
+	/// carrying on there reports the device's condition as failing journeys.
+	/// </summary>
+	private const int SessionRecoveryAttempts = 3;
+
 	/// <summary>How many lines of the Appium server's output to keep back for a post-mortem.</summary>
 	private const int AppiumOutputTailLines = 200;
 
@@ -232,7 +239,16 @@ public static class SuiteRunner
 	/// <param name="Config">The platform fixture.</param>
 	/// <param name="Cases">The journeys selected for it.</param>
 	/// <param name="Driver">Its live Appium session.</param>
-	private sealed record FixtureSession(PlatformConfig Config, IReadOnlyList<TestCase> Cases, TestDriver Driver);
+	/// <param name="BackendUrlVariable">
+	/// Name the app reads its backend URL from, kept so a replacement session can be opened on the
+	/// same terms as the first.
+	/// </param>
+	private sealed record FixtureSession(
+		PlatformConfig Config,
+		IReadOnlyList<TestCase> Cases,
+		TestDriver Driver,
+		string BackendUrlVariable
+	);
 
 	/// <summary>The outcome of trying to bring a fixture up.</summary>
 	/// <param name="Config">The platform fixture.</param>
@@ -299,7 +315,12 @@ public static class SuiteRunner
 		{
 			start.Driver.Backend = backend;
 			reporter.FixtureReady(config);
-			RunFixture(new FixtureSession(config, cases, start.Driver), reporter, manager, cancellationToken);
+			RunFixture(
+				new FixtureSession(config, cases, start.Driver, backendSetup?.UrlVariable ?? string.Empty),
+				reporter,
+				manager,
+				cancellationToken
+			);
 		}
 		finally
 		{
@@ -389,6 +410,16 @@ public static class SuiteRunner
 		return null;
 	}
 
+	/// <summary>
+	/// Runs a fixture's journeys, replacing the session when the device stops answering it. The
+	/// device's automation process can die under a journey while the app and the Appium server both
+	/// stay up, and every command after that fails the same way, so a session outliving its device
+	/// turns the rest of the fixture's journeys into failures that describe nothing.
+	/// </summary>
+	/// <param name="session">The fixture, its journeys, and the session to run them on.</param>
+	/// <param name="reporter">Told each journey's outcome, and when the fixture has to be abandoned.</param>
+	/// <param name="manager">Screenshot storage the driver writes through.</param>
+	/// <param name="cancellationToken">Cancelled when the reader interrupts the run.</param>
 	private static void RunFixture(
 		FixtureSession session,
 		RunReporter reporter,
@@ -397,38 +428,112 @@ public static class SuiteRunner
 	)
 	{
 		var driver = session.Driver;
+		var recoveriesLeft = SessionRecoveryAttempts;
 		try
 		{
 			session.Config.OnBeforeTests(driver, driver.GetDeviceId());
 
-			foreach (var testCase in session.Cases)
+			for (var index = 0; index < session.Cases.Count; index++)
 			{
 				if (cancellationToken.IsCancellationRequested)
 				{
 					return;
 				}
 
-				try
-				{
-					reporter.JourneyCompleted(JourneyRunner.Run(driver, testCase, manager, reporter));
-				}
-				catch when (cancellationToken.IsCancellationRequested)
+				var testCase = session.Cases[index];
+				if (RunJourney(driver, testCase) is not { } result)
 				{
 					return;
 				}
-				catch (Exception ex)
+
+				if (result.Passed || driver.IsSessionAlive())
 				{
-					// Infrastructure failures (Appium server unreachable, driver crash, etc.) must fail
-					// the journey rather than escape to the runtime — an unhandled exception here would
-					// SIGABRT the process and skip the finally block that disposes the Appium server,
-					// orphaning its child process.
-					reporter.JourneyCompleted(new JourneyResult(testCase, false, TimeSpan.Zero, ex.Message, ex));
+					reporter.JourneyCompleted(result);
+					continue;
 				}
+
+				var remaining = session.Cases.Count - index;
+				if (recoveriesLeft == 0)
+				{
+					reporter.FixtureSkipped(
+						session.Config,
+						remaining,
+						$"its session died {SessionRecoveryAttempts} times, so its device is not fit to run on."
+					);
+					return;
+				}
+
+				recoveriesLeft--;
+				if (ReplaceSession() is not { } replacement)
+				{
+					driver = null;
+					reporter.FixtureSkipped(session.Config, remaining, "its session died and would not reopen.");
+					return;
+				}
+
+				driver = replacement;
+
+				// The journey ran against a session that was already dying, so its result describes
+				// the session rather than the app.
+				if (RunJourney(driver, testCase) is not { } rerun)
+				{
+					return;
+				}
+
+				reporter.JourneyCompleted(rerun);
 			}
 		}
 		finally
 		{
-			QuitDriver(driver, cancellationToken);
+			if (driver is not null)
+			{
+				QuitDriver(driver, cancellationToken);
+			}
+		}
+
+		// Returns the journey's outcome, or null once the reader has interrupted the run.
+		JourneyResult? RunJourney(TestDriver on, TestCase testCase)
+		{
+			try
+			{
+				return JourneyRunner.Run(on, testCase, manager, reporter);
+			}
+			catch when (cancellationToken.IsCancellationRequested)
+			{
+				return null;
+			}
+			catch (Exception ex)
+			{
+				// Infrastructure failures (Appium server unreachable, driver crash, etc.) must fail
+				// the journey rather than escape to the runtime — an unhandled exception here would
+				// SIGABRT the process and skip the finally block that disposes the Appium server,
+				// orphaning its child process.
+				return new JourneyResult(testCase, false, TimeSpan.Zero, ex.Message, ex);
+			}
+		}
+
+		// Closes the dead session and opens another on the same device, or returns null when the
+		// device will not take one. The backend is bound to the device rather than to the session,
+		// so the replacement inherits it.
+		TestDriver? ReplaceSession()
+		{
+			QuitDriver(driver!, cancellationToken);
+			var replacement = TryStartSession(
+				session.Config,
+				manager,
+				session.BackendUrlVariable,
+				reporter,
+				out var error
+			);
+			if (replacement is null)
+			{
+				RunReporter.Note($"{session.Config}: {error}");
+				return null;
+			}
+
+			replacement.Backend = driver!.Backend;
+			session.Config.OnBeforeTests(replacement, replacement.GetDeviceId());
+			return replacement;
 		}
 	}
 

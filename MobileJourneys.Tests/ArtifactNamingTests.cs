@@ -58,6 +58,19 @@ public sealed class ArtifactNamingTests
 	}
 
 	[Test]
+	public void ErrorTextIsAFailureArtifactOfItsOwnStepAndJourney()
+	{
+		var fileName = ArtifactNaming.ErrorTextFileName(Step);
+
+		// Unrecognised, it would read as an orphan to the extraneous scan and survive a rerun's cleanup.
+		_ = ArtifactNaming.IsFailureArtifact(fileName).Should().BeTrue();
+		_ = ArtifactNaming.IsFailureArtifactForStep(fileName, "01 Step", "Journey").Should().BeTrue();
+		_ = ArtifactNaming.IsFailureArtifactForJourney(fileName, "Journey").Should().BeTrue();
+		_ = ArtifactNaming.IsBaseline(fileName).Should().BeFalse();
+		_ = ArtifactNaming.ParseFailureArtifact(fileName)!.Kind.Should().Be("error");
+	}
+
+	[Test]
 	public void NonDiffArtifactsCarryNoPixelCount()
 	{
 		_ = ArtifactNaming.ParseFailureArtifact("01 Step [Journey].new.png")!.DiffPixelCount.Should().BeNull();

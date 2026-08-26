@@ -283,6 +283,45 @@ public sealed class ScreenshotManagerTests
 		_ = result.Passed.Should().BeFalse();
 	}
 
+	[Test]
+	public void WriteFailScreenshotStoresTheDetailsInTheImageItWrote()
+	{
+		var storage = new InMemoryScreenshotStorage();
+		var manager = new ScreenshotManager(storage);
+		var config = BuildConfig();
+		var key = new TestStep(config, "Journey", "01 Step", "Journey");
+
+		using var stream = new MemoryStream();
+		new Image<Rgb24>(10, 10).SaveAsPng(stream);
+		_ = manager.WriteFailScreenshot(key, "boom", stream.ToArray(), "System.Exception: boom");
+
+		using var written = Image.Load(storage.ReadRaw(config, "Journey", "01 Step [Journey]_FAIL_boom.png"));
+		_ = ImageHelpers.GetFailureDetails(written).Should().Be("System.Exception: boom");
+	}
+
+	[Test]
+	public void WriteFailScreenshotKeepsTheDetailsWhenTheCaptureFailedToo()
+	{
+		var storage = new InMemoryScreenshotStorage();
+		var manager = new ScreenshotManager(storage);
+		var config = BuildConfig();
+		var key = new TestStep(config, "Journey", "01 Step", "Journey");
+
+		// A dead session answers a screenshot request the same way it answers everything else, so the
+		// failure that most needs explaining is the one arriving with no image to explain it in.
+		const string Details = "OpenQA.Selenium.WebDriverException: the instrumentation process is not running\nline two";
+		_ = manager.WriteFailScreenshot(key, "sanitized and truncated", [], Details);
+
+		_ = storage
+			.ListAllFiles(config, "Journey")
+			.Should()
+			.BeEquivalentTo("01 Step [Journey]_FAIL_sanitized and truncated.png", "01 Step [Journey].ERROR.txt");
+		_ = System
+			.Text.Encoding.UTF8.GetString(storage.ReadRaw(config, "Journey", "01 Step [Journey].ERROR.txt"))
+			.Should()
+			.Be(Details);
+	}
+
 	private static void PaintColumns(Image<Rgb24> image, int fromX, int toX, Rgb24 color) =>
 		image.ProcessPixelRows(accessor =>
 		{
