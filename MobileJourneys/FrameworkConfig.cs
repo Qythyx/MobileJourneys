@@ -48,6 +48,15 @@ public sealed record FrameworkConfig(
 	public sealed record BackendSetup(Func<PlatformConfig, string, IJourneyBackend> Create, string UrlVariable);
 
 	/// <summary>
+	/// Finds the fixture named by its <see cref="PlatformConfig.DisplayName"/>, which is how a
+	/// fixture is named by anything outside this process — a page's request, a runner's event.
+	/// </summary>
+	/// <param name="displayName">The display name to look for.</param>
+	/// <returns>The fixture, or <c>null</c> when the matrix holds none of that name.</returns>
+	public PlatformConfig? FindPlatform(string? displayName) =>
+		PlatformConfigs.FirstOrDefault(platform => platform.DisplayName == displayName);
+
+	/// <summary>
 	/// Finds screenshot files no journey references — see <see cref="ScreenshotStorage.FindExtraneous"/>.
 	/// </summary>
 	/// <param name="deleteExtraneous">When <c>true</c>, deletes the extraneous files after collecting them.</param>

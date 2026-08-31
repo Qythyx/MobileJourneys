@@ -30,10 +30,14 @@ public static class ScreenshotViewer
 
 	private static readonly JsonSerializerOptions ResponseOptions = new();
 
-	/// <summary>Guards <see cref="jobs"/> and the single-rerun-at-a-time rule.</summary>
+	/// <summary>Guards <see cref="current"/> and the single-rerun-at-a-time rule.</summary>
 	private static readonly Lock RerunGate = new();
 
-	private static readonly Dictionary<string, RerunJob> jobs = [];
+	/// <summary>
+	/// The most recent rerun, running or finished: the one a page can still address, and the one the
+	/// next rerun replaces.
+	/// </summary>
+	private static RerunJob? current;
 
 	/// <summary>
 	/// Writes <c>viewer/index.html</c> and <c>viewer/manifest.js</c> under the screenshots root,
@@ -217,7 +221,7 @@ public static class ScreenshotViewer
 		var id = context.Request.QueryString[parameterName];
 		lock (RerunGate)
 		{
-			return id is not null && jobs.TryGetValue(id, out var found) ? found : null;
+			return current is { } job && job.Id == id ? job : null;
 		}
 	}
 
@@ -305,7 +309,7 @@ public static class ScreenshotViewer
 			case "accept" or "reject":
 			{
 				var request = JsonSerializer.Deserialize<StepRequest>(body, RequestOptions);
-				var platform = FindPlatform(config, request?.Config);
+				var platform = config.FindPlatform(request?.Config);
 				if (request is null || platform is null)
 				{
 					TryRespond(context, 400, "text/plain", Encoding.UTF8.GetBytes("bad request"));
@@ -338,7 +342,7 @@ public static class ScreenshotViewer
 			case "delete-extraneous":
 			{
 				var request = JsonSerializer.Deserialize<FileRequest>(body, RequestOptions);
-				var platform = FindPlatform(config, request?.Config);
+				var platform = config.FindPlatform(request?.Config);
 				if (request is null || platform is null)
 				{
 					TryRespond(context, 400, "text/plain", Encoding.UTF8.GetBytes("bad request"));
@@ -364,7 +368,7 @@ public static class ScreenshotViewer
 				StartRerun(context, config, storage, JsonSerializer.Deserialize<RerunRequest>(body, RequestOptions));
 				return;
 			case "rerun-all":
-				StartRerunAll(context, JsonSerializer.Deserialize<RerunAllRequest>(body, RequestOptions));
+				StartRerunAll(context, config, JsonSerializer.Deserialize<RerunAllRequest>(body, RequestOptions));
 				return;
 			default:
 				TryRespond(context, 404, "text/plain", Encoding.UTF8.GetBytes("unknown action"));
@@ -399,7 +403,7 @@ public static class ScreenshotViewer
 		{
 			"all" => [.. config.PlatformConfigs],
 			"failed" => [.. config.PlatformConfigs.Where(p => storage.HasFailureArtifacts(p, journey))],
-			_ => FindPlatform(config, request.Config) is { } single ? [single] : [],
+			_ => config.FindPlatform(request.Config) is { } single ? [single] : [],
 		};
 
 		if (platforms.Count == 0)
@@ -417,6 +421,7 @@ public static class ScreenshotViewer
 
 		LaunchRerun(
 			context,
+			config,
 			$"{journey.Name} on {string.Join(", ", platforms.Select(p => p.DisplayName))}",
 			[],
 			["--journey", journey.Name, .. scopeArgs]
@@ -431,13 +436,15 @@ public static class ScreenshotViewer
 	/// changes). The two combine.
 	/// </summary>
 	/// <param name="context">The request to respond to.</param>
+	/// <param name="config">Framework configuration providing the platforms the run reports against.</param>
 	/// <param name="request">Whether to limit to failing journeys and/or rebuild the app first.</param>
-	private static void StartRerunAll(HttpListenerContext context, RerunAllRequest? request)
+	private static void StartRerunAll(HttpListenerContext context, FrameworkConfig config, RerunAllRequest? request)
 	{
 		var failed = request?.Failed ?? false;
 		var embed = request?.Embed ?? false;
 		LaunchRerun(
 			context,
+			config,
 			(failed ? "failed journeys" : "all journeys") + (embed ? " (rebuilding app)" : ""),
 			embed ? ["-p:EmbedAssemblies=true"] : [],
 			failed ? ["--rerun"] : []
@@ -450,11 +457,13 @@ public static class ScreenshotViewer
 	/// fight over the simulators — so this answers 409 when one is already going.
 	/// </summary>
 	/// <param name="context">The request to answer with the new job's id, or an error.</param>
+	/// <param name="config">Framework configuration providing the platforms the run reports against.</param>
 	/// <param name="description">Human-readable summary of what is being rerun, shown on the page.</param>
 	/// <param name="buildArgs">MSBuild properties for <c>dotnet run</c> itself, before the <c>--</c>.</param>
 	/// <param name="runnerArgs">Arguments for the runner, after the <c>--</c> — the journey selection, or <c>--rerun</c>.</param>
 	private static void LaunchRerun(
 		HttpListenerContext context,
+		FrameworkConfig config,
 		string description,
 		IEnumerable<string> buildArgs,
 		IEnumerable<string> runnerArgs
@@ -467,16 +476,17 @@ public static class ScreenshotViewer
 			return;
 		}
 
-		var job = new RerunJob();
+		var console = new RerunConsole(config);
+		var job = new RerunJob(console);
 		lock (RerunGate)
 		{
-			if (jobs.Values.Any(j => j.Running))
+			if (current is { Running: true })
 			{
 				TryRespond(context, 409, "text/plain", Encoding.UTF8.GetBytes("a rerun is already running"));
 				return;
 			}
 
-			jobs[job.Id] = job;
+			current = job;
 		}
 
 		var startInfo = new ProcessStartInfo("dotnet")
@@ -508,6 +518,7 @@ public static class ScreenshotViewer
 			startInfo.ArgumentList.Add(arg);
 		}
 
+		RerunConsole.Announce(description);
 		job.Append($"$ dotnet {string.Join(" ", startInfo.ArgumentList.Select(Quote))}");
 		var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
 		process.OutputDataReceived += (_, e) => job.Append(e.Data);
@@ -543,9 +554,6 @@ public static class ScreenshotViewer
 	}
 
 	private static string Quote(string argument) => argument.Contains(' ') ? $"\"{argument}\"" : argument;
-
-	private static PlatformConfig? FindPlatform(FrameworkConfig config, string? displayName) =>
-		config.PlatformConfigs.FirstOrDefault(p => p.DisplayName == displayName);
 
 	private static void TryRespond(
 		HttpListenerContext context,
@@ -606,7 +614,8 @@ public static class ScreenshotViewer
 	/// A running or finished <c>dotnet run</c> rerun: the events it has reported so far, and the
 	/// console output collected from it.
 	/// </summary>
-	private sealed class RerunJob
+	/// <param name="console">Shows the same run on the server's own console as it goes.</param>
+	private sealed class RerunJob(RerunConsole console)
 	{
 		private readonly List<string> lines = [];
 		private readonly List<string> events = [];
@@ -642,6 +651,8 @@ public static class ScreenshotViewer
 					lines.RemoveRange(0, lines.Count - MaxJobLines);
 				}
 			}
+
+			console.Line(line.TrimEnd());
 		}
 
 		/// <summary>Records an event the run reported, and wakes everyone waiting for one.</summary>
@@ -653,6 +664,8 @@ public static class ScreenshotViewer
 				events.Add(json);
 				Wake();
 			}
+
+			console.Consume(json);
 		}
 
 		/// <summary>
@@ -679,6 +692,8 @@ public static class ScreenshotViewer
 				);
 				Wake();
 			}
+
+			console.Finish(exitCode);
 		}
 
 		/// <summary>

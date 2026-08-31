@@ -314,7 +314,8 @@ public sealed record AndroidPlatformConfig(
 	/// An emulator answers <c>adb devices</c> well before Android is usable: the package manager is
 	/// still settling, and a session started in that window fails installing or launching a helper
 	/// app — most visibly as <c>Activity class {io.appium.settings/…} does not exist</c>. Waiting for
-	/// the boot to actually complete closes that window.
+	/// the boot to actually complete closes that window. A device starved off its transport by a
+	/// loaded host reports <c>device offline</c> and is waited out here too.
 	/// </remarks>
 	internal override void WaitUntilDevicesAreReady(TimeSpan timeout)
 	{
@@ -330,6 +331,9 @@ public sealed record AndroidPlatformConfig(
 		{
 			while (DateTime.UtcNow < deadline && !IsBootComplete(deviceId))
 			{
+				// adb keeps a device it dropped to "offline" there until the host kicks the transport,
+				// so polling alone never gets it back. A no-op when nothing is offline.
+				_ = ProcessRunner.RunWithResult(AdbPath, ["reconnect", "offline"]);
 				Thread.Sleep(BootPollInterval);
 			}
 		}

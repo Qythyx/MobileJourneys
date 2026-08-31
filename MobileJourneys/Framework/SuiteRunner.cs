@@ -20,8 +20,11 @@ public static class SuiteRunner
 	/// <summary>What an Android crash log says when the APK was built without embedded assemblies.</summary>
 	private const string MissingAssembliesMarker = "No assemblies found";
 
-	/// <summary>How many times to try opening a fixture's Appium session before abandoning it.</summary>
-	private const int SessionStartAttempts = 2;
+	/// <summary>
+	/// How many times to try opening a fixture's Appium session before abandoning it. A further
+	/// attempt costs the wait below; abandoning the fixture costs every journey selected for it.
+	/// </summary>
+	private const int SessionStartAttempts = 3;
 
 	/// <summary>
 	/// How many sessions a fixture may lose mid-run before it is abandoned. Sessions die
@@ -33,8 +36,11 @@ public static class SuiteRunner
 	/// <summary>How many lines of the Appium server's output to keep back for a post-mortem.</summary>
 	private const int AppiumOutputTailLines = 200;
 
-	/// <summary>How long to give a device to finish booting before retrying its session.</summary>
-	private static readonly TimeSpan DeviceReadyTimeout = TimeSpan.FromSeconds(90);
+	/// <summary>
+	/// How long to give a device to become usable before retrying its session. The wait returns as
+	/// soon as the device is ready, so only a fixture already in trouble pays for a generous one.
+	/// </summary>
+	private static readonly TimeSpan DeviceReadyTimeout = TimeSpan.FromMinutes(3);
 
 	/// <summary>Runs whatever the command line asked for.</summary>
 	/// <param name="config">The suite's journeys, fixtures, and storage.</param>
@@ -604,7 +610,12 @@ public static class SuiteRunner
 		}
 	}
 
-	private static bool IsInteractive { get; } =
+	/// <summary>
+	/// Whether the console is a terminal a reader is watching, and so can host a display that
+	/// redraws in place. Redirected output has no cursor to move, and a display that redraws into it
+	/// writes the whole thing again several times a second.
+	/// </summary>
+	internal static bool IsInteractive { get; } =
 		!Console.IsOutputRedirected
 		&& !Console.IsInputRedirected
 		&& Environment.GetEnvironmentVariable("NO_COLOR") is null
