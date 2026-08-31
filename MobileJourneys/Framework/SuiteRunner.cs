@@ -396,6 +396,10 @@ public static class SuiteRunner
 	)
 	{
 		error = string.Empty;
+		// Before the first attempt, not only between them: the retries exist to survive a session that
+		// fails, not to stand in for bringing the device up.
+		config.EnsureDevicesRunning();
+		config.WaitUntilDevicesAreReady(DeviceReadyTimeout);
 		for (var attempt = 1; attempt <= SessionStartAttempts; attempt++)
 		{
 			try

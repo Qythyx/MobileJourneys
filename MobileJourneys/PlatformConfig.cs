@@ -139,6 +139,13 @@ public abstract record PlatformConfig(
 	// --- Device readiness ---
 
 	/// <summary>
+	/// Brings this fixture's device up if it is not already running, so that the automation server
+	/// finds one rather than starting its own. Does nothing where the device is not this framework's
+	/// to start.
+	/// </summary>
+	internal virtual void EnsureDevicesRunning() { }
+
+	/// <summary>
 	/// Blocks until this platform's devices are far enough through boot that a session can be started
 	/// against them, or until <paramref name="timeout"/> elapses. Does nothing where a device reports
 	/// itself attached only once it is genuinely usable.

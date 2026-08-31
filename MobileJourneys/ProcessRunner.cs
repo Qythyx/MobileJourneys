@@ -56,6 +56,32 @@ internal static class ProcessRunner
 	}
 
 	/// <summary>
+	/// Starts a process expected to outlive this call, and returns as soon as it is running.
+	/// </summary>
+	/// <remarks>
+	/// Its output goes to <c>/dev/null</c> through a shell rather than to a pipe, because a pipe
+	/// would have to be drained for as long as the child lives — and once this process stopped
+	/// reading, the child would take a SIGPIPE on its next write. Inheriting the console instead is
+	/// no good either: the caller's display owns it.
+	/// </remarks>
+	/// <param name="fileName">The program to run.</param>
+	/// <param name="arguments">Its arguments, passed through without shell interpretation.</param>
+	public static void Start(string fileName, IReadOnlyList<string> arguments)
+	{
+		var psi = new ProcessStartInfo { FileName = "/bin/sh", UseShellExecute = false };
+		psi.ArgumentList.Add("-c");
+		psi.ArgumentList.Add("exec \"$0\" \"$@\" >/dev/null 2>&1");
+		psi.ArgumentList.Add(fileName);
+		foreach (var arg in arguments)
+		{
+			psi.ArgumentList.Add(arg);
+		}
+
+		using var process = new Process { StartInfo = psi };
+		_ = process.Start();
+	}
+
+	/// <summary>
 	/// Captures stdout/stderr/exit code. Returns <c>null</c> if the process fails to start.
 	/// Both streams are drained concurrently so a child writing &gt;64 KB to either pipe
 	/// can't deadlock against a serial reader.

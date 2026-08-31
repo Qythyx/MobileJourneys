@@ -42,13 +42,13 @@ public sealed record AndroidPlatformConfig(
 	/// <summary>The activity to launch on app start, falling back to <c>$"{AppIdentifier}.MainActivity"</c>.</summary>
 	public string ResolvedMainActivity => MainActivity ?? $"{AppIdentifier}.MainActivity";
 
-	private static string AdbPath =>
-		Path.Combine(
-			Environment.GetEnvironmentVariable("ANDROID_HOME")
-				?? throw new InvalidOperationException(MissingAndroidHomeMessage),
-			"platform-tools",
-			"adb"
-		);
+	private static string AndroidHome =>
+		Environment.GetEnvironmentVariable("ANDROID_HOME")
+		?? throw new InvalidOperationException(MissingAndroidHomeMessage);
+
+	private static string AdbPath => Path.Combine(AndroidHome, "platform-tools", "adb");
+
+	private static string EmulatorPath => Path.Combine(AndroidHome, "emulator", "emulator");
 
 	private const string MissingAndroidHomeMessage =
 		"ANDROID_HOME environment variable is not set. Install the Android SDK "
@@ -308,6 +308,27 @@ public sealed record AndroidPlatformConfig(
 	/// </remarks>
 	public override void StopForwardingPort(string deviceId, int port) =>
 		_ = RunAdb(deviceId, "reverse", "--remove", $"tcp:{port}");
+
+	/// <inheritdoc/>
+	/// <remarks>
+	/// Started here rather than left to Appium, which decides whether to launch by looking for the
+	/// AVD in <c>adb devices</c> — where a booting emulator does not appear, because Appium itself
+	/// launches it with <c>-delay-adb</c>. It therefore starts a second emulator on the same AVD
+	/// during the boot window, which is fatal to both. Asking the process table instead answers
+	/// correctly while the emulator is still coming up, and cannot block on a device that is wedged.
+	/// </remarks>
+	internal override void EnsureDevicesRunning()
+	{
+		// Anchored on a separator so one AVD is not matched by another that extends its name.
+		if (ProcessRunner.RunWithResult(PgrepPath, ["-f", $"qemu-system.*-avd {AvdName}( |$)"]) is { ExitCode: 0 })
+		{
+			return;
+		}
+
+		ProcessRunner.Start(EmulatorPath, ["-avd", AvdName]);
+	}
+
+	private const string PgrepPath = "/usr/bin/pgrep";
 
 	/// <inheritdoc/>
 	/// <remarks>
