@@ -147,7 +147,11 @@
 			pointer-events: none;
 		}
 
+		/* The badges themselves do take the pointer: each one says what it counts in a tooltip, and
+		   `pointer-events: none` would suppress it. A click on one still reaches the device button it
+		   is a child of, which is the button it belongs to. */
 		.seg .badge {
+			pointer-events: auto;
 			min-width: 16px;
 			padding: 0 4px;
 			border-radius: 8px;
@@ -185,7 +189,8 @@
 			border-left: 1px solid rgba(0, 0, 0, .3);
 		}
 
-		/* A running fixture's progress wears the failure badge's shape in the accent colour. */
+		/* A running fixture's countdown wears the failure badge's shape in the accent colour. It never
+		   turns red: red is the failure badge, which is shown alongside it throughout the run. */
 		.seg .badge.progress {
 			background: var(--accent);
 		}
@@ -196,14 +201,6 @@
 
 		.seg .badge.progress.starting {
 			background: var(--accent);
-		}
-
-		.seg .badge.progress.failing {
-			background: var(--fail);
-		}
-
-		.seg .badge.progress.failing .steps {
-			background: var(--fail2);
 		}
 
 		.seg .badge.progress.done {
@@ -934,6 +931,7 @@
 			let serverMode = false;    // the review server is reachable right now
 			let everServer = false;    // it was reachable at least once (distinguishes "died" from "static file")
 			let selected = 0;        // index into currentFailures(); -1 = nothing selected
+			let selectedKey = null;  // failureKey of that failure, so a re-scan can find it where it moved to
 			let resolved = null;     // a failure just cleared (rerun passed / accepted / discarded), shown in place
 			let zoomed = false;      // the z view is open
 			let chord = null, chordTimer = null, runEvents = null, clockTimer = null;
@@ -972,26 +970,67 @@
 			const failureKey = (f) => f.container + "|" + f.step + "|" + f.journey;
 			const nodeNameOf = (container) => container.slice(container.lastIndexOf("/") + 1);
 
+			// What the comparator concluded about one capture, which is all the page can tell two captures
+			// apart by: the artifacts it wrote, the size of the difference, and what it said about it.
+			// Byte equality is no use here — masked regions are excluded from the comparison, so two
+			// captures of the same screen routinely differ inside them and still fail identically.
+			const verdictOf = (g) => [...Object.keys(g.kinds).sort(), g.percent, g.pixels, g.failureText].join("|");
+
+			// One entry per failing step rather than per journey. Journeys share containers, and a step
+			// several of them walk stores one baseline but a failure artifact per journey — so the same
+			// screen would otherwise be triaged once per journey that reached it. Journeys whose captures
+			// reached the same verdict are that one screen failing one way and collapse into a single
+			// entry, which accepts or discards for all of them at once. A journey that reached a different
+			// verdict keeps its own entry: its scenario can genuinely change what the screen shows.
 			const failureGroups = (cfg) => {
-				const groups = new Map();
+				const byJourney = new Map();
 				for (const f of filesFor(cfg).failures) {
 					const key = f.container + " " + f.step + " " + f.journey;
-					if (!groups.has(key)) {
-						groups.set(key, {
-							container: f.container, step: f.step, journey: f.journey,
+					if (!byJourney.has(key)) {
+						byJourney.set(key, {
+							container: f.container, step: f.step, journey: f.journey, journeys: [f.journey],
 							kinds: {}, percent: null, pixels: null, failureText: "",
 						});
 					}
-					const g = groups.get(key);
+					const g = byJourney.get(key);
 					g.kinds[f.kind] = f.file;
 					if (f.percent != null) { g.percent = f.percent; }
 					if (f.pixels != null) { g.pixels = f.pixels; }
 					if (f.details) { g.failureText = f.details; }
 				}
-				return [...groups.entries()].sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0).map((e) => e[1]);
+				// Folded in sorted order, so the entry that represents a collapsed group — the one whose
+				// artifacts the panes show — is always its alphabetically first journey, and the list stays
+				// in the order it had before any collapsing.
+				const groups = new Map();
+				for (const [, g] of [...byJourney.entries()].sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)) {
+					const verdictKey = g.container + " " + g.step + " " + verdictOf(g);
+					const shown = groups.get(verdictKey);
+					if (shown) { shown.journeys.push(g.journey); }
+					else { groups.set(verdictKey, g); }
+				}
+				return [...groups.values()];
 			};
+			// How a failure names the journeys it stands for.
+			const journeyLabel = (f) => f.journeys.length === 1 ? f.journey : plural(f.journeys.length, "journey");
 			const currentFailures = () => failureGroups(config);
 			const selectedFailure = () => currentFailures()[selected];
+
+			// Selecting records which failure it is, not only where it sat: the list is rebuilt from disk on
+			// every re-scan, and a rerun that fails a step sorting ahead of this one moves it.
+			function setSelected(index) {
+				selected = index;
+				const f = currentFailures()[index];
+				selectedKey = f ? failureKey(f) : null;
+			}
+			// Re-find the selection after a re-scan. Gone from the list means it was resolved — accepted,
+			// discarded, or passed on a rerun — and the index it vacated now holds the next failure along,
+			// which is what carries triage forward.
+			function resolveSelection() {
+				if (selected < 0) { return; }
+				const fails = currentFailures();
+				const found = fails.findIndex((f) => failureKey(f) === selectedKey);
+				setSelected(found >= 0 ? found : Math.min(selected, fails.length - 1));
+			}
 
 			// A journey-end chip only earns its space when the node is not already named after it.
 			const journeyEnds = (() => {
@@ -1053,8 +1092,7 @@
 				resolved = null;
 				// Keep the same failure selected when this device fails at that same step too (so triaging a
 				// screen follows you device to device); otherwise select nothing.
-				const fails = currentFailures();
-				selected = prev ? fails.findIndex((x) => failureKey(x) === failureKey(prev)) : -1;
+				setSelected(prev ? currentFailures().findIndex((x) => failureKey(x) === failureKey(prev)) : -1);
 				closeZoom();
 				render();
 				// No focusSelected: the tree layout is identical across devices, so keeping the current
@@ -1233,14 +1271,17 @@
 			}
 			const kindLabel = { baseline: "baseline", new: "new capture", diff: "diff (white = changed)", fail: "failure screenshot" };
 			const kindFile = (f, kind) => (kind === "baseline" ? f.step + ".png" : f.kinds[kind]);
-			// A diff needs the accept/discard explanation; any other failure is better served by the error
-			// that actually caused it.
+			// A new capture needs the accept/discard explanation; any other failure is better served by
+			// the error that actually caused it. A diff with no new capture is neither: the comparison
+			// ran, so saying it never got that far would be wrong, but there is nothing to accept.
 			function explainBlock(f) {
 				const el = document.createElement(f.kinds.new ? "div" : "pre");
 				el.className = f.kinds.new ? "explain" : "failtext";
 				el.textContent = f.kinds.new
 					? "Screenshot changed. Accept replaces the baseline with the new capture; Discard deletes this run's artifacts and keeps the baseline."
-					: f.failureText || "The step failed before a comparison could happen; no details were recorded.";
+					: f.failureText || (f.kinds.diff
+						? "The capture differed from the baseline, but no new capture was kept, so there is nothing to accept. The baseline is usually missing under this step's current name \u2014 check whether the step was renamed."
+						: "No failure details were recorded for this step.");
 				return el;
 			}
 
@@ -1290,8 +1331,9 @@
 
 			async function act(action, f) {
 				if (!serverMode) { toast("start with --review to enable this"); return; }
-				if (!(await api(action, { config, container: f.container, step: f.step, journey: f.journey }))) { return; }
-				const message = action === "accept" ? "Accepted " + f.step : "Discarded " + f.step;
+				if (!(await api(action, { config, container: f.container, step: f.step, journeys: f.journeys }))) { return; }
+				const message = (action === "accept" ? "Accepted " : "Discarded ") + f.step
+					+ (f.journeys.length > 1 ? ` for ${plural(f.journeys.length, "journey")}` : "");
 				if (zoomed) {
 					// Stay in triage: with no resolvedLabel, refresh advances `selected` to the next failure
 					// (the resolved one drops out of the list) and re-opens the zoom on it — or closes the
@@ -1316,7 +1358,8 @@
 				const head = document.createElement("div");
 				head.className = "zhead";
 				const b = document.createElement("b");
-				b.textContent = f.step + " — " + f.journey;
+				b.textContent = f.step + " — " + journeyLabel(f);
+				b.title = f.journeys.join("\n");
 				const where = document.createElement("span");
 				where.style.color = "var(--muted)";
 				where.textContent = config + "/" + f.container;
@@ -1516,23 +1559,23 @@
 
 			function selectFailure(f) {
 				const i = currentFailures().findIndex((x) => failureKey(x) === failureKey(f));
-				if (i >= 0) { resolved = null; selected = i; render(); focusSelected(true); }
+				if (i >= 0) { resolved = null; setSelected(i); render(); focusSelected(true); }
 			}
 			// Click a failed thumbnail → select it and open the zoom/triage view straight away.
 			function triageFailure(f) {
 				const i = currentFailures().findIndex((x) => failureKey(x) === failureKey(f));
-				if (i >= 0) { resolved = null; selected = i; render(); openZoom(); }
+				if (i >= 0) { resolved = null; setSelected(i); render(); openZoom(); }
 			}
 			function moveSelection(delta) {
 				const fails = currentFailures();
 				if (fails.length === 0) { toast("no failures on this device"); return; }
 				resolved = null;
-				selected = (selected + delta + fails.length) % fails.length;
+				setSelected((selected + delta + fails.length) % fails.length);
 				render();
 				focusSelected(true);
 				if (zoomed) { openZoom(); }
 				const f = fails[selected];
-				toast(`${selected + 1}/${fails.length} · ${f.step} — ${f.journey}`);
+				toast(`${selected + 1}/${fails.length} · ${f.step} — ${journeyLabel(f)}`);
 			}
 
 			// ---------- live rerun progress ----------
@@ -1607,12 +1650,12 @@
 			}
 			// One fixture's counts, keyed by device. `steps` above is keyed by container/step because it
 			// paints thumbnails, which collapses a step several journeys share into one entry — so it can
-			// never count how many steps ran. `verdicts` keys by journey too, so it counts each step once
+			// never count how many steps ran. `seen` keys by journey too, so it counts each step once
 			// even when a journey runs again after its session was replaced.
 			function fixtureProgress(cfg) {
 				let p = run.progress.get(cfg);
 				if (!p) {
-					p = { journeysTotal: 0, stepsTotal: 0, journeysDone: 0, stepsDone: 0, failed: 0, verdicts: new Map(), ready: false, skipReason: null, retryReason: null, firstStepAt: 0 };
+					p = { journeysTotal: 0, stepsTotal: 0, journeysDone: 0, stepsDone: 0, seen: new Set(), ready: false, skipReason: null, retryReason: null, firstStepAt: 0 };
 					run.progress.set(cfg, p);
 				}
 				return p;
@@ -1667,11 +1710,8 @@
 						// Each fixture's own clock: they reach their first step minutes apart, so a rate
 						// measured from the run's start would badly underestimate a late starter.
 						if (!p.firstStepAt) { p.firstStepAt = Date.now(); }
-						const verdictKey = ev.container + "/" + ev.step + "/" + ev.journey;
-						if (!p.verdicts.has(verdictKey)) { p.stepsDone++; }
-						else if (!p.verdicts.get(verdictKey)) { p.failed--; }
-						if (!ev.passed) { p.failed++; }
-						p.verdicts.set(verdictKey, ev.passed);
+						const stepKey = ev.container + "/" + ev.step + "/" + ev.journey;
+						if (!p.seen.has(stepKey)) { p.seen.add(stepKey); p.stepsDone++; }
 						if (run.overlay) { applyProgress(); }
 						break;
 					}
@@ -1933,13 +1973,13 @@
 					return;
 				}
 
-				const fails = currentFailures();
-				const clearedCurrent = resolvedLabel && wasOn && !fails.some((f) => failureKey(f) === failureKey(wasOn));
+				const clearedCurrent = resolvedLabel && wasOn
+					&& !currentFailures().some((f) => failureKey(f) === failureKey(wasOn));
 				if (clearedCurrent) {
 					resolved = { container: wasOn.container, step: wasOn.step, journey: wasOn.journey, label: resolvedLabel };
-					selected = -1;
-				} else if (selected >= fails.length) {
-					selected = Math.max(0, fails.length - 1);
+					setSelected(-1);
+				} else {
+					resolveSelection();
 				}
 				render();
 				if (zoomed) { if (selectedFailure()) { openZoom(); } else { closeZoom(); } }
@@ -1957,8 +1997,7 @@
 					new Function(await res.text())();
 					Object.assign(M, window.MANIFEST);
 				} catch { return; }
-				const fails = currentFailures();
-				if (selected >= fails.length) { selected = Math.max(0, fails.length - 1); }
+				resolveSelection();
 				render();
 				if (zoomed && selectedFailure()) { openZoom(); }
 			}
@@ -1986,24 +2025,24 @@
 				return s;
 			}
 
-			// A live run owns the badges: what is on disk is mid-rewrite, and the tree is already painting
-			// this run's passes and failures per thumbnail. Bringing the devices up takes minutes, so the
-			// badge says so from the moment the run is requested rather than waiting for a first result.
+			// What a running fixture has left to do, counting down to 0 | 0. Bringing the devices up takes
+			// minutes, so the badge says so from the moment the run is requested rather than waiting for a
+			// first result.
 			function progressBadge(cfg) {
 				const p = run.progress.get(cfg);
 				if (!p) { return wordBadge("starting", "starting…", "waiting for the runner to start"); }
 				if (p.skipReason) { return wordBadge("skipped", "skipped", p.skipReason); }
 				if (p.retryReason && !p.ready) { return wordBadge("retrying", "retrying…", p.retryReason); }
 				if (!p.ready) { return wordBadge("starting", "starting…", `${cfg} — bringing the device up`); }
+				const journeysLeft = p.journeysTotal - p.journeysDone;
+				const stepsLeft = p.stepsTotal - p.stepsDone;
 				const badge = splitBadge(
 					"progress",
-					`${p.journeysDone}/${p.journeysTotal}`,
-					`${p.stepsDone}/${p.stepsTotal}`,
-					`${p.journeysDone}/${p.journeysTotal} journeys · ${p.stepsDone}/${p.stepsTotal} steps`
-						+ (p.failed > 0 ? ` · ${p.failed} failed` : "")
+					journeysLeft,
+					stepsLeft,
+					`still to run: ${plural(journeysLeft, "journey")} · ${plural(stepsLeft, "step")}`
 				);
-				if (p.failed > 0) { badge.classList.add("failing"); }
-				else if (p.journeysDone === p.journeysTotal) { badge.classList.add("done"); }
+				if (journeysLeft === 0) { badge.classList.add("done"); }
 				return badge;
 			}
 
@@ -2024,23 +2063,23 @@
 					box.className = "badges";
 					if (running && inRun.has(b.dataset.config)) {
 						box.appendChild(progressBadge(b.dataset.config));
-					} else if (running) {
-						// In a run it takes no part in — say nothing rather than report stale disk state.
-					} else {
-						const cfgFails = failureGroups(b.dataset.config);
-						const journeys = new Set(cfgFails.map((f) => f.journey)).size;
-						const steps = cfgFails.length;
-						const extra = filesFor(b.dataset.config).extraneous.length;
-						if (steps > 0) {
-							box.appendChild(splitBadge("", journeys, steps,
-								`${plural(journeys, "journey")} · ${plural(steps, "failed step")}`));
-						}
-						if (extra > 0) {
-							const s = document.createElement("span");
-							s.className = "badge extra";
-							s.textContent = extra;
-							box.appendChild(s);
-						}
+					}
+					// The red badge means one thing at every moment — what is failing right now — so it stays
+					// up during a run too. Mid-run that is a mix: steps this run has redone, and steps still
+					// carrying the artifacts of the last one. It settles as the run reaches them.
+					const cfgFails = failureGroups(b.dataset.config);
+					const journeys = new Set(cfgFails.flatMap((f) => f.journeys)).size;
+					if (cfgFails.length > 0) {
+						box.appendChild(splitBadge("", journeys, cfgFails.length,
+							`failing: ${plural(journeys, "journey")} · ${plural(cfgFails.length, "step")}`));
+					}
+					const extra = filesFor(b.dataset.config).extraneous.length;
+					if (extra > 0) {
+						const s = document.createElement("span");
+						s.className = "badge extra";
+						s.textContent = extra;
+						s.title = plural(extra, "extraneous file");
+						box.appendChild(s);
 					}
 					if (box.children.length > 0) { b.appendChild(box); }
 				});

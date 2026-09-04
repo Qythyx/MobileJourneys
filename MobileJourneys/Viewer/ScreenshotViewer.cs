@@ -310,32 +310,42 @@ public static class ScreenshotViewer
 			{
 				var request = JsonSerializer.Deserialize<StepRequest>(body, RequestOptions);
 				var platform = config.FindPlatform(request?.Config);
-				if (request is null || platform is null)
+				if (request is null || platform is null || request.Journeys is not { Count: > 0 })
 				{
 					TryRespond(context, 400, "text/plain", Encoding.UTF8.GetBytes("bad request"));
 					return;
 				}
 
-				if (!expected.IsExpectedStep(request.Container, request.Step, request.Journey))
+				// A step several journeys walk keeps a failure artifact per journey, and the page resolves
+				// the ones that failed identically together — so this names every journey it settles.
+				if (!request.Journeys.All(journey => expected.IsExpectedStep(request.Container, request.Step, journey)))
 				{
 					TryRespond(context, 400, "text/plain", Encoding.UTF8.GetBytes("unknown step"));
 					return;
 				}
 
-				var testStep = new TestStep(platform, request.Container, request.Step, request.Journey);
 				if (action == "accept")
 				{
-					var newBytes = storage.ReadNewScreenshot(testStep);
+					// One baseline serves every journey through the step, so it is written once — from the
+					// capture of the journey whose artifacts the page was showing.
+					var shown = new TestStep(platform, request.Container, request.Step, request.Journeys[0]);
+					var newBytes = storage.ReadNewScreenshot(shown);
 					if (newBytes is null)
 					{
 						TryRespond(context, 409, "text/plain", Encoding.UTF8.GetBytes("no .new capture on disk"));
 						return;
 					}
 
-					storage.WriteBaseline(testStep, newBytes);
+					storage.WriteBaseline(shown, newBytes);
 				}
 
-				storage.DeleteFailureArtifactsForStep(testStep);
+				foreach (var journey in request.Journeys)
+				{
+					storage.DeleteFailureArtifactsForStep(
+						new TestStep(platform, request.Container, request.Step, journey)
+					);
+				}
+
 				TryRespond(context, 200, "text/plain", Encoding.UTF8.GetBytes("ok"));
 				return;
 			}
@@ -602,7 +612,7 @@ public static class ScreenshotViewer
 		return reader.ReadToEnd();
 	}
 
-	private sealed record StepRequest(string Config, string Container, string Step, string Journey);
+	private sealed record StepRequest(string Config, string Container, string Step, IReadOnlyList<string> Journeys);
 
 	private sealed record FileRequest(string Config, string Container, string File);
 
