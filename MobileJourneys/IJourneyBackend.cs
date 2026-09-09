@@ -22,4 +22,11 @@ public interface IJourneyBackend : IDisposable
 	/// </summary>
 	/// <param name="environment">The environment the app is about to launch with.</param>
 	void ServeEnvironment(IJourneyEnvironment environment);
+
+	/// <summary>
+	/// Has the app take input focus away from whatever holds it. Reached for after typing into an
+	/// input the platform's keyboard cannot leave, so no caret survives into the screenshot and the
+	/// app sees the input left, as it would under a customer's next tap.
+	/// </summary>
+	void ReleaseInputFocus();
 }

@@ -155,11 +155,29 @@ public abstract record PlatformConfig(
 
 	// --- Keyboard / alerts ---
 
-	internal virtual void DismissKeyboard(AppiumDriver driver) => driver.HideKeyboard();
+	/// <summary>
+	/// Finishes typing the way a customer does, with the keyboard's confirm key, so the app sees the
+	/// input completed and the keyboard goes.
+	/// </summary>
+	/// <param name="driver">The session whose keyboard is up.</param>
+	/// <returns>
+	/// Whether the input was left as well. <c>false</c> means the keyboard is down but the input still
+	/// holds focus, because the platform offers no key that leaves it.
+	/// </returns>
+	internal abstract bool DismissKeyboard(AppiumDriver driver);
 
 	internal abstract void DismissDefaultAlert(IAlert alert);
 
 	internal abstract By GetAlertButtonLocator(string buttonLabel);
+
+	/// <summary>
+	/// Answers the system permission prompt the app raises on its first launch after an install, if
+	/// one is showing. Must leave an alert the app itself raised alone: the first journey on a
+	/// fixture may start on one. Does nothing where the session grants permissions at install.
+	/// </summary>
+	/// <param name="driver">The session to look for the prompt in.</param>
+	/// <returns>Whether a prompt was answered.</returns>
+	internal virtual bool AnswerFirstLaunchPrompt(AppiumDriver driver) => false;
 
 	// --- Crash logs / device logs ---
 

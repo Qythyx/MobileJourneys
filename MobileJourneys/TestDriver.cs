@@ -118,14 +118,18 @@ public sealed class TestDriver(
 		// A permission prompt the app raises on first launch covers the screen, so the first journey on
 		// a freshly installed fixture fails on every step behind it. Answered once per fixture, because
 		// the answer sticks for the install and this wait costs its full timeout when nothing appears.
-		if (!_firstLaunchAlertHandled)
+		// Whatever the app had queued behind the prompt comes up as it goes, so the settling is redone.
+		if (!_firstLaunchPromptAnswered)
 		{
-			_firstLaunchAlertHandled = true;
-			DismissAlertIfPresent(TimeSpan.FromSeconds(3));
+			_firstLaunchPromptAnswered = true;
+			if (Config.AnswerFirstLaunchPrompt(App))
+			{
+				WaitUntilAppIsSettled();
+			}
 		}
 	}
 
-	private bool _firstLaunchAlertHandled;
+	private bool _firstLaunchPromptAnswered;
 
 	/// <summary>
 	/// Blocks until the freshly launched app is in the foreground and its accessibility tree has
@@ -442,8 +446,17 @@ public sealed class TestDriver(
 	/// <summary>Swipes right on the given scrollable element.</summary>
 	public void SwipeRight(string onElementId) => SwipeOnElement(onElementId, "right");
 
-	/// <summary>Dismisses the on-screen keyboard if present.</summary>
-	public void DismissKeyboard() => Config.DismissKeyboard(App);
+	/// <summary>
+	/// Finishes typing: the keyboard goes and the input is left, by the keyboard's own key where the
+	/// platform has one and otherwise by the backend asking the app.
+	/// </summary>
+	public void DismissKeyboard()
+	{
+		if (!Config.DismissKeyboard(App))
+		{
+			Backend?.ReleaseInputFocus();
+		}
+	}
 
 	/// <summary>Opens an in-app deep link via mobile: deepLink (Android) or App.OpenUrl (iOS).</summary>
 	public void OpenDeepLink(string url) => Config.OpenDeepLink(App, url);

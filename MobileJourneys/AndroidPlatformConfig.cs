@@ -95,6 +95,8 @@ public sealed record AndroidPlatformConfig(
 		options.AddAdditionalAppiumOption("avd", AvdName);
 		options.AddAdditionalAppiumOption("avdLaunchTimeout", AvdLaunchTimeoutMs);
 		options.AddAdditionalAppiumOption($"settings[{WaitForIdleSetting}]", WaitForIdleTimeoutMs);
+		// The keyboard is its own window, and typing ends by tapping its confirm key.
+		options.AddAdditionalAppiumOption("settings[enableMultiWindows]", true);
 	}
 
 	internal override AppiumDriver CreateDriver(AppiumOptions options) => new AndroidDriver(options);
@@ -141,6 +143,30 @@ public sealed record AndroidPlatformConfig(
 
 	internal override void PressHomeButton(AppiumDriver driver) =>
 		_ = driver.ExecuteScript("mobile: pressKey", new Dictionary<string, object> { ["keycode"] = 3 });
+
+	internal override bool DismissKeyboard(AppiumDriver driver)
+	{
+		if (!driver.IsKeyboardShown())
+		{
+			return true;
+		}
+
+		// The keyboard's own confirm key, as on iOS, so the app sees the entry completed. Hiding the
+		// keyboard from outside leaves the entry focused and its caret blinking through screenshots,
+		// and the driver's editor-action command switches input methods to deliver it, which has
+		// cost the window its navigation-bar inset. A multi-line editor's key only inserts a newline.
+		var confirmKeys = driver.FindElements(
+			By.XPath($"//*[@package!={XPathLiteral(AppIdentifier)} and (@content-desc='Done' or @content-desc='Go')]")
+		);
+		if (confirmKeys.Count == 0)
+		{
+			driver.HideKeyboard();
+			return false;
+		}
+
+		confirmKeys[0].Click();
+		return true;
+	}
 
 	internal override void DismissDefaultAlert(IAlert alert) => alert.Dismiss();
 
@@ -248,6 +274,10 @@ public sealed record AndroidPlatformConfig(
 			"echo 'chrome --no-first-run --disable-fre --no-default-browser-check' > /data/local/tmp/chrome-command-line"
 		);
 		_ = RunAdb(deviceId, "shell", "pm", "grant", "com.android.chrome", "android.permission.POST_NOTIFICATIONS");
+
+		// The spell checker underlines a typed test value it does not know, some time after the
+		// keyboard has gone, so whether a screenshot carries the underline is a race.
+		_ = RunAdb(deviceId, "shell", "settings", "put", "secure", "spell_checker_enabled", "0");
 	}
 
 	internal override void VerifyDependencies()

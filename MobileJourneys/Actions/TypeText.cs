@@ -1,7 +1,9 @@
 namespace MobileJourneys.Actions;
 
 /// <summary>
-/// Clears the target element and types the given text into it, then dismisses the keyboard.
+/// Focuses the target element, clears it and types the given text into it, then dismisses the
+/// keyboard. Focus moves the way it does under a customer's finger, so an input left for the next
+/// one sees its unfocus; setting text through the accessibility tree alone moves nothing.
 /// </summary>
 /// <remarks>
 /// On iOS, sending text that contains spaces is unreliable — the XCUITest backend occasionally
@@ -16,6 +18,7 @@ public sealed record TypeText(string AutomationId, string Text) : JourneyAction(
 	public override void Execute(TestDriver driver)
 	{
 		var element = driver.FindElement(AutomationId, TimeSpan.FromSeconds(5));
+		element.Click();
 		element.Clear();
 		element.SendKeys(Text);
 		driver.DismissKeyboard();

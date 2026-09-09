@@ -1,6 +1,7 @@
 using OpenQA.Selenium;
 using OpenQA.Selenium.Appium;
 using OpenQA.Selenium.Appium.iOS;
+using OpenQA.Selenium.Support.UI;
 
 namespace MobileJourneys;
 
@@ -83,16 +84,16 @@ public sealed record IosPlatformConfig(
 	internal override void PressHomeButton(AppiumDriver driver) =>
 		_ = driver.ExecuteScript("mobile: pressButton", new Dictionary<string, object> { ["name"] = "home" });
 
-	internal override void DismissKeyboard(AppiumDriver driver)
+	internal override bool DismissKeyboard(AppiumDriver driver)
 	{
 		// HideKeyboard() is unreliable on iOS 26+ — it may silently fail
 		// or throw. Try the MAUI Done button (input accessory toolbar added by
 		// MauiDoneAccessoryView for Editor/Picker controls) first, then fall
-		// back to the keyboard Return key for Entry controls.
+		// back to the keyboard Return key for Entry controls. Either resigns the input.
 		try
 		{
 			driver.FindElement(By.XPath("//XCUIElementTypeToolbar//XCUIElementTypeButton")).Click();
-			return;
+			return true;
 		}
 		catch
 		{
@@ -107,6 +108,8 @@ public sealed record IosPlatformConfig(
 		{
 			/* keyboard may not be visible */
 		}
+
+		return true;
 	}
 
 	internal override void DismissDefaultAlert(IAlert alert) =>
@@ -115,6 +118,46 @@ public sealed record IosPlatformConfig(
 		alert.Accept();
 
 	internal override By GetAlertButtonLocator(string buttonLabel) => By.Name(buttonLabel);
+
+	internal override bool AnswerFirstLaunchPrompt(AppiumDriver driver)
+	{
+		// A system prompt belongs to SpringBoard, outside the app's element tree, so only the alert
+		// endpoint sees it. The app's own alerts answer there too; the button tells them apart.
+		IEnumerable<object> buttons;
+		try
+		{
+			buttons = new WebDriverWait(driver, TimeSpan.FromSeconds(3)).Until(_ =>
+			{
+				try
+				{
+					return (IEnumerable<object>?)
+						driver.ExecuteScript(
+							"mobile: alert",
+							new Dictionary<string, object> { ["action"] = "getButtons" }
+						);
+				}
+				catch (WebDriverException)
+				{
+					return null;
+				}
+			});
+		}
+		catch (WebDriverTimeoutException)
+		{
+			return false;
+		}
+
+		if (!buttons.Any(button => button.ToString() == "Allow"))
+		{
+			return false;
+		}
+
+		_ = driver.ExecuteScript(
+			"mobile: alert",
+			new Dictionary<string, object> { ["action"] = "accept", ["buttonLabel"] = "Allow" }
+		);
+		return true;
+	}
 
 	internal override string? ReadCrashLog(string deviceId)
 	{
