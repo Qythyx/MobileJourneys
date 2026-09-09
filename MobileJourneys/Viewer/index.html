@@ -2150,9 +2150,13 @@
 					render();
 				}
 			}
+			// A port forward (VS Code Remote-SSH) accepts the connection before it learns the server is
+			// gone, so a ping can hang rather than fail. Hung pings fill the browser's per-origin connection
+			// limit, after which no ping is ever sent again and a returning server goes unnoticed. The
+			// timeout is shorter than the polling interval, so each ping settles before the next starts.
 			async function checkServer() {
 				try {
-					const res = await fetch("api/ping", { cache: "no-store" });
+					const res = await fetch("api/ping", { cache: "no-store", signal: AbortSignal.timeout(3000) });
 					setServerMode(res.ok);
 				} catch {
 					setServerMode(false);
