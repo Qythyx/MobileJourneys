@@ -15,6 +15,7 @@ internal sealed class ConsoleReporter : RunReporter
 	/// <inheritdoc/>
 	public override void StepCompleted(
 		TestStep step,
+		int worker,
 		int stepNumber,
 		int totalSteps,
 		string stepName,
@@ -25,7 +26,7 @@ internal sealed class ConsoleReporter : RunReporter
 		var mark = passed ? "[green]✓[/]" : "[red]✗[/]";
 		var name = Markup.Escape(step.JourneyName).PadRight(18);
 		var line =
-			$"  {mark} [dim]{Markup.Escape(Tag(step.Config))}[/] {name} [dim]{stepNumber}/{totalSteps}[/]  {Markup.Escape(stepName)}";
+			$"  {mark} [dim]{Markup.Escape(Tag(StepLabel(step.Config, worker)))}[/] {name} [dim]{stepNumber}/{totalSteps}[/]  {Markup.Escape(stepName)}";
 		lock (Gate)
 		{
 			AnsiConsole.MarkupLine(passed || detail is null ? line : $"{line} — [red]{Markup.Escape(detail)}[/]");
@@ -40,16 +41,27 @@ internal sealed class ConsoleReporter : RunReporter
 		var name = Markup.Escape(result.TestCase.Journey.Name).PadRight(18);
 		lock (Gate)
 		{
-			AnsiConsole.MarkupLine($"{mark} {Markup.Escape(Tag(result.TestCase.Config))} {name} [dim]{seconds}s[/]");
+			AnsiConsole.MarkupLine(
+				$"{mark} {Markup.Escape(Tag(FixtureLabel(result.TestCase.Config)))} {name} [dim]{seconds}s[/]"
+			);
 		}
 	}
 
 	/// <inheritdoc/>
-	public override void FixtureRetrying(PlatformConfig config, string reason)
+	public override void FixtureRetrying(PlatformConfig config, int worker, string reason)
 	{
 		lock (Gate)
 		{
-			AnsiConsole.MarkupLine($"[yellow]RETRY[/] {Markup.Escape($"{config} — {reason}")}");
+			AnsiConsole.MarkupLine($"[yellow]RETRY[/] {Markup.Escape($"{WorkerLabel(config, worker)} — {reason}")}");
+		}
+	}
+
+	/// <inheritdoc/>
+	public override void WorkerLost(PlatformConfig config, int worker, string reason)
+	{
+		lock (Gate)
+		{
+			AnsiConsole.MarkupLine($"[yellow]LOST[/] {Markup.Escape($"{WorkerLabel(config, worker)} — {reason}")}");
 		}
 	}
 
@@ -64,5 +76,13 @@ internal sealed class ConsoleReporter : RunReporter
 		}
 	}
 
-	private static string Tag(PlatformConfig config) => FixtureLabel(config).PadRight(TagWidth);
+	private static string Tag(string label) => label.PadRight(TagWidth);
+
+	/// <summary>Names a worker the short way, for a step line's tag.</summary>
+	private static string StepLabel(PlatformConfig config, int worker) =>
+		config.Instances == 1 ? FixtureLabel(config) : $"{FixtureLabel(config)} #{worker}";
+
+	/// <summary>Names a worker the long way, for lines that stand on their own.</summary>
+	private static string WorkerLabel(PlatformConfig config, int worker) =>
+		config.Instances == 1 ? config.ToString() : $"{config} worker {worker}";
 }

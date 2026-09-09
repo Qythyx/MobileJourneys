@@ -85,10 +85,13 @@ internal sealed class RerunConsole(FrameworkConfig config)
 		switch (type)
 		{
 			case "fixture-ready":
-				current.Ready(fixture);
+				current.Ready(fixture, Number(root, "worker"));
 				return;
 			case "fixture-retrying":
-				current.Retrying(fixture, Text(root, "reason") ?? string.Empty);
+				current.Retrying(fixture, Number(root, "worker"), Text(root, "reason") ?? string.Empty);
+				return;
+			case "worker-lost":
+				current.Lost(fixture, Number(root, "worker"), Text(root, "reason") ?? string.Empty);
 				return;
 			case "fixture-skipped":
 				current.Abandoned(fixture, Text(root, "reason") ?? string.Empty);
@@ -96,6 +99,7 @@ internal sealed class RerunConsole(FrameworkConfig config)
 			case "step-completed":
 				current.Step(
 					fixture,
+					Number(root, "worker"),
 					Text(root, "journey") ?? string.Empty,
 					Number(root, "number"),
 					Number(root, "totalSteps"),

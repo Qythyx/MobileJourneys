@@ -5,10 +5,10 @@ namespace MobileJourneys.Framework;
 
 /// <summary>
 /// A table that redraws in place: one row per platform fixture, showing how many of its journeys are
-/// done, still to come, and failed, plus the step it is on right now. Owns the wording of a row's
-/// current-activity cell as well as the layout, so both of its drivers — <see cref="LiveStatusReporter"/>
-/// for a run in this process, and the review server for the events a rerun posts back — render the
-/// same table.
+/// done, still to come, and failed, plus the step each of its workers is on right now. Owns the
+/// wording of a row's current-activity cell as well as the layout, so both of its drivers —
+/// <see cref="LiveStatusReporter"/> for a run in this process, and the review server for the events
+/// a rerun posts back — render the same table.
 /// </summary>
 /// <param name="fixtures">Each fixture the run will use, and how many journeys it will run.</param>
 internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int Total)> fixtures)
@@ -29,13 +29,18 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 
 	private readonly Dictionary<PlatformConfig, FixtureProgress> rows = fixtures.ToDictionary(
 		fixture => fixture.Config,
-		fixture => new FixtureProgress(RunReporter.FixtureLabel(fixture.Config), fixture.Total)
+		fixture => new FixtureProgress(
+			RunReporter.FixtureLabel(fixture.Config),
+			fixture.Total,
+			fixture.Config.Instances
+		)
 	);
 
-	/// <summary>One row of the table: a fixture's totals and what it is doing.</summary>
+	/// <summary>One row of the table: a fixture's totals and what each of its workers is doing.</summary>
 	/// <param name="name">The fixture's label.</param>
 	/// <param name="total">How many journeys it will run.</param>
-	private sealed class FixtureProgress(string name, int total)
+	/// <param name="workers">How many devices it runs on.</param>
+	private sealed class FixtureProgress(string name, int total, int workers)
 	{
 		public string Name { get; } = name;
 
@@ -46,12 +51,25 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 		public int Failed { get; set; }
 
 		/// <summary>
-		/// What the fixture is doing. Starts as the device coming up, since that is now the first
-		/// thing the table shows rather than something that finished before it appeared.
+		/// What each worker is doing, by index. Every worker starts as its device coming up, since
+		/// that is the first thing the table shows rather than something that finished before it
+		/// appeared.
 		/// </summary>
-		public string Current { get; set; } = "starting the device…";
+		public Dictionary<int, string> Current { get; } =
+			Enumerable.Range(1, workers).ToDictionary(worker => worker, _ => "starting the device…");
+
+		/// <summary>Text that stands in for every worker's line once the fixture as a whole has an outcome.</summary>
+		public string? Outcome { get; set; }
 
 		public bool Abandoned { get; set; }
+
+		public string Cell =>
+			Outcome
+			?? (
+				Current.Count == 1
+					? Current.Values.Single()
+					: string.Join('\n', Current.OrderBy(line => line.Key).Select(line => $"{line.Key}: {line.Value}"))
+			);
 	}
 
 	/// <summary>Keeps the table on screen, redrawing it, for as long as <paramref name="body"/> runs.</summary>
@@ -78,23 +96,50 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 			})
 			.ConfigureAwait(false);
 
-	/// <summary>Shows a fixture's device as up, with its journeys about to start.</summary>
-	/// <param name="config">The fixture that came up.</param>
-	public void Ready(PlatformConfig config) => SetCurrent(config, string.Empty);
+	/// <summary>Shows a worker's device as up, with its journeys about to start.</summary>
+	/// <param name="config">The fixture the worker belongs to.</param>
+	/// <param name="worker">The worker's 1-based index.</param>
+	public void Ready(PlatformConfig config, int worker) => SetCurrent(config, worker, string.Empty);
 
-	/// <summary>Shows a fixture as trying its session again.</summary>
-	/// <param name="config">The fixture being retried.</param>
+	/// <summary>Shows a worker as trying its session again.</summary>
+	/// <param name="config">The fixture the worker belongs to.</param>
+	/// <param name="worker">The worker's 1-based index.</param>
 	/// <param name="reason">Why the previous attempt failed.</param>
-	public void Retrying(PlatformConfig config, string reason) => SetCurrent(config, $"retrying — {reason}");
+	public void Retrying(PlatformConfig config, int worker, string reason) =>
+		SetCurrent(config, worker, $"retrying — {reason}");
 
-	/// <summary>Shows the step a fixture has just finished.</summary>
+	/// <summary>Shows the step a worker has just finished.</summary>
 	/// <param name="config">The fixture the step ran on.</param>
+	/// <param name="worker">The worker that ran it, 1-based.</param>
 	/// <param name="journeyName">The journey the step belongs to.</param>
 	/// <param name="stepNumber">The step's 1-based position.</param>
 	/// <param name="totalSteps">How many steps the journey has.</param>
 	/// <param name="stepName">The step's bare name.</param>
-	public void Step(PlatformConfig config, string journeyName, int stepNumber, int totalSteps, string stepName) =>
-		SetCurrent(config, $"{journeyName} {stepNumber}/{totalSteps} {stepName}");
+	public void Step(
+		PlatformConfig config,
+		int worker,
+		string journeyName,
+		int stepNumber,
+		int totalSteps,
+		string stepName
+	) => SetCurrent(config, worker, $"{journeyName} {stepNumber}/{totalSteps} {stepName}");
+
+	/// <summary>Shows a worker as gone for the rest of the run, its line kept so the others do not move.</summary>
+	/// <param name="config">The fixture the worker belonged to.</param>
+	/// <param name="worker">The worker's 1-based index.</param>
+	/// <param name="reason">Why it is gone.</param>
+	public void Lost(PlatformConfig config, int worker, string reason) =>
+		SetCurrent(config, worker, $"lost — {reason}");
+
+	/// <summary>The current-activity cell as the table renders it, one line per worker.</summary>
+	/// <param name="config">The fixture whose cell to read.</param>
+	internal string CurrentCell(PlatformConfig config)
+	{
+		lock (gate)
+		{
+			return rows[config].Cell;
+		}
+	}
 
 	/// <summary>Counts a finished journey against its fixture's totals.</summary>
 	/// <param name="config">The fixture the journey ran on.</param>
@@ -115,7 +160,7 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 				// what the fixture is doing.
 				if (row.Done == row.Total)
 				{
-					row.Current = Finished;
+					row.Outcome = Finished;
 				}
 			}
 		}
@@ -131,18 +176,18 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 			if (rows.TryGetValue(config, out var row))
 			{
 				row.Abandoned = true;
-				row.Current = reason;
+				row.Outcome = reason;
 			}
 		}
 	}
 
-	private void SetCurrent(PlatformConfig config, string text)
+	private void SetCurrent(PlatformConfig config, int worker, string text)
 	{
 		lock (gate)
 		{
 			if (rows.TryGetValue(config, out var row))
 			{
-				row.Current = text;
+				row.Current[worker] = text;
 			}
 		}
 	}
@@ -185,7 +230,7 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 					Count(row.Done, "green"),
 					Count(left, left == 0 ? "grey" : "default"),
 					Count(row.Failed, row.Failed == 0 ? "grey" : "red"),
-					new Markup($"[grey]{Markup.Escape(row.Current)}[/]").Ellipsis()
+					new Markup($"[grey]{Markup.Escape(row.Cell)}[/]").Ellipsis()
 				);
 			}
 		}

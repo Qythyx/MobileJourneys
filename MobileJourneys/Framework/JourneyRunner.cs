@@ -6,6 +6,7 @@ internal static class JourneyRunner
 {
 	public static JourneyResult Run(
 		TestDriver driver,
+		int worker,
 		TestCase testCase,
 		ScreenshotManager manager,
 		RunReporter reporter
@@ -97,7 +98,7 @@ internal static class JourneyRunner
 				failures.Add(new JourneyFailureException(message, journey, journeyStep, number, totalSteps, name, ex));
 			}
 
-			reporter.StepCompleted(testStep, number, totalSteps, name, stepPassed, detail);
+			reporter.StepCompleted(testStep, worker, number, totalSteps, name, stepPassed, detail);
 		}
 
 		stopwatch.Stop();

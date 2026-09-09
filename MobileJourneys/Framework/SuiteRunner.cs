@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using MobileJourneys.Viewer;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Appium.Service;
@@ -241,42 +242,34 @@ public static class SuiteRunner
 		return interrupted ? 1 : exitCode;
 	}
 
-	/// <summary>A fixture whose device is up, its app installed, and its journeys ready to run.</summary>
+	/// <summary>One of a fixture's devices and the worker index it reports under.</summary>
 	/// <param name="Config">The platform fixture.</param>
-	/// <param name="Cases">The journeys selected for it.</param>
-	/// <param name="Driver">Its live Appium session.</param>
+	/// <param name="Index">The worker's 1-based index within the fixture.</param>
+	/// <param name="DeviceId">The simulator UDID or emulator serial it runs on.</param>
 	/// <param name="BackendUrlVariable">
 	/// Name the app reads its backend URL from, kept so a replacement session can be opened on the
 	/// same terms as the first.
 	/// </param>
-	private sealed record FixtureSession(
-		PlatformConfig Config,
-		IReadOnlyList<TestCase> Cases,
-		TestDriver Driver,
-		string BackendUrlVariable
-	);
-
-	/// <summary>The outcome of trying to bring a fixture up.</summary>
-	/// <param name="Config">The platform fixture.</param>
-	/// <param name="Cases">The journeys selected for it.</param>
-	/// <param name="Driver">Its Appium session, or <c>null</c> when it could not be brought up.</param>
-	/// <param name="Failure">Why it could not be brought up, ready to print, or <c>null</c> on success.</param>
-	private sealed record FixtureStart(
-		PlatformConfig Config,
-		IReadOnlyList<TestCase> Cases,
-		TestDriver? Driver,
-		string? Failure
-	);
+	private sealed record Worker(PlatformConfig Config, int Index, string DeviceId, string BackendUrlVariable);
 
 	/// <summary>
-	/// Brings one fixture's device up and runs its journeys on it. Abandons the fixture, rather than
-	/// the run, when the device cannot host the suite.
+	/// Orders a fixture's journeys longest first, so that a long one is never picked up last and
+	/// left running alone while the fixture's other devices sit idle.
+	/// </summary>
+	/// <param name="cases">The journeys selected for one fixture.</param>
+	internal static IEnumerable<TestCase> LongestFirst(IEnumerable<TestCase> cases) =>
+		cases.OrderByDescending(testCase => testCase.Journey.ExpectedStepLocations().Count());
+
+	/// <summary>
+	/// Brings one fixture's devices up and runs its journeys across them, each device a worker
+	/// pulling the next journey from a shared queue. Abandons the fixture, rather than the run, when
+	/// no device can host the suite.
 	/// </summary>
 	/// <param name="config">The platform fixture to bring up.</param>
 	/// <param name="cases">The journeys selected for it.</param>
 	/// <param name="backendSetup">The suite's backend, or <c>null</c> for an app that needs none.</param>
-	/// <param name="reporter">Told what the fixture is doing, and when it has to be abandoned.</param>
-	/// <param name="manager">Screenshot storage the driver writes through.</param>
+	/// <param name="reporter">Told what each worker is doing, and when the fixture has to be abandoned.</param>
+	/// <param name="manager">Screenshot storage the drivers write through.</param>
 	/// <param name="cancellationToken">Cancelled when the reader interrupts the run.</param>
 	private static void StartAndRunFixture(
 		PlatformConfig config,
@@ -287,110 +280,145 @@ public static class SuiteRunner
 		CancellationToken cancellationToken
 	)
 	{
-		var start = StartFixture(
-			config,
-			cases,
-			manager,
-			backendSetup?.UrlVariable ?? string.Empty,
-			reporter,
-			cancellationToken
-		);
-		if (start.Driver is null)
+		IReadOnlyList<string> deviceIds;
+		try
 		{
-			reporter.FixtureSkipped(config, cases.Count, start.Failure ?? "the app did not start.");
+			deviceIds = config.StartDevices(DeviceReadyTimeout);
+		}
+		catch (InvalidOperationException ex)
+		{
+			reporter.FixtureSkipped(config, cases.Count, $"its devices could not be started: {ex.Message}");
 			return;
 		}
 
-		// The backend is built after the session, not before it, because it may have to bind itself to
-		// the device it serves and only a live session names that device.
-		IJourneyBackend? backend;
-		try
+		var queue = new ConcurrentQueue<TestCase>(LongestFirst(cases));
+		var started = 0;
+		var lost = new string?[deviceIds.Count];
+		var backendUrlVariable = backendSetup?.UrlVariable ?? string.Empty;
+		// Each worker minds the token itself and closes its own session on the way out, so the fixture
+		// waits for all of them rather than leaving one mid-cleanup when the run is interrupted.
+		Task.WaitAll([
+			.. deviceIds.Select(
+				(deviceId, index) =>
+					Task.Run(() =>
+					{
+						var worker = new Worker(config, index + 1, deviceId, backendUrlVariable);
+						var driver = StartWorker(
+							worker,
+							backendSetup,
+							reporter,
+							manager,
+							cancellationToken,
+							out var failure
+						);
+						if (driver is null)
+						{
+							lost[index] = failure;
+							reporter.WorkerLost(config, worker.Index, failure);
+							return;
+						}
+
+						_ = Interlocked.Increment(ref started);
+						lost[index] = RunWorker(worker, driver, queue, reporter, manager, cancellationToken);
+					})
+			),
+		]);
+
+		if (cancellationToken.IsCancellationRequested)
 		{
-			backend = backendSetup?.Create(config, start.Driver.GetDeviceId());
-		}
-		catch (Exception ex)
-		{
-			// Abandon the fixture rather than the run, as a failed session start does — and rather than
-			// escaping to the runtime, which would skip disposing the Appium server.
-			QuitDriver(start.Driver, cancellationToken);
-			reporter.FixtureSkipped(config, cases.Count, $"its backend failed to start: {ex.Message}");
 			return;
 		}
 
-		try
+		if (started == 0)
 		{
-			start.Driver.Backend = backend;
-			reporter.FixtureReady(config);
-			RunFixture(
-				new FixtureSession(config, cases, start.Driver, backendSetup?.UrlVariable ?? string.Empty),
-				reporter,
-				manager,
-				cancellationToken
-			);
+			reporter.FixtureSkipped(config, cases.Count, Verdict("none of its devices could host the app", lost));
 		}
-		finally
+		else if (!queue.IsEmpty)
 		{
-			try
-			{
-				backend?.Dispose();
-			}
-			catch (Exception ex)
-			{
-				RunReporter.Note($"{config}: the backend did not shut down cleanly — {ex.Message}");
-			}
+			reporter.FixtureSkipped(config, queue.Count, Verdict("every device it had was lost", lost));
 		}
 	}
 
-	private static FixtureStart StartFixture(
-		PlatformConfig config,
-		IReadOnlyList<TestCase> cases,
-		ScreenshotManager manager,
-		string backendUrlVariable,
+	/// <summary>
+	/// Words a fixture's abandonment from its workers' losses: a lone worker's reason stands on its
+	/// own, and several are listed under the summary.
+	/// </summary>
+	/// <param name="summary">What happened to the fixture as a whole.</param>
+	/// <param name="lost">Why each worker is gone, by index.</param>
+	private static string Verdict(string summary, string?[] lost) =>
+		lost.Length == 1
+			? lost[0] ?? string.Empty
+			: $"{summary}:\n" + string.Join('\n', lost.Select((reason, index) => $"worker {index + 1}: {reason}"));
+
+	/// <summary>
+	/// Brings one worker's session up with its backend attached.
+	/// </summary>
+	/// <param name="worker">The worker to bring up.</param>
+	/// <param name="backendSetup">The suite's backend, or <c>null</c> for an app that needs none.</param>
+	/// <param name="reporter">Told when the worker is up, or retrying.</param>
+	/// <param name="manager">Screenshot storage the driver writes through.</param>
+	/// <param name="cancellationToken">Cancelled when the reader interrupts the run.</param>
+	/// <param name="failure">Why the worker could not be brought up, ready to print; empty on success.</param>
+	/// <returns>The live session, or <c>null</c> when the worker could not be brought up.</returns>
+	private static TestDriver? StartWorker(
+		Worker worker,
+		FrameworkConfig.BackendSetup? backendSetup,
 		RunReporter reporter,
-		CancellationToken cancellationToken
+		ScreenshotManager manager,
+		CancellationToken cancellationToken,
+		out string failure
 	)
 	{
-		var driver = TryStartSession(config, manager, backendUrlVariable, reporter, out var sessionError);
+		var driver = TryStartSession(worker, manager, reporter, out failure);
 		if (driver is null)
 		{
-			return new FixtureStart(config, cases, null, sessionError);
+			return null;
 		}
 
-		if (!driver.IsAppCrashed())
+		if (driver.IsAppCrashed())
 		{
-			return new FixtureStart(config, cases, driver, null);
-		}
-
-		var crashLog = driver.CaptureDeviceCrashLog() ?? "No crash log available.";
-		QuitDriver(driver, cancellationToken);
-		return new FixtureStart(
-			config,
-			cases,
-			null,
-			"the app crashed on startup. "
+			var crashLog = driver.CaptureDeviceCrashLog() ?? "No crash log available.";
+			QuitDriver(driver, cancellationToken);
+			failure =
+				"the app crashed on startup. "
 				+ (
 					crashLog.Contains(MissingAssembliesMarker, StringComparison.Ordinal)
 						? "Rebuild with -p:EmbedAssemblies=true to embed assemblies into the APK."
 						: $"Crash log:\n{crashLog}"
-				)
-		);
+				);
+			return null;
+		}
+
+		// The backend is built after the session, not before it, because it may have to bind itself to
+		// the device it serves and only a live session names that device.
+		try
+		{
+			driver.Backend = backendSetup?.Create(worker.Config, driver.GetDeviceId());
+		}
+		catch (Exception ex)
+		{
+			QuitDriver(driver, cancellationToken);
+			failure = $"its backend failed to start: {ex.Message}";
+			return null;
+		}
+
+		reporter.FixtureReady(worker.Config, worker.Index);
+		return driver;
 	}
 
 	/// <summary>
-	/// Opens the Appium session, retrying once. A session started against a device that has only just
-	/// come up races the tail of its boot, and the failure that produces is transient — waiting for
-	/// the device to finish and asking again costs one attempt and saves the whole fixture.
+	/// Opens a worker's Appium session, retrying. A session started against a device that has only
+	/// just come up races the tail of its boot, and the failure that produces is transient — waiting
+	/// for the device to finish and asking again costs one attempt and saves the whole worker.
 	/// </summary>
-	/// <param name="config">The platform fixture to open a session on.</param>
+	/// <param name="worker">The worker to open a session for.</param>
 	/// <param name="manager">Screenshot storage the driver writes through.</param>
-	/// <param name="backendUrlVariable">Name the app reads its backend URL from.</param>
 	/// <param name="reporter">Told when an attempt failed and another is coming.</param>
 	/// <param name="error">Why every attempt failed, ready to print; empty on success.</param>
 	/// <returns>The live session, or <c>null</c> when it could not be opened.</returns>
 	private static TestDriver? TryStartSession(
-		PlatformConfig config,
+		Worker worker,
 		ScreenshotManager manager,
-		string backendUrlVariable,
 		RunReporter reporter,
 		out string error
 	)
@@ -398,21 +426,25 @@ public static class SuiteRunner
 		error = string.Empty;
 		// Before the first attempt, not only between them: the retries exist to survive a session that
 		// fails, not to stand in for bringing the device up.
-		config.EnsureDevicesRunning();
-		config.WaitUntilDevicesAreReady(DeviceReadyTimeout);
+		worker.Config.WaitUntilDeviceIsReady(worker.DeviceId, DeviceReadyTimeout);
 		for (var attempt = 1; attempt <= SessionStartAttempts; attempt++)
 		{
 			try
 			{
-				return new TestDriver(config.CreateAppiumDriver(), config, manager, backendUrlVariable);
+				return new TestDriver(
+					worker.Config.CreateAppiumDriver(worker.DeviceId),
+					worker.Config,
+					manager,
+					worker.BackendUrlVariable
+				);
 			}
 			catch (Exception ex) when (ex is WebDriverException or FileNotFoundException or TimeoutException)
 			{
 				error = $"the Appium session failed to start after {SessionStartAttempts} attempts: {ex.Message}";
 				if (attempt < SessionStartAttempts)
 				{
-					reporter.FixtureRetrying(config, $"attempt {attempt} failed: {ex.Message}");
-					config.WaitUntilDevicesAreReady(DeviceReadyTimeout);
+					reporter.FixtureRetrying(worker.Config, worker.Index, $"attempt {attempt} failed: {ex.Message}");
+					worker.Config.WaitUntilDeviceIsReady(worker.DeviceId, DeviceReadyTimeout);
 				}
 			}
 		}
@@ -421,84 +453,102 @@ public static class SuiteRunner
 	}
 
 	/// <summary>
-	/// Runs a fixture's journeys, replacing the session when the device stops answering it. The
-	/// device's automation process can die under a journey while the app and the Appium server both
-	/// stay up, and every command after that fails the same way, so a session outliving its device
-	/// turns the rest of the fixture's journeys into failures that describe nothing.
+	/// Runs journeys from the fixture's queue on one worker until the queue is empty, replacing the
+	/// session when the device stops answering it. The device's automation process can die under a
+	/// journey while the app and the Appium server both stay up, and every command after that fails
+	/// the same way, so a session outliving its device turns every journey the worker takes into a
+	/// failure that describes nothing. A worker that cannot replace its session, or has replaced it
+	/// too often, puts the journey it holds back on the queue and drops out.
 	/// </summary>
-	/// <param name="session">The fixture, its journeys, and the session to run them on.</param>
-	/// <param name="reporter">Told each journey's outcome, and when the fixture has to be abandoned.</param>
+	/// <param name="worker">The worker to run on.</param>
+	/// <param name="driver">Its live session, with the backend attached.</param>
+	/// <param name="queue">The fixture's journeys still to run, shared with its other workers.</param>
+	/// <param name="reporter">Told each journey's outcome, and when the worker is lost.</param>
 	/// <param name="manager">Screenshot storage the driver writes through.</param>
 	/// <param name="cancellationToken">Cancelled when the reader interrupts the run.</param>
-	private static void RunFixture(
-		FixtureSession session,
+	/// <returns>Why the worker dropped out, ready to print, or <c>null</c> when it drained the queue.</returns>
+	private static string? RunWorker(
+		Worker worker,
+		TestDriver driver,
+		ConcurrentQueue<TestCase> queue,
 		RunReporter reporter,
 		ScreenshotManager manager,
 		CancellationToken cancellationToken
 	)
 	{
-		var driver = session.Driver;
+		var backend = driver.Backend;
 		var recoveriesLeft = SessionRecoveryAttempts;
+		var live = driver;
 		try
 		{
-			session.Config.OnBeforeTests(driver, driver.GetDeviceId());
+			worker.Config.OnBeforeTests(driver, driver.GetDeviceId());
 
-			for (var index = 0; index < session.Cases.Count; index++)
+			while (!cancellationToken.IsCancellationRequested && queue.TryDequeue(out var testCase))
 			{
-				if (cancellationToken.IsCancellationRequested)
+				if (RunJourney(live, testCase) is not { } result)
 				{
-					return;
+					return null;
 				}
 
-				var testCase = session.Cases[index];
-				if (RunJourney(driver, testCase) is not { } result)
-				{
-					return;
-				}
-
-				if (result.Passed || driver.IsSessionAlive())
+				if (result.Passed || live.IsSessionAlive())
 				{
 					reporter.JourneyCompleted(result);
 					continue;
 				}
 
-				var remaining = session.Cases.Count - index;
 				if (recoveriesLeft == 0)
 				{
-					reporter.FixtureSkipped(
-						session.Config,
-						remaining,
+					queue.Enqueue(testCase);
+					return Lose(
 						$"its session died {SessionRecoveryAttempts} times, so its device is not fit to run on."
 					);
-					return;
 				}
 
 				recoveriesLeft--;
 				if (ReplaceSession() is not { } replacement)
 				{
-					driver = null;
-					reporter.FixtureSkipped(session.Config, remaining, "its session died and would not reopen.");
-					return;
+					live = null;
+					queue.Enqueue(testCase);
+					return Lose("its session died and would not reopen.");
 				}
 
-				driver = replacement;
+				live = replacement;
 
 				// The journey ran against a session that was already dying, so its result describes
 				// the session rather than the app.
-				if (RunJourney(driver, testCase) is not { } rerun)
+				if (RunJourney(live, testCase) is not { } rerun)
 				{
-					return;
+					return null;
 				}
 
 				reporter.JourneyCompleted(rerun);
 			}
+
+			return null;
 		}
 		finally
 		{
-			if (driver is not null)
+			if (live is not null)
 			{
-				QuitDriver(driver, cancellationToken);
+				QuitDriver(live, cancellationToken);
 			}
+
+			try
+			{
+				backend?.Dispose();
+			}
+			catch (Exception ex)
+			{
+				RunReporter.Note(
+					$"{worker.Config} worker {worker.Index}: the backend did not shut down cleanly — {ex.Message}"
+				);
+			}
+		}
+
+		string Lose(string reason)
+		{
+			reporter.WorkerLost(worker.Config, worker.Index, reason);
+			return reason;
 		}
 
 		// Returns the journey's outcome, or null once the reader has interrupted the run.
@@ -506,7 +556,7 @@ public static class SuiteRunner
 		{
 			try
 			{
-				return JourneyRunner.Run(on, testCase, manager, reporter);
+				return JourneyRunner.Run(on, worker.Index, testCase, manager, reporter);
 			}
 			catch when (cancellationToken.IsCancellationRequested)
 			{
@@ -527,22 +577,16 @@ public static class SuiteRunner
 		// so the replacement inherits it.
 		TestDriver? ReplaceSession()
 		{
-			QuitDriver(driver!, cancellationToken);
-			var replacement = TryStartSession(
-				session.Config,
-				manager,
-				session.BackendUrlVariable,
-				reporter,
-				out var error
-			);
+			QuitDriver(live!, cancellationToken);
+			var replacement = TryStartSession(worker, manager, reporter, out var error);
 			if (replacement is null)
 			{
-				RunReporter.Note($"{session.Config}: {error}");
+				RunReporter.Note($"{worker.Config} worker {worker.Index}: {error}");
 				return null;
 			}
 
-			replacement.Backend = driver!.Backend;
-			session.Config.OnBeforeTests(replacement, replacement.GetDeviceId());
+			replacement.Backend = backend;
+			worker.Config.OnBeforeTests(replacement, replacement.GetDeviceId());
 			return replacement;
 		}
 	}

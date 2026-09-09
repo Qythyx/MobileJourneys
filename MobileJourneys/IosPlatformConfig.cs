@@ -1,3 +1,4 @@
+using System.Text.Json;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Appium;
 using OpenQA.Selenium.Appium.iOS;
@@ -203,6 +204,97 @@ public sealed record IosPlatformConfig(
 			"--version",
 			"Install Xcode command-line tools: `xcode-select --install`."
 		);
+
+	/// <summary>One runtime's simulators as <c>simctl list devices -j</c> reports them.</summary>
+	/// <param name="Id">The runtime identifier, e.g. <c>com.apple.CoreSimulator.SimRuntime.iOS-26-2</c>.</param>
+	/// <param name="ByName">The available simulators on it, keyed by name.</param>
+	internal sealed record SimulatorRuntime(string Id, IReadOnlyDictionary<string, Simulator> ByName);
+
+	/// <summary>A simulator as <c>simctl list devices -j</c> reports it.</summary>
+	/// <param name="Udid">Its unique id.</param>
+	/// <param name="DeviceTypeId">Its device type identifier, e.g. <c>com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro</c>.</param>
+	internal sealed record Simulator(string Udid, string DeviceTypeId);
+
+	/// <summary>Names the simulator a fixture's extra worker runs on.</summary>
+	/// <param name="deviceName">The fixture's base simulator name.</param>
+	/// <param name="worker">The worker's 1-based index; 2 or more.</param>
+	internal static string WorkerSimulatorName(string deviceName, int worker) => $"{deviceName} · worker {worker}";
+
+	/// <summary>
+	/// Reads the runtime matching <paramref name="platformVersion"/> out of <c>simctl list devices -j</c>.
+	/// </summary>
+	/// <param name="simctlJson">The command's output.</param>
+	/// <param name="platformVersion">The iOS version, e.g. <c>26.2</c>.</param>
+	/// <returns>The runtime and its available simulators, or <c>null</c> when no runtime matches.</returns>
+	internal static SimulatorRuntime? ParseSimulatorRuntime(string simctlJson, string platformVersion)
+	{
+		using var document = JsonDocument.Parse(simctlJson);
+		var suffix = $".iOS-{platformVersion.Replace('.', '-')}";
+		foreach (var runtime in document.RootElement.GetProperty("devices").EnumerateObject())
+		{
+			if (!runtime.Name.EndsWith(suffix, StringComparison.Ordinal))
+			{
+				continue;
+			}
+
+			var byName = runtime
+				.Value.EnumerateArray()
+				.Where(device => device.GetProperty("isAvailable").GetBoolean())
+				.ToDictionary(
+					device => device.GetProperty("name").GetString() ?? string.Empty,
+					device => new Simulator(
+						device.GetProperty("udid").GetString() ?? string.Empty,
+						device.GetProperty("deviceTypeIdentifier").GetString() ?? string.Empty
+					)
+				);
+			return new SimulatorRuntime(runtime.Name, byName);
+		}
+
+		return null;
+	}
+
+	/// <inheritdoc/>
+	/// <remarks>
+	/// Booting is left to the automation server, which boots a shutdown simulator it is given the
+	/// UDID of. Only the simulators' existence is ensured here.
+	/// </remarks>
+	internal override IReadOnlyList<string> StartDevices(TimeSpan timeout)
+	{
+		var listing = ProcessRunner.RunWithResult("xcrun", ["simctl", "list", "devices", "available", "-j"]);
+		if (listing is not { ExitCode: 0 })
+		{
+			throw new InvalidOperationException($"simctl could not list simulators: {listing?.Error.Trim()}");
+		}
+
+		var runtime =
+			ParseSimulatorRuntime(listing.Output, PlatformVersion)
+			?? throw new InvalidOperationException($"No iOS {PlatformVersion} runtime is installed.");
+		if (!runtime.ByName.TryGetValue(DeviceName, out var baseDevice))
+		{
+			throw new InvalidOperationException($"No simulator named '{DeviceName}' exists on iOS {PlatformVersion}.");
+		}
+
+		var udids = new List<string>(Instances) { baseDevice.Udid };
+		for (var worker = 2; worker <= Instances; worker++)
+		{
+			var name = WorkerSimulatorName(DeviceName, worker);
+			udids.Add(
+				runtime.ByName.TryGetValue(name, out var existing)
+					? existing.Udid
+					: CreateSimulator(name, baseDevice.DeviceTypeId, runtime.Id)
+			);
+		}
+
+		return udids;
+	}
+
+	private static string CreateSimulator(string name, string deviceTypeId, string runtimeId)
+	{
+		var created = ProcessRunner.RunWithResult("xcrun", ["simctl", "create", name, deviceTypeId, runtimeId], 60);
+		return created is { ExitCode: 0 } && !string.IsNullOrWhiteSpace(created.Output)
+			? created.Output.Trim()
+			: throw new InvalidOperationException($"simctl could not create '{name}': {created?.Error.Trim()}");
+	}
 
 	internal override void KillStaleHelperProcesses() =>
 		// The XCUITest driver's WebDriverAgent runner outlives an Appium server that goes away without

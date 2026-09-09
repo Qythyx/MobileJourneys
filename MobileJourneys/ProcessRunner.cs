@@ -59,18 +59,24 @@ internal static class ProcessRunner
 	/// Starts a process expected to outlive this call, and returns as soon as it is running.
 	/// </summary>
 	/// <remarks>
-	/// Its output goes to <c>/dev/null</c> through a shell rather than to a pipe, because a pipe
-	/// would have to be drained for as long as the child lives — and once this process stopped
-	/// reading, the child would take a SIGPIPE on its next write. Inheriting the console instead is
-	/// no good either: the caller's display owns it.
+	/// The child is put in a process group of its own, through a shell with job control on, so
+	/// that a Ctrl+C or a closed terminal aimed at this process does not reach it: the terminal
+	/// signals the whole foreground group, and a child left in it dies with the run that started
+	/// it. Ignoring the signals instead does not hold, because the emulator installs handlers of
+	/// its own. The shell is bash because zsh cannot turn job control on without a terminal.
+	/// <para/>
+	/// Its output goes to <c>/dev/null</c> rather than to a pipe, because a pipe would have to be
+	/// drained for as long as the child lives — and once this process stopped reading, the child
+	/// would take a SIGPIPE on its next write. Inheriting the console instead is no good either:
+	/// the caller's display owns it.
 	/// </remarks>
 	/// <param name="fileName">The program to run.</param>
 	/// <param name="arguments">Its arguments, passed through without shell interpretation.</param>
 	public static void Start(string fileName, IReadOnlyList<string> arguments)
 	{
-		var psi = new ProcessStartInfo { FileName = "/bin/sh", UseShellExecute = false };
+		var psi = new ProcessStartInfo { FileName = "/bin/bash", UseShellExecute = false };
 		psi.ArgumentList.Add("-c");
-		psi.ArgumentList.Add("exec \"$0\" \"$@\" >/dev/null 2>&1");
+		psi.ArgumentList.Add("set -m; \"$0\" \"$@\" </dev/null >/dev/null 2>&1 &");
 		psi.ArgumentList.Add(fileName);
 		foreach (var arg in arguments)
 		{

@@ -24,7 +24,6 @@ public abstract record PlatformConfig(
 )
 {
 	internal const int SimulatorStartupTimeoutMs = 180_000;
-	internal const int AvdLaunchTimeoutMs = 120_000;
 	internal const int AppWaitDurationMs = 30_000;
 
 	/// <summary>The uiautomator2 setting that bounds how long a lookup waits for the UI to go quiet.</summary>
@@ -51,6 +50,20 @@ public abstract record PlatformConfig(
 	public abstract string AutomationName { get; }
 
 	/// <summary>
+	/// How many devices this fixture runs on at once. Each is a separate simulator or emulator
+	/// instance with its own Appium session, and the fixture's journeys are shared between them.
+	/// </summary>
+	public int Instances
+	{
+		get;
+		init
+		{
+			ArgumentOutOfRangeException.ThrowIfLessThan(value, 1, nameof(Instances));
+			field = value;
+		}
+	} = 1;
+
+	/// <summary>
 	/// Allow small per-pixel color differences (e.g., JPEG decoding non-determinism).
 	/// The number is the sum of the delta for each component, R, G, and B.
 	/// </summary>
@@ -73,10 +86,11 @@ public abstract record PlatformConfig(
 	public sealed override string ToString() => DisplayName;
 
 	/// <summary>
-	/// Builds and starts an Appium driver bound to this fixture. The framework wraps the
-	/// returned driver in a <see cref="TestDriver"/>; consumers do not call this directly.
+	/// Builds and starts an Appium driver bound to one of this fixture's devices. The framework
+	/// wraps the returned driver in a <see cref="TestDriver"/>; consumers do not call this directly.
 	/// </summary>
-	internal AppiumDriver CreateAppiumDriver()
+	/// <param name="deviceId">The simulator UDID or emulator serial to open the session on.</param>
+	internal AppiumDriver CreateAppiumDriver(string deviceId)
 	{
 		var options = new AppiumOptions
 		{
@@ -87,6 +101,7 @@ public abstract record PlatformConfig(
 			App = ResolveAppBinaryPath(),
 		};
 
+		options.AddAdditionalAppiumOption("udid", deviceId);
 		ConfigureAppiumOptions(options);
 		options.AddAdditionalAppiumOption("newCommandTimeout", 120);
 		return CreateDriver(options);
@@ -139,19 +154,23 @@ public abstract record PlatformConfig(
 	// --- Device readiness ---
 
 	/// <summary>
-	/// Brings this fixture's device up if it is not already running, so that the automation server
-	/// finds one rather than starting its own. Does nothing where the device is not this framework's
-	/// to start.
+	/// Brings this fixture's <see cref="Instances"/> devices up, creating any that do not exist yet,
+	/// and names them. The automation server is then handed a device that is already up, so it
+	/// never starts one of its own.
 	/// </summary>
-	internal virtual void EnsureDevicesRunning() { }
+	/// <param name="timeout">How long to wait for a started device to become addressable.</param>
+	/// <returns>One device id per instance, in worker order.</returns>
+	/// <exception cref="InvalidOperationException">A device could not be found, created, or started.</exception>
+	internal abstract IReadOnlyList<string> StartDevices(TimeSpan timeout);
 
 	/// <summary>
-	/// Blocks until this platform's devices are far enough through boot that a session can be started
-	/// against them, or until <paramref name="timeout"/> elapses. Does nothing where a device reports
-	/// itself attached only once it is genuinely usable.
+	/// Blocks until a device is far enough through boot that a session can be started against it,
+	/// or until <paramref name="timeout"/> elapses. Does nothing where a device reports itself
+	/// attached only once it is genuinely usable.
 	/// </summary>
+	/// <param name="deviceId">The device to wait for.</param>
 	/// <param name="timeout">How long to wait before giving up and letting the caller try anyway.</param>
-	internal virtual void WaitUntilDevicesAreReady(TimeSpan timeout) { }
+	internal virtual void WaitUntilDeviceIsReady(string deviceId, TimeSpan timeout) { }
 
 	// --- Keyboard / alerts ---
 

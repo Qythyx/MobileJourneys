@@ -143,6 +143,21 @@ public static class MyAppPlatforms
 }
 ```
 
+A fixture runs its journeys on one device unless told otherwise. Set `Instances` to run it on
+several at once, with the journeys shared between them longest-first:
+
+```csharp
+new IosPlatformConfig(...) { Instances = 3 },
+```
+
+On iOS, worker 1 is the simulator the config names and the extras are simulators named
+`<DeviceName> · worker <n>`, created from the base device's type on first use and kept for later
+runs. On Android every instance of a shared AVD runs read-only, since the emulator allows no
+writable one beside them; a writable instance left by an earlier run is stopped first. All are left
+running after a run, like the base device. A device that cannot be brought up, or whose session dies past its
+retry budget, drops out and the fixture's other devices take its journeys; the fixture is abandoned
+only when none of its devices can host the app.
+
 ### 4. Write journeys
 
 Journeys are authored with a **factory DSL** imported via `using static`, so a flow reads as bare
@@ -243,10 +258,11 @@ offers — at a terminal — to rebuild the consumer project with `-p:EmbedAssem
 again; with stdout redirected it prints the same hint and abandons the fixture.
 
 A device's automation process can also die part-way through a fixture, while the app and the Appium
-server both stay up. Every command after that fails identically, so the fixture replaces the session
+server both stay up. Every command after that fails identically, so the worker replaces the session
 and gives the interrupted journey the run it never got, keeping the rest of its journeys. Three lost
-sessions and the fixture is abandoned instead, with its remaining journeys counted as not run — a
-device needing more than that is reporting its own condition, not the app's.
+sessions and the worker is lost instead — a device needing more than that is reporting its own
+condition, not the app's — and the fixture's other workers take the journeys it would have run.
+Only when a fixture's last worker is lost are its remaining journeys counted as not run.
 
 ### 6. Required csproj bits
 

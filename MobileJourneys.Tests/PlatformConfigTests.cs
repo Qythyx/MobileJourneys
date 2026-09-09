@@ -58,6 +58,19 @@ public sealed class PlatformConfigTests
 	public void ToStringEqualsDisplayName() => IosLight.ToString().Should().Be(IosLight.DisplayName);
 
 	[Test]
+	public void InstancesDefaultsToOne() => _ = IosLight.Instances.Should().Be(1);
+
+	[Test]
+	public void InstancesAcceptsMoreThanOne() => _ = (IosLight with { Instances = 3 }).Instances.Should().Be(3);
+
+	[Test]
+	public void InstancesRejectsZero() =>
+		_ = FluentActions
+			.Invoking(() => IosLight with { Instances = 0 })
+			.Should()
+			.Throw<ArgumentOutOfRangeException>();
+
+	[Test]
 	public void ColorToleranceIsHigherForAndroidThanIos() =>
 		// Higher Android tolerance compensates for emulator rendering differences.
 		AndroidDark.ColorTolerance.Should().BeGreaterThan(IosLight.ColorTolerance);

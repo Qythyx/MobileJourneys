@@ -92,8 +92,6 @@ public sealed record AndroidPlatformConfig(
 		options.AddAdditionalAppiumOption("appWaitDuration", AppWaitDurationMs);
 		options.AddAdditionalAppiumOption("autoGrantPermissions", true);
 		options.AddAdditionalAppiumOption("enforceAppInstall", true);
-		options.AddAdditionalAppiumOption("avd", AvdName);
-		options.AddAdditionalAppiumOption("avdLaunchTimeout", AvdLaunchTimeoutMs);
 		options.AddAdditionalAppiumOption($"settings[{WaitForIdleSetting}]", WaitForIdleTimeoutMs);
 		// The keyboard is its own window, and typing ends by tapping its confirm key.
 		options.AddAdditionalAppiumOption("settings[enableMultiWindows]", true);
@@ -341,24 +339,70 @@ public sealed record AndroidPlatformConfig(
 
 	/// <inheritdoc/>
 	/// <remarks>
-	/// Started here rather than left to Appium, which decides whether to launch by looking for the
-	/// AVD in <c>adb devices</c> — where a booting emulator does not appear, because Appium itself
-	/// launches it with <c>-delay-adb</c>. It therefore starts a second emulator on the same AVD
-	/// during the boot window, which is fatal to both. Asking the process table instead answers
-	/// correctly while the emulator is still coming up, and cannot block on a device that is wedged.
+	/// Running instances are counted in the process table, which answers correctly while an
+	/// emulator is still coming up and cannot block on one that is wedged. An AVD may be shared
+	/// only by instances that all run read-only: the emulator refuses to start a read-only instance
+	/// beside a writable one. A lone instance runs writable, so its quick-boot snapshot is saved.
 	/// </remarks>
-	internal override void EnsureDevicesRunning()
+	internal override IReadOnlyList<string> StartDevices(TimeSpan timeout)
 	{
-		// Anchored on a separator so one AVD is not matched by another that extends its name.
-		if (ProcessRunner.RunWithResult(PgrepPath, ["-f", $"qemu-system.*-avd {AvdName}( |$)"]) is { ExitCode: 0 })
+		var deadline = DateTime.UtcNow + timeout;
+		var running = RunningInstances();
+		if (Instances > 1 && running.Any(commandLine => !commandLine.Contains(ReadOnlyFlag, StringComparison.Ordinal)))
 		{
-			return;
+			// A writable instance is the runner's own, left from a run wanting one; it has to go
+			// before any read-only sibling can start.
+			foreach (var serial in AttachedDevices().Where(serial => AvdNameOf(serial) == AvdName))
+			{
+				_ = RunAdb(serial, "emu", "kill");
+			}
+
+			while (DateTime.UtcNow < deadline && RunningInstances().Count > 0)
+			{
+				Thread.Sleep(BootPollInterval);
+			}
+
+			running = [];
 		}
 
-		ProcessRunner.Start(EmulatorPath, ["-avd", AvdName]);
+		for (var instance = running.Count; instance < Instances; instance++)
+		{
+			ProcessRunner.Start(EmulatorPath, Instances == 1 ? ["-avd", AvdName] : ["-avd", AvdName, ReadOnlyFlag]);
+		}
+
+		while (true)
+		{
+			var serials = AttachedDevices().Where(serial => AvdNameOf(serial) == AvdName).Take(Instances).ToList();
+			if (serials.Count == Instances)
+			{
+				return serials;
+			}
+
+			if (DateTime.UtcNow >= deadline)
+			{
+				throw new InvalidOperationException(
+					$"only {serials.Count} of {Instances} instances of {AvdName} appeared within {timeout.TotalSeconds}s."
+				);
+			}
+
+			KickOfflineDevices();
+			Thread.Sleep(BootPollInterval);
+		}
 	}
 
+	private const string ReadOnlyFlag = "-read-only";
+
+	/// <summary>The command lines of this AVD's running emulator instances.</summary>
+	private List<string> RunningInstances() =>
+		// Anchored on a separator so one AVD is not matched by another that extends its name.
+		ProcessRunner.RunWithResult(PgrepPath, ["-fl", $"qemu-system.*-avd {AvdName}( |$)"])
+			is { ExitCode: 0 } found
+			? [.. found.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries)]
+			: [];
+
 	private const string PgrepPath = "/usr/bin/pgrep";
+
+	private static string AvdNameOf(string serial) => GetProperty(serial, "ro.boot.qemu.avd_name");
 
 	/// <inheritdoc/>
 	/// <remarks>
@@ -368,27 +412,21 @@ public sealed record AndroidPlatformConfig(
 	/// the boot to actually complete closes that window. A device starved off its transport by a
 	/// loaded host reports <c>device offline</c> and is waited out here too.
 	/// </remarks>
-	internal override void WaitUntilDevicesAreReady(TimeSpan timeout)
+	internal override void WaitUntilDeviceIsReady(string deviceId, TimeSpan timeout)
 	{
 		var deadline = DateTime.UtcNow + timeout;
-		// A failure early enough in the launch leaves nothing attached yet, so give one a chance to
-		// appear before concluding there is nothing to wait for.
-		while (DateTime.UtcNow < deadline && !AttachedDevices().Any())
+		while (DateTime.UtcNow < deadline && !IsBootComplete(deviceId))
 		{
+			KickOfflineDevices();
 			Thread.Sleep(BootPollInterval);
 		}
-
-		foreach (var deviceId in AttachedDevices())
-		{
-			while (DateTime.UtcNow < deadline && !IsBootComplete(deviceId))
-			{
-				// adb keeps a device it dropped to "offline" there until the host kicks the transport,
-				// so polling alone never gets it back. A no-op when nothing is offline.
-				_ = ProcessRunner.RunWithResult(AdbPath, ["reconnect", "offline"]);
-				Thread.Sleep(BootPollInterval);
-			}
-		}
 	}
+
+	/// <summary>
+	/// adb keeps a device it dropped to "offline" there until the host kicks the transport, so
+	/// polling alone never gets it back. A no-op when nothing is offline.
+	/// </summary>
+	private static void KickOfflineDevices() => _ = ProcessRunner.RunWithResult(AdbPath, ["reconnect", "offline"]);
 
 	private static readonly TimeSpan BootPollInterval = TimeSpan.FromSeconds(2);
 

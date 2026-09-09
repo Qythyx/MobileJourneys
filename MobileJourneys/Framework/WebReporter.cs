@@ -46,16 +46,36 @@ internal sealed class WebReporter(string url, IReadOnlyList<TestCase> selected) 
 	}
 
 	/// <inheritdoc/>
-	public override void FixtureReady(PlatformConfig config) =>
-		Post(new { type = "fixture-ready", config = config.DisplayName });
+	public override void FixtureReady(PlatformConfig config, int worker) =>
+		Post(
+			new
+			{
+				type = "fixture-ready",
+				config = config.DisplayName,
+				worker,
+			}
+		);
 
 	/// <inheritdoc/>
-	public override void FixtureRetrying(PlatformConfig config, string reason) =>
+	public override void FixtureRetrying(PlatformConfig config, int worker, string reason) =>
 		Post(
 			new
 			{
 				type = "fixture-retrying",
 				config = config.DisplayName,
+				worker,
+				reason,
+			}
+		);
+
+	/// <inheritdoc/>
+	public override void WorkerLost(PlatformConfig config, int worker, string reason) =>
+		Post(
+			new
+			{
+				type = "worker-lost",
+				config = config.DisplayName,
+				worker,
 				reason,
 			}
 		);
@@ -75,6 +95,7 @@ internal sealed class WebReporter(string url, IReadOnlyList<TestCase> selected) 
 	/// <inheritdoc/>
 	public override void StepCompleted(
 		TestStep step,
+		int worker,
 		int stepNumber,
 		int totalSteps,
 		string stepName,
@@ -86,6 +107,7 @@ internal sealed class WebReporter(string url, IReadOnlyList<TestCase> selected) 
 			{
 				type = "step-completed",
 				config = step.Config.DisplayName,
+				worker,
 				container = step.Container,
 				step = step.StepName,
 				journey = step.JourneyName,

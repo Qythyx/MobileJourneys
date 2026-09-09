@@ -17,22 +17,28 @@ internal sealed class LiveStatusReporter(IReadOnlyList<TestCase> selected) : Run
 	/// <inheritdoc/>
 	public override void StepCompleted(
 		TestStep step,
+		int worker,
 		int stepNumber,
 		int totalSteps,
 		string stepName,
 		bool passed,
 		string? detail
-	) => table.Step(step.Config, step.JourneyName, stepNumber, totalSteps, stepName);
+	) => table.Step(step.Config, worker, step.JourneyName, stepNumber, totalSteps, stepName);
 
 	/// <inheritdoc/>
 	protected override void ReportJourney(JourneyResult result) =>
 		table.JourneyDone(result.TestCase.Config, result.Passed);
 
 	/// <inheritdoc/>
-	public override void FixtureReady(PlatformConfig config) => table.Ready(config);
+	public override void FixtureReady(PlatformConfig config, int worker) => table.Ready(config, worker);
 
 	/// <inheritdoc/>
-	public override void FixtureRetrying(PlatformConfig config, string reason) => table.Retrying(config, reason);
+	public override void FixtureRetrying(PlatformConfig config, int worker, string reason) =>
+		table.Retrying(config, worker, reason);
+
+	/// <inheritdoc/>
+	public override void WorkerLost(PlatformConfig config, int worker, string reason) =>
+		table.Lost(config, worker, reason);
 
 	/// <inheritdoc/>
 	/// <remarks>

@@ -88,6 +88,7 @@ internal abstract class RunReporter
 	/// <summary>Reports a step that has finished.</summary>
 	/// <param name="step">Which screenshot the step produced — its fixture, container, numbered name,
 	/// and journey.</param>
+	/// <param name="worker">Which of the fixture's workers ran it, 1-based.</param>
 	/// <param name="stepNumber">The step's 1-based position.</param>
 	/// <param name="totalSteps">How many steps the journey has.</param>
 	/// <param name="stepName">The step's bare name, without the number <see cref="TestStep.StepName"/> carries.</param>
@@ -95,6 +96,7 @@ internal abstract class RunReporter
 	/// <param name="detail">What went wrong, or <c>null</c> when the step passed.</param>
 	public abstract void StepCompleted(
 		TestStep step,
+		int worker,
 		int stepNumber,
 		int totalSteps,
 		string stepName,
@@ -148,20 +150,32 @@ internal abstract class RunReporter
 	protected abstract void ReportFixtureSkipped(PlatformConfig config, int journeyCount, string reason);
 
 	/// <summary>
-	/// Notes that a fixture's device is up and its journeys are about to start. Fixtures now start
-	/// inside the display rather than before it, so without this a row would still read as starting
-	/// until its first step finished — most of a minute later.
+	/// Notes that one of a fixture's devices is up and its journeys are about to start. Fixtures
+	/// start inside the display rather than before it, so without this a row would still read as
+	/// starting until its first step finished — most of a minute later.
 	/// </summary>
-	/// <param name="config">The fixture that came up.</param>
-	public virtual void FixtureReady(PlatformConfig config) { }
+	/// <param name="config">The fixture the worker belongs to.</param>
+	/// <param name="worker">The worker whose device came up, 1-based.</param>
+	public virtual void FixtureReady(PlatformConfig config, int worker) { }
 
 	/// <summary>
-	/// Notes that a fixture's session start failed and is being tried again. A retry waits out the
-	/// device's boot, so without this the fixture reads as merely slow to start for a minute or more.
+	/// Notes that a worker's session start failed and is being tried again. A retry waits out the
+	/// device's boot, so without this the worker reads as merely slow to start for a minute or more.
 	/// </summary>
-	/// <param name="config">The fixture being retried.</param>
+	/// <param name="config">The fixture the worker belongs to.</param>
+	/// <param name="worker">The worker being retried, 1-based.</param>
 	/// <param name="reason">Why the attempt failed, ready to print.</param>
-	public virtual void FixtureRetrying(PlatformConfig config, string reason) { }
+	public virtual void FixtureRetrying(PlatformConfig config, int worker, string reason) { }
+
+	/// <summary>
+	/// Notes that one of a fixture's workers is gone for the rest of the run — its device would not
+	/// come up, or its session died more times than it may recover from. The fixture's other
+	/// workers take the journeys it would have run, so this does not fail the run by itself.
+	/// </summary>
+	/// <param name="config">The fixture the worker belonged to.</param>
+	/// <param name="worker">The worker's 1-based index.</param>
+	/// <param name="reason">Why it is gone, ready to print.</param>
+	public virtual void WorkerLost(PlatformConfig config, int worker, string reason) { }
 
 	/// <summary>
 	/// Runs the fixture fan-out inside whatever display this reporter keeps on screen for its
