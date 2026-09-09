@@ -263,6 +263,22 @@ public sealed class ScreenshotManagerTests
 	}
 
 	[Test]
+	public void CompareWithBaselineAndDisposeStoresTheLiveMasksInTheNewCapture()
+	{
+		var storage = new InMemoryScreenshotStorage();
+		var manager = new ScreenshotManager(storage);
+		var config = BuildConfig();
+		var key = new TestStep(config, "Journey", "01 Step", "Journey");
+		Rectangle[] liveMasks = [new Rectangle(10, 0, 30, 100)];
+
+		_ = manager.CompareWithBaselineAndDispose(new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0)), key, []);
+		_ = manager.CompareWithBaselineAndDispose(new Image<Rgb24>(100, 100, new Rgb24(255, 0, 0)), key, liveMasks);
+
+		using var newCapture = Image.Load(storage.ReadNewScreenshot(key)!);
+		_ = ImageHelpers.GetMaskMetadata(newCapture).Should().Equal(liveMasks);
+	}
+
+	[Test]
 	public void CompareWithBaselineAndDisposeFailsWhenLiveMaskTooNarrowAndBaselineStoredNoMask()
 	{
 		var storage = new InMemoryScreenshotStorage();
@@ -309,7 +325,8 @@ public sealed class ScreenshotManagerTests
 
 		// A dead session answers a screenshot request the same way it answers everything else, so the
 		// failure that most needs explaining is the one arriving with no image to explain it in.
-		const string Details = "OpenQA.Selenium.WebDriverException: the instrumentation process is not running\nline two";
+		const string Details =
+			"OpenQA.Selenium.WebDriverException: the instrumentation process is not running\nline two";
 		_ = manager.WriteFailScreenshot(key, "sanitized and truncated", [], Details);
 
 		_ = storage

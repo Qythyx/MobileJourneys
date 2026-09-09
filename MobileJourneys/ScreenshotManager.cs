@@ -61,8 +61,9 @@ public sealed class ScreenshotManager(ScreenshotStorage storage)
 
 	/// <summary>
 	/// Compares an image against a baseline at full resolution and disposes it. Mask regions are
-	/// in the image's pixel coordinates. When a baseline is first written, the mask regions are
-	/// stored in the baseline PNG's metadata; on later comparisons they are unioned with the live
+	/// in the image's pixel coordinates. Every PNG written from the capture — a first baseline or
+	/// a <c>.new</c> artifact — carries the mask regions in its metadata, so a <c>.new</c> the
+	/// viewer promotes to baseline keeps them; on later comparisons they are unioned with the live
 	/// regions so content that shifts size between runs stays masked in both images.
 	/// </summary>
 	/// <param name="actual">The screenshot image at full device resolution.</param>
@@ -76,9 +77,10 @@ public sealed class ScreenshotManager(ScreenshotStorage storage)
 	{
 		using (actual)
 		{
+			ImageHelpers.SetMaskMetadata(actual, maskRegions);
+
 			if (!storage.BaselineExists(testStep))
 			{
-				ImageHelpers.SetMaskMetadata(actual, maskRegions);
 				storage.WriteBaseline(testStep, ToPngBytes(actual));
 				return new(true, 0, null);
 			}
