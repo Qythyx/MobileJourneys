@@ -577,7 +577,7 @@ public static class SuiteRunner
 		// so the replacement inherits it.
 		TestDriver? ReplaceSession()
 		{
-			QuitDriver(live!, cancellationToken);
+			QuitDriver(live, cancellationToken);
 			var replacement = TryStartSession(worker, manager, reporter, out var error);
 			if (replacement is null)
 			{
