@@ -39,6 +39,11 @@ public sealed record IosPlatformConfig(
 	internal override void ConfigureAppiumOptions(AppiumOptions options)
 	{
 		options.AddAdditionalAppiumOption("simulatorStartupTimeout", SimulatorStartupTimeoutMs);
+		// Xcode 27 removed Simulator.app, and this driver resolves the UI client from a hardcoded
+		// path to it, so any attempt to launch one fails outright. Headless boots through simctl
+		// and never touches the UI client. Removable once the driver can open Device Hub instead
+		// (appium-xcuitest-driver 12+, which requires Appium 3).
+		options.AddAdditionalAppiumOption("isHeadless", true);
 		options.AddAdditionalAppiumOption("wdaLocalPort", FindFreePort());
 		options.AddAdditionalAppiumOption("mjpegServerPort", FindFreePort());
 		// Letters per second cap for XCUITest typing. Default is 60 (~17ms/key), which can drop
