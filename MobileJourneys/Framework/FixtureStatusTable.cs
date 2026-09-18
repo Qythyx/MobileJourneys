@@ -36,6 +36,8 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 		)
 	);
 
+	private bool stopping;
+
 	/// <summary>One row of the table: a fixture's totals and what each of its workers is doing.</summary>
 	/// <param name="name">The fixture's label.</param>
 	/// <param name="total">How many journeys it will run.</param>
@@ -91,6 +93,12 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 				{
 					await refreshing.CancelAsync().ConfigureAwait(false);
 					await pump.ConfigureAwait(false);
+					// The last render stays on screen after the run, when a second Ctrl+C no longer applies.
+					lock (gate)
+					{
+						stopping = false;
+					}
+
 					context.UpdateTarget(BuildTable());
 				}
 			})
@@ -181,6 +189,15 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 		}
 	}
 
+	/// <summary>Shows under the table that the run is stopping, and how to quit it at once.</summary>
+	public void Stopping()
+	{
+		lock (gate)
+		{
+			stopping = true;
+		}
+	}
+
 	private void SetCurrent(PlatformConfig config, int worker, string text)
 	{
 		lock (gate)
@@ -221,6 +238,11 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 
 		lock (gate)
 		{
+			if (stopping)
+			{
+				_ = table.Caption("[yellow]Stopping… press Ctrl+C again to quit now.[/]");
+			}
+
 			foreach (var row in rows.Values.OrderBy(r => r.Name, StringComparer.Ordinal))
 			{
 				var left = row.Abandoned ? 0 : row.Total - row.Done;

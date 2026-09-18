@@ -23,7 +23,8 @@ public static class SuiteRunner
 
 	/// <summary>
 	/// How many times to try opening a fixture's Appium session before abandoning it. A further
-	/// attempt costs the wait below; abandoning the fixture costs every journey selected for it.
+	/// attempt costs the wait below, and at most one of them a device restart besides; abandoning
+	/// the fixture costs every journey selected for it.
 	/// </summary>
 	private const int SessionStartAttempts = 3;
 
@@ -162,15 +163,6 @@ public static class SuiteRunner
 			: IsInteractive ? new LiveStatusReporter(selected)
 			: new ConsoleReporter();
 
-		using var cancellation = new CancellationTokenSource();
-		Console.CancelKeyPress += (_, e) =>
-		{
-			// Handle it ourselves so the finally blocks below still dispose the Appium server;
-			// letting the runtime kill the process orphans its child.
-			e.Cancel = true;
-			cancellation.Cancel();
-		};
-
 		// Before the server starts, so the sweep cannot reach the helpers this run is about to spawn.
 		foreach (var platformConfig in config.PlatformConfigs.DistinctBy(p => p.Platform))
 		{
@@ -182,6 +174,27 @@ public static class SuiteRunner
 			.UsingPort(AppiumHostPort)
 			.WithArguments(new OptionCollector().AddArguments(new("--allow-insecure", "*:adb_shell")))
 			.Build();
+
+		// The runtime's own kill would orphan the Appium server, so Ctrl+C is handled here: the first
+		// stops the run and still closes every session, and a second quits at once.
+		using var cancellation = new CancellationTokenSource();
+		var interruptions = 0;
+		void OnCancelKeyPress(object? sender, ConsoleCancelEventArgs e)
+		{
+			e.Cancel = true;
+			if (Interlocked.Increment(ref interruptions) == 1)
+			{
+				reporter.Interrupted();
+				cancellation.Cancel();
+				return;
+			}
+
+			appiumService.Dispose();
+			AnsiConsole.Cursor.Show();
+			Environment.Exit(RunReporter.InterruptedExitCode);
+		}
+
+		Console.CancelKeyPress += OnCancelKeyPress;
 
 		// The display owns the console for the run's duration, so the server's output has nowhere to go
 		// and is kept here instead, to be printed only if the run ends in a way nothing else explains.
@@ -195,7 +208,8 @@ public static class SuiteRunner
 		// leaving the reader watching a spinner until the slowest one is ready.
 		// The runtime tears the process down without unwinding, so an exception that reaches it skips
 		// the summary below and the Appium server's disposal.
-		var interrupted = false;
+		var cutShort = false;
+		Exception? faultBeforeInterruption = null;
 		try
 		{
 			await reporter
@@ -204,8 +218,10 @@ public static class SuiteRunner
 						selected
 							.GroupBy(testCase => testCase.Config)
 							.Select(group =>
-								Task.Run(
-									() =>
+								Task.Run(() =>
+								{
+									try
+									{
 										StartAndRunFixture(
 											group.Key,
 											[.. group],
@@ -213,33 +229,47 @@ public static class SuiteRunner
 											reporter,
 											manager,
 											cancellation.Token
-										),
-									cancellation.Token
-								)
+										);
+									}
+									catch (Exception ex) when (!cancellation.IsCancellationRequested)
+									{
+										_ = Interlocked.CompareExchange(ref faultBeforeInterruption, ex, null);
+										throw;
+									}
+								})
 							)
 					)
 				)
 				.ConfigureAwait(false);
 		}
-		catch (OperationCanceledException)
-		{
-			interrupted = true;
-			RunReporter.Note("The run was interrupted, so the results below cover only what finished.");
-		}
+		// A fixture still bringing its devices up stops by throwing, and its journeys go unreported. A
+		// fault from before the interruption is still reported: the rest of the run is what hid it.
+		catch (Exception) when (cancellation.IsCancellationRequested && faultBeforeInterruption is null) { }
 		catch (Exception ex)
 		{
-			interrupted = true;
-			RunReporter.Fault($"The run was cut short by {ex.GetType().Name}: {ex.Message}");
+			var fault = faultBeforeInterruption ?? ex;
+			cutShort = true;
+			RunReporter.Fault($"The run was cut short by {fault.GetType().Name}: {fault.Message}");
 			ReportAppiumOutput(appiumOutput);
 		}
 
+		// Nothing after the fan-out drives a device, so a Ctrl+C from here on can take its usual effect
+		// without orphaning the server.
+		Console.CancelKeyPress -= OnCancelKeyPress;
+		appiumService.Dispose();
+
 		var exitCode = reporter.Summarize();
+		if (cancellation.IsCancellationRequested)
+		{
+			return exitCode;
+		}
+
 		if (IsInteractive)
 		{
 			FailureBrowser.Browse(config, reporter.Failures);
 		}
 
-		return interrupted ? 1 : exitCode;
+		return cutShort ? 1 : exitCode;
 	}
 
 	/// <summary>One of a fixture's devices and the worker index it reports under.</summary>
@@ -283,7 +313,7 @@ public static class SuiteRunner
 		IReadOnlyList<string> deviceIds;
 		try
 		{
-			deviceIds = config.StartDevices(DeviceReadyTimeout);
+			deviceIds = config.StartDevices(DeviceReadyTimeout, cancellationToken);
 		}
 		catch (InvalidOperationException ex)
 		{
@@ -313,6 +343,9 @@ public static class SuiteRunner
 						);
 						if (driver is null)
 						{
+							// Once the run is interrupted, a worker that did not come up was stopped by it,
+							// and reporting that as a lost device would blame the device.
+							cancellationToken.ThrowIfCancellationRequested();
 							lost[index] = failure;
 							reporter.WorkerLost(config, worker.Index, failure);
 							return;
@@ -369,7 +402,7 @@ public static class SuiteRunner
 		out string failure
 	)
 	{
-		var driver = TryStartSession(worker, manager, reporter, out failure);
+		var driver = TryStartSession(worker, manager, reporter, cancellationToken, out failure);
 		if (driver is null)
 		{
 			return null;
@@ -409,48 +442,101 @@ public static class SuiteRunner
 	/// <summary>
 	/// Opens a worker's Appium session, retrying. A session started against a device that has only
 	/// just come up races the tail of its boot, and the failure that produces is transient — waiting
-	/// for the device to finish and asking again costs one attempt and saves the whole worker.
+	/// for the device to finish and asking again costs one attempt and saves the whole worker. A
+	/// device that has stopped answering does not recover by being waited on, so it is restarted
+	/// instead, at most once — see <see cref="ShouldRestartDevice"/>.
 	/// </summary>
 	/// <param name="worker">The worker to open a session for.</param>
 	/// <param name="manager">Screenshot storage the driver writes through.</param>
 	/// <param name="reporter">Told when an attempt failed and another is coming.</param>
+	/// <param name="cancellationToken">Cancelled when the reader interrupts the run.</param>
 	/// <param name="error">Why every attempt failed, ready to print; empty on success.</param>
 	/// <returns>The live session, or <c>null</c> when it could not be opened.</returns>
+	/// <exception cref="OperationCanceledException">The run was interrupted.</exception>
 	private static TestDriver? TryStartSession(
 		Worker worker,
 		ScreenshotManager manager,
 		RunReporter reporter,
+		CancellationToken cancellationToken,
 		out string error
 	)
 	{
 		error = string.Empty;
-		// Before the first attempt, not only between them: the retries exist to survive a session that
-		// fails, not to stand in for bringing the device up.
-		worker.Config.WaitUntilDeviceIsReady(worker.DeviceId, DeviceReadyTimeout);
+		Exception? lastFailure = null;
+		var restartTried = false;
+		var restarted = false;
 		for (var attempt = 1; attempt <= SessionStartAttempts; attempt++)
 		{
+			// Before the first attempt, not only between them: the retries exist to survive a session
+			// that fails, not to stand in for bringing the device up.
+			var readiness = worker.Config.WaitUntilDeviceIsReady(worker.DeviceId, DeviceReadyTimeout, cancellationToken);
+
+			// The wait returns without looking at the token once the device is ready, and a restart
+			// the reader has already stopped the run for would take the device down for nothing.
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!restartTried && ShouldRestartDevice(readiness, attempt == SessionStartAttempts, lastFailure))
+			{
+				restartTried = true;
+				restarted = worker.Config.RestartDevice(worker.DeviceId, DeviceReadyTimeout);
+				if (restarted)
+				{
+					reporter.FixtureRetrying(
+						worker.Config,
+						worker.Index,
+						readiness == PlatformConfig.DeviceReadiness.Unresponsive
+							? "its device is not responding, restarting it"
+							: "restarting its device for the last attempt"
+					);
+					_ = worker.Config.WaitUntilDeviceIsReady(worker.DeviceId, DeviceReadyTimeout, cancellationToken);
+				}
+			}
+
 			try
 			{
 				return new TestDriver(
 					worker.Config.CreateAppiumDriver(worker.DeviceId),
 					worker.Config,
 					manager,
-					worker.BackendUrlVariable
+					worker.BackendUrlVariable,
+					cancellationToken
 				);
 			}
-			catch (Exception ex) when (ex is WebDriverException or FileNotFoundException or TimeoutException)
+			catch (Exception ex)
+				when (ex is WebDriverException or FileNotFoundException or TimeoutException
+					&& !cancellationToken.IsCancellationRequested
+				)
 			{
-				error = $"the Appium session failed to start after {SessionStartAttempts} attempts: {ex.Message}";
+				lastFailure = ex;
+				error = restarted
+					? $"the Appium session failed to start after {SessionStartAttempts} attempts, even on a freshly restarted device, so the device is not fit to run on: {ex.Message}"
+					: $"the Appium session failed to start after {SessionStartAttempts} attempts: {ex.Message}";
 				if (attempt < SessionStartAttempts)
 				{
 					reporter.FixtureRetrying(worker.Config, worker.Index, $"attempt {attempt} failed: {ex.Message}");
-					worker.Config.WaitUntilDeviceIsReady(worker.DeviceId, DeviceReadyTimeout);
 				}
 			}
 		}
 
 		return null;
 	}
+
+	/// <summary>
+	/// Decides whether a session attempt should be made on a freshly restarted device. A device that
+	/// has stopped answering gets one straight away. One that looks ready, or is merely slow to boot,
+	/// gets one only for the last attempt, and only when the earlier attempts failed in a way the
+	/// device can be behind — a missing app binary fails the same on any device.
+	/// </summary>
+	/// <param name="readiness">What the readiness wait before this attempt found.</param>
+	/// <param name="isLastAttempt">Whether this is the last attempt before the worker is lost.</param>
+	/// <param name="lastFailure">Why the previous attempt failed, or <c>null</c> before the first.</param>
+	/// <returns>Whether to restart the device before this attempt.</returns>
+	internal static bool ShouldRestartDevice(
+		PlatformConfig.DeviceReadiness readiness,
+		bool isLastAttempt,
+		Exception? lastFailure
+	) =>
+		readiness == PlatformConfig.DeviceReadiness.Unresponsive
+		|| (isLastAttempt && lastFailure is WebDriverException or TimeoutException);
 
 	/// <summary>
 	/// Runs journeys from the fixture's queue on one worker until the queue is empty, replacing the
@@ -556,7 +642,7 @@ public static class SuiteRunner
 		{
 			try
 			{
-				return JourneyRunner.Run(on, worker.Index, testCase, manager, reporter);
+				return JourneyRunner.Run(on, worker.Index, testCase, manager, reporter, cancellationToken);
 			}
 			catch when (cancellationToken.IsCancellationRequested)
 			{
@@ -578,7 +664,7 @@ public static class SuiteRunner
 		TestDriver? ReplaceSession()
 		{
 			QuitDriver(live, cancellationToken);
-			var replacement = TryStartSession(worker, manager, reporter, out var error);
+			var replacement = TryStartSession(worker, manager, reporter, cancellationToken, out var error);
 			if (replacement is null)
 			{
 				RunReporter.Note($"{worker.Config} worker {worker.Index}: {error}");
@@ -586,7 +672,17 @@ public static class SuiteRunner
 			}
 
 			replacement.Backend = backend;
-			worker.Config.OnBeforeTests(replacement, replacement.GetDeviceId());
+			try
+			{
+				worker.Config.OnBeforeTests(replacement, replacement.GetDeviceId());
+			}
+			catch
+			{
+				// Not yet the worker's live session, so the worker's own cleanup would not close it.
+				QuitDriver(replacement, cancellationToken);
+				throw;
+			}
+
 			return replacement;
 		}
 	}

@@ -10,6 +10,6 @@ public sealed record InvertSystemTheme() : JourneyAction
 	public override void Execute(TestDriver driver)
 	{
 		driver.Config.SetSystemTheme(driver.GetDeviceId(), !driver.Config.IsLightTheme);
-		TestDriver.WaitForAppToSettle(500);
+		driver.WaitForAppToSettle(500);
 	}
 }

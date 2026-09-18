@@ -19,6 +19,9 @@ internal abstract class RunReporter
 	/// <summary>Serializes console writes and the shared tally across the fixture threads.</summary>
 	protected static readonly Lock Gate = new();
 
+	/// <summary>The exit code of a run the reader interrupted — the shell's own for a SIGINT.</summary>
+	internal const int InterruptedExitCode = 130;
+
 	/// <summary>
 	/// Room to write into when nothing is there to measure. A redirected console has no width of its
 	/// own, so Spectre assumes a narrow one and hard-wraps to it — which would fold these lines in
@@ -38,6 +41,8 @@ internal abstract class RunReporter
 	private readonly List<JourneyResult> results = [];
 
 	private int skippedFixtures;
+
+	private bool interrupted;
 
 	/// <summary>Prints the header naming the suite and how much of it is about to run.</summary>
 	/// <param name="displayName">The suite's display name.</param>
@@ -178,6 +183,24 @@ internal abstract class RunReporter
 	public virtual void WorkerLost(PlatformConfig config, int worker, string reason) { }
 
 	/// <summary>
+	/// Records that the reader interrupted the run, which from here on reports only the journeys
+	/// that finished and exits with <see cref="InterruptedExitCode"/>.
+	/// </summary>
+	public void Interrupted()
+	{
+		lock (Gate)
+		{
+			interrupted = true;
+		}
+
+		ReportInterrupted();
+	}
+
+	/// <summary>Tells the reader the run is stopping, and that a second Ctrl+C quits at once.</summary>
+	protected virtual void ReportInterrupted() =>
+		Note("Stopping each journey at its next wait and closing its session. Press Ctrl+C again to quit now.");
+
+	/// <summary>
 	/// Runs the fixture fan-out inside whatever display this reporter keeps on screen for its
 	/// duration.
 	/// </summary>
@@ -189,7 +212,10 @@ internal abstract class RunReporter
 	/// Prints the end-of-run summary: each failure's explanation, then the banner indexing the
 	/// failed journeys by fixture, then the verdict as the last line.
 	/// </summary>
-	/// <returns>The process exit code — 0 when everything passed.</returns>
+	/// <returns>
+	/// The process exit code — 0 when everything passed, <see cref="InterruptedExitCode"/> when the
+	/// reader interrupted the run.
+	/// </returns>
 	public int Summarize()
 	{
 		var failed = Failures;
@@ -201,11 +227,14 @@ internal abstract class RunReporter
 			: skippedFixtures == 1 ? " 1 fixture was abandoned."
 			: $" {skippedFixtures} fixtures were abandoned.";
 		AnsiConsole.MarkupLine(
-			failed.Count == 0 && skippedFixtures == 0
-				? $"[green]All {results.Count} {journeys} passed.[/]"
-				: $"[red]{failed.Count} of {results.Count} {journeys} failed.{abandoned}[/]"
+			interrupted ? $"[yellow]Interrupted after {results.Count} {journeys}, {failed.Count} of them failed.[/]"
+			: failed.Count == 0 && skippedFixtures == 0 ? $"[green]All {results.Count} {journeys} passed.[/]"
+			: $"[red]{failed.Count} of {results.Count} {journeys} failed.{abandoned}[/]"
 		);
-		var exitCode = failed.Count == 0 && skippedFixtures == 0 ? 0 : 1;
+		var exitCode =
+			interrupted ? InterruptedExitCode
+			: failed.Count == 0 && skippedFixtures == 0 ? 0
+			: 1;
 		ReportRunFinished(exitCode);
 		return exitCode;
 	}

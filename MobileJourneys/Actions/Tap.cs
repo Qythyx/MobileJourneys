@@ -22,7 +22,7 @@ public sealed record Tap(string AutomationId) : JourneyAction(AutomationId)
 			}
 			catch (StaleElementReferenceException) when (attempt < 2)
 			{
-				TestDriver.WaitForAppToSettle(300);
+				driver.WaitForAppToSettle(300);
 			}
 		}
 	}

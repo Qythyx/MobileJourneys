@@ -60,8 +60,9 @@ public sealed class ScreenshotManager(ScreenshotStorage storage)
 		storage.BaselineExists(testStep) ? new(Image.Load(storage.ReadBaseline(testStep)), testStep) : null;
 
 	/// <summary>
-	/// Compares an image against a baseline at full resolution and disposes it. Mask regions are
-	/// in the image's pixel coordinates. Every PNG written from the capture — a first baseline or
+	/// Compares an image against a baseline at full resolution and disposes it, replacing whatever
+	/// failure artifacts the step's last run left. Mask regions are in the image's pixel
+	/// coordinates. Every PNG written from the capture — a first baseline or
 	/// a <c>.new</c> artifact — carries the mask regions in its metadata, so a <c>.new</c> the
 	/// viewer promotes to baseline keeps them; on later comparisons they are unioned with the live
 	/// regions so content that shifts size between runs stays masked in both images.
@@ -77,6 +78,7 @@ public sealed class ScreenshotManager(ScreenshotStorage storage)
 	{
 		using (actual)
 		{
+			storage.DeleteFailureArtifactsForStep(testStep);
 			ImageHelpers.SetMaskMetadata(actual, maskRegions);
 
 			if (!storage.BaselineExists(testStep))

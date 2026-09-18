@@ -263,7 +263,7 @@ public sealed record IosPlatformConfig(
 	/// Booting is left to the automation server, which boots a shutdown simulator it is given the
 	/// UDID of. Only the simulators' existence is ensured here.
 	/// </remarks>
-	internal override IReadOnlyList<string> StartDevices(TimeSpan timeout)
+	internal override IReadOnlyList<string> StartDevices(TimeSpan timeout, CancellationToken cancellationToken)
 	{
 		var listing = ProcessRunner.RunWithResult("xcrun", ["simctl", "list", "devices", "available", "-j"]);
 		if (listing is not { ExitCode: 0 })
