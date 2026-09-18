@@ -151,11 +151,16 @@ public abstract class ScreenshotStorage
 	internal abstract byte[]? ReadFile(PlatformConfig config, string container, string fileName);
 
 	/// <summary>
-	/// A token that changes whenever the file's contents change and is stable while they don't,
-	/// used to build cache-busting image URLs for the viewer. Empty when the file is missing.
+	/// A token that changes whenever the file's contents change and is stable while they don't —
+	/// across checkouts and machines too, since the viewer's manifest is committed. Used to build
+	/// cache-busting image URLs for the viewer. Empty when the file is missing.
 	/// </summary>
 	/// <param name="config">Platform fixture the file belongs to.</param>
 	/// <param name="container">'/'-separated container path relative to the platform folder.</param>
 	/// <param name="fileName">Filename within the container.</param>
-	internal abstract string FileVersion(PlatformConfig config, string container, string fileName);
+	/// <returns>The SHA-256 of the file's contents in lowercase hex, or an empty string.</returns>
+	internal string FileVersion(PlatformConfig config, string container, string fileName) =>
+		ReadFile(config, container, fileName) is { } bytes
+			? Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes))
+			: string.Empty;
 }

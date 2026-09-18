@@ -141,15 +141,6 @@ internal sealed class FilesystemScreenshotStorage(string rootDir) : ScreenshotSt
 	}
 
 	/// <inheritdoc/>
-	internal override string FileVersion(PlatformConfig config, string container, string fileName)
-	{
-		var path = Path.Combine(ContainerDir(config, container), fileName);
-		return File.Exists(path)
-			? File.GetLastWriteTimeUtc(path).Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture)
-			: string.Empty;
-	}
-
-	/// <inheritdoc/>
 	protected override void DeleteFile(PlatformConfig config, StoredFile file)
 	{
 		var path = Path.Combine(ContainerDir(config, file.Container), file.FileName);

@@ -180,6 +180,33 @@ public sealed class FilesystemScreenshotStorageTests
 	}
 
 	[Test]
+	public void FileVersionIsUnchangedWhenAFileIsRewrittenWithTheSameBytes()
+	{
+		_storage.WriteBaseline(K("Journey", "01 Step"), [1, 2, 3]);
+		var before = _storage.FileVersion(_config, "Journey", "01 Step.png");
+
+		_storage.WriteBaseline(K("Journey", "01 Step"), [1, 2, 3]);
+		File.SetLastWriteTimeUtc(FilePath("Journey", "01 Step.png"), DateTime.UtcNow.AddDays(1));
+
+		_ = _storage.FileVersion(_config, "Journey", "01 Step.png").Should().Be(before);
+	}
+
+	[Test]
+	public void FileVersionChangesWhenAFileIsRewrittenWithDifferentBytesOfTheSameLength()
+	{
+		_storage.WriteBaseline(K("Journey", "01 Step"), [1, 2, 3]);
+		var before = _storage.FileVersion(_config, "Journey", "01 Step.png");
+
+		_storage.WriteBaseline(K("Journey", "01 Step"), [3, 2, 1]);
+
+		_ = _storage.FileVersion(_config, "Journey", "01 Step.png").Should().NotBe(before);
+	}
+
+	[Test]
+	public void FileVersionIsEmptyWhenTheFileIsMissing() =>
+		_ = _storage.FileVersion(_config, "Journey", "01 Step.png").Should().BeEmpty();
+
+	[Test]
 	public void DefaultRootsUnderTestAssemblyProjectRootPath()
 	{
 		var defaultStorage = FilesystemScreenshotStorage.Default();

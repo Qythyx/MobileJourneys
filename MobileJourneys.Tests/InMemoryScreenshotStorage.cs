@@ -118,11 +118,6 @@ internal sealed class InMemoryScreenshotStorage : ScreenshotStorage
 	internal override byte[]? ReadFile(PlatformConfig config, string container, string fileName) =>
 		Lookup(config, container) is { } files && files.TryGetValue(fileName, out var bytes) ? bytes : null;
 
-	internal override string FileVersion(PlatformConfig config, string container, string fileName) =>
-		Lookup(config, container) is { } files && files.TryGetValue(fileName, out var bytes)
-			? bytes.Length.ToString(System.Globalization.CultureInfo.InvariantCulture)
-			: string.Empty;
-
 	protected override void DeleteFile(PlatformConfig config, StoredFile file)
 	{
 		if (Lookup(config, file.Container) is { } container)
