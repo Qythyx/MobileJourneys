@@ -159,18 +159,53 @@ public abstract record PlatformConfig(
 	/// never starts one of its own.
 	/// </summary>
 	/// <param name="timeout">How long to wait for a started device to become addressable.</param>
+	/// <param name="cancellationToken">Cancelled when the reader interrupts the run.</param>
 	/// <returns>One device id per instance, in worker order.</returns>
 	/// <exception cref="InvalidOperationException">A device could not be found, created, or started.</exception>
-	internal abstract IReadOnlyList<string> StartDevices(TimeSpan timeout);
+	/// <exception cref="OperationCanceledException">The run was interrupted.</exception>
+	internal abstract IReadOnlyList<string> StartDevices(TimeSpan timeout, CancellationToken cancellationToken);
 
 	/// <summary>
 	/// Blocks until a device is far enough through boot that a session can be started against it,
-	/// or until <paramref name="timeout"/> elapses. Does nothing where a device reports itself
+	/// or until <paramref name="timeout"/> elapses. Returns at once where a device reports itself
 	/// attached only once it is genuinely usable.
 	/// </summary>
 	/// <param name="deviceId">The device to wait for.</param>
-	/// <param name="timeout">How long to wait before giving up and letting the caller try anyway.</param>
-	internal virtual void WaitUntilDeviceIsReady(string deviceId, TimeSpan timeout) { }
+	/// <param name="timeout">How long to wait for a device that is still booting.</param>
+	/// <param name="cancellationToken">Cancelled when the reader interrupts the run.</param>
+	/// <returns>How far the device got by the time the wait ended.</returns>
+	/// <exception cref="OperationCanceledException">The run was interrupted.</exception>
+	internal virtual DeviceReadiness WaitUntilDeviceIsReady(
+		string deviceId,
+		TimeSpan timeout,
+		CancellationToken cancellationToken
+	) => DeviceReadiness.Ready;
+
+	/// <summary>What <see cref="WaitUntilDeviceIsReady"/> found the device doing.</summary>
+	internal enum DeviceReadiness
+	{
+		/// <summary>A session can be started against it.</summary>
+		Ready = 0,
+
+		/// <summary>It was still booting when the wait ran out.</summary>
+		Booting = 1,
+
+		/// <summary>It has booted, but no longer answers, and only <see cref="RestartDevice"/> brings it back.</summary>
+		Unresponsive = 2,
+	}
+
+	/// <summary>
+	/// Replaces a running device with a fresh boot of the same one, under the same device id. The
+	/// device may be mid-boot on return; <see cref="WaitUntilDeviceIsReady"/> waits it out. Once the
+	/// old device is gone the new one is always started, so a restart never leaves a device dead.
+	/// </summary>
+	/// <param name="deviceId">The device to restart.</param>
+	/// <param name="timeout">How long to wait for the old device to go.</param>
+	/// <returns>
+	/// Whether a fresh boot was started. <c>false</c> where the platform cannot restart a device, or
+	/// could not tell which running device to stop.
+	/// </returns>
+	internal virtual bool RestartDevice(string deviceId, TimeSpan timeout) => false;
 
 	// --- Keyboard / alerts ---
 

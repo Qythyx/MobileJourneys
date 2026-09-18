@@ -64,7 +64,7 @@ public sealed record AndroidPlatformConfig(
 	public static void SelectPickerItem(TestDriver driver, string automationId, int itemIndex)
 	{
 		driver.FindElement(automationId, TimeSpan.FromSeconds(5)).Click();
-		TestDriver.WaitForAppToSettle(500);
+		driver.WaitForAppToSettle(500);
 
 		// Android MAUI Picker: opens an AlertDialog with CheckedTextView radio button items.
 		// Wait for the dialog to appear before looking for items.
@@ -344,7 +344,7 @@ public sealed record AndroidPlatformConfig(
 	/// only by instances that all run read-only: the emulator refuses to start a read-only instance
 	/// beside a writable one. A lone instance runs writable, so its quick-boot snapshot is saved.
 	/// </remarks>
-	internal override IReadOnlyList<string> StartDevices(TimeSpan timeout)
+	internal override IReadOnlyList<string> StartDevices(TimeSpan timeout, CancellationToken cancellationToken)
 	{
 		var deadline = DateTime.UtcNow + timeout;
 		var running = RunningInstances();
@@ -359,7 +359,7 @@ public sealed record AndroidPlatformConfig(
 
 			while (DateTime.UtcNow < deadline && RunningInstances().Count > 0)
 			{
-				Thread.Sleep(BootPollInterval);
+				cancellationToken.Sleep(BootPollInterval);
 			}
 
 			running = [];
@@ -367,7 +367,7 @@ public sealed record AndroidPlatformConfig(
 
 		for (var instance = running.Count; instance < Instances; instance++)
 		{
-			ProcessRunner.Start(EmulatorPath, Instances == 1 ? ["-avd", AvdName] : ["-avd", AvdName, ReadOnlyFlag]);
+			ProcessRunner.Start(EmulatorPath, EmulatorArguments(Instances > 1));
 		}
 
 		while (true)
@@ -386,13 +386,82 @@ public sealed record AndroidPlatformConfig(
 			}
 
 			KickOfflineDevices();
-			Thread.Sleep(BootPollInterval);
+			cancellationToken.Sleep(BootPollInterval);
 		}
 	}
 
 	private const string ReadOnlyFlag = "-read-only";
 
-	/// <summary>The command lines of this AVD's running emulator instances.</summary>
+	private string[] EmulatorArguments(bool readOnly) => readOnly ? ["-avd", AvdName, ReadOnlyFlag] : ["-avd", AvdName];
+
+	/// <inheritdoc/>
+	/// <remarks>
+	/// The instance is killed outright: stopped gracefully, a writable instance saves its quick-boot
+	/// snapshot, and the fresh boot would load the very state it was restarted to escape. Its process
+	/// is found from the console port its serial names, without asking the device, and it comes back
+	/// on that same port so the serial holds. It comes back read-only exactly when it ran read-only,
+	/// since the emulator refuses to mix the two among one AVD's instances.
+	/// </remarks>
+	internal override bool RestartDevice(string deviceId, TimeSpan timeout)
+	{
+		var deadline = DateTime.UtcNow + timeout;
+		var consolePort = deviceId[EmulatorSerialPrefix.Length..];
+		// lsof exits 1 with nothing printed when no process listens on the port.
+		if (
+			ProcessRunner.RunWithResult(LsofPath, ["-nP", $"-iTCP:{consolePort}", "-sTCP:LISTEN", "-t"])
+			is not { Status: ProcessRunner.ShellResultStatus.Completed } listener
+		)
+		{
+			return false;
+		}
+
+		var readOnly = Instances > 1;
+		var pid = listener.Output.Trim();
+		if (pid.Length > 0)
+		{
+			if (InstanceListeningOn(pid, RunningInstances()) is not { } instance)
+			{
+				return false;
+			}
+
+			readOnly = instance.Contains(ReadOnlyFlag, StringComparison.Ordinal);
+			_ = ProcessRunner.RunWithResult(KillPath, ["-9", pid]);
+			while (InstanceListeningOn(pid, RunningInstances()) is not null)
+			{
+				if (DateTime.UtcNow >= deadline)
+				{
+					return false;
+				}
+
+				// Not cut short by an interrupted run: the device is on its way down, and bringing it
+				// back is what spares the next run a cold start.
+				Thread.Sleep(BootPollInterval);
+			}
+		}
+
+		ProcessRunner.Start(EmulatorPath, [.. EmulatorArguments(readOnly), "-port", consolePort]);
+		return true;
+	}
+
+	/// <summary>
+	/// Picks the running instance a console port's listener belongs to, so that a port some other
+	/// process has taken since is never what gets killed.
+	/// </summary>
+	/// <param name="listenerPids">What <c>lsof -t</c> printed for the port: one process id per line.</param>
+	/// <param name="runningInstances">This AVD's instances, as <c>pgrep -fl</c> prints them.</param>
+	/// <returns>The instance's command line, or <c>null</c> unless the listener is exactly one of them.</returns>
+	internal static string? InstanceListeningOn(string listenerPids, IEnumerable<string> runningInstances) =>
+		listenerPids.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) is [var pid]
+			? runningInstances.FirstOrDefault(commandLine => commandLine.StartsWith($"{pid} ", StringComparison.Ordinal))
+			: null;
+
+	private const string EmulatorSerialPrefix = "emulator-";
+
+	private const string LsofPath = "/usr/sbin/lsof";
+
+	private const string KillPath = "/bin/kill";
+
+	/// <summary>The process ids and command lines of this AVD's running emulator instances.</summary>
 	private List<string> RunningInstances() =>
 		// Anchored on a separator so one AVD is not matched by another that extends its name.
 		ProcessRunner.RunWithResult(PgrepPath, ["-fl", $"qemu-system.*-avd {AvdName}( |$)"])
@@ -411,15 +480,54 @@ public sealed record AndroidPlatformConfig(
 	/// app — most visibly as <c>Activity class {io.appium.settings/…} does not exist</c>. Waiting for
 	/// the boot to actually complete closes that window. A device starved off its transport by a
 	/// loaded host reports <c>device offline</c> and is waited out here too.
+	/// <para/>
+	/// A device long past its boot can pass every one of those checks and still not start an
+	/// activity, so readiness ends with starting the home screen — the kind of call a session opens
+	/// with, given the time a session gives it. One that times out has stopped answering, and waiting
+	/// longer does not bring it back.
 	/// </remarks>
-	internal override void WaitUntilDeviceIsReady(string deviceId, TimeSpan timeout)
+	internal override DeviceReadiness WaitUntilDeviceIsReady(
+		string deviceId,
+		TimeSpan timeout,
+		CancellationToken cancellationToken
+	)
 	{
 		var deadline = DateTime.UtcNow + timeout;
-		while (DateTime.UtcNow < deadline && !IsBootComplete(deviceId))
+		while (DateTime.UtcNow < deadline)
 		{
+			var home = IsBootComplete(deviceId)
+				? ProcessRunner.RunWithResult(
+					AdbPath,
+					[
+						"-s",
+						deviceId,
+						"shell",
+						"am",
+						"start",
+						"-W",
+						"-a",
+						"android.intent.action.MAIN",
+						"-c",
+						"android.intent.category.HOME",
+					],
+					AppWaitDurationMs / 1000
+				)
+				: null;
+			if (home is { ExitCode: 0 })
+			{
+				return DeviceReadiness.Ready;
+			}
+
+			if (home is { Status: ProcessRunner.ShellResultStatus.TimedOut })
+			{
+				return DeviceReadiness.Unresponsive;
+			}
+
 			KickOfflineDevices();
-			Thread.Sleep(BootPollInterval);
+			cancellationToken.Sleep(BootPollInterval);
 		}
+
+		return DeviceReadiness.Booting;
 	}
 
 	/// <summary>

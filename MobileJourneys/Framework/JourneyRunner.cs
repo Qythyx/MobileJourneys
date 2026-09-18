@@ -9,7 +9,8 @@ internal static class JourneyRunner
 		int worker,
 		TestCase testCase,
 		ScreenshotManager manager,
-		RunReporter reporter
+		RunReporter reporter,
+		CancellationToken cancellationToken
 	)
 	{
 		var journey = testCase.Journey;
@@ -68,6 +69,7 @@ internal static class JourneyRunner
 		var failures = new List<JourneyFailureException>();
 		foreach (var (number, name, execute, maskElements, prefetchMasks, journeyStep) in steps)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var testStep = new TestStep(
 				driver.Config,
 				journey.ContainerForStep(number),
@@ -78,7 +80,6 @@ internal static class JourneyRunner
 			string? detail = null;
 			try
 			{
-				manager.DeleteFailureArtifactsForStep(testStep);
 				var stepResult = driver.DoActionAndCompareWithBaseline(execute, testStep, maskElements, prefetchMasks);
 				stepPassed = stepResult.Passed;
 				if (!stepResult.Passed)
@@ -89,10 +90,15 @@ internal static class JourneyRunner
 					failures.Add(new JourneyFailureException(message, journey, journeyStep, number, totalSteps, name));
 				}
 			}
-			catch (Exception ex)
+			// Once the run is interrupted, a step's exception comes from the interruption: the driver's
+			// waits throw to stop it, and the Appium server receives the same Ctrl+C. Recorded as a
+			// failure, it would leave artifacts that --rerun then selects the journey on — and the step's
+			// artifacts from its last run stay, so an interrupted journey is still selected by them.
+			catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
 			{
 				stepPassed = false;
 				detail = ex.Message;
+				manager.DeleteFailureArtifactsForStep(testStep);
 				HandleStepFailure(driver, manager, ex, testStep);
 				var message = $"step {number}/{totalSteps}: {name} — {ex.Message}";
 				failures.Add(new JourneyFailureException(message, journey, journeyStep, number, totalSteps, name, ex));

@@ -19,11 +19,16 @@ namespace MobileJourneys;
 /// <param name="config">Platform fixture (drives platform-specific branches).</param>
 /// <param name="screenshotManager">Instance used for baseline capture and comparison.</param>
 /// <param name="backendUrlVariable">The name the app reads the backend's address under.</param>
+/// <param name="cancellationToken">
+/// Cancelled when the reader interrupts the run; every wait this driver makes then throws
+/// <see cref="OperationCanceledException"/>.
+/// </param>
 public sealed class TestDriver(
 	AppiumDriver app,
 	PlatformConfig config,
 	ScreenshotManager screenshotManager,
-	string backendUrlVariable
+	string backendUrlVariable,
+	CancellationToken cancellationToken
 )
 {
 	/// <summary>
@@ -167,7 +172,7 @@ public sealed class TestDriver(
 				previousTree = null;
 			}
 
-			Task.Delay(PollIntervalMs).Wait();
+			WaitForAppToSettle(PollIntervalMs);
 		}
 	}
 
@@ -196,7 +201,7 @@ public sealed class TestDriver(
 			try
 			{
 				_ = FindElementNow(automationId);
-				Thread.Sleep(250);
+				WaitForAppToSettle(250);
 			}
 			catch (NoSuchElementException)
 			{
@@ -235,18 +240,21 @@ public sealed class TestDriver(
 
 		try
 		{
-			return wait.Until(_ =>
-			{
-				var element = FindElementNow(automationId);
-
-				if (condition is not { } c || c.check(element))
+			return wait.Until(
+				_ =>
 				{
-					return element;
-				}
+					var element = FindElementNow(automationId);
 
-				lastElement = element;
-				return null;
-			});
+					if (condition is not { } c || c.check(element))
+					{
+						return element;
+					}
+
+					lastElement = element;
+					return null;
+				},
+				cancellationToken
+			);
 		}
 		catch (WebDriverTimeoutException) when (condition is { } c && lastElement is not null)
 		{
@@ -305,7 +313,10 @@ public sealed class TestDriver(
 		);
 
 	/// <summary>Sleeps for the given duration to let UI animations / async work settle.</summary>
-	public static void WaitForAppToSettle(int milliseconds) => Task.Delay(milliseconds).Wait();
+	/// <param name="milliseconds">How long to sleep.</param>
+	/// <exception cref="OperationCanceledException">The run was interrupted.</exception>
+	public void WaitForAppToSettle(int milliseconds) =>
+		cancellationToken.Sleep(TimeSpan.FromMilliseconds(milliseconds));
 
 	/// <summary>
 	/// Polls screenshots until one matches the step's baseline (skipping masked regions), then
@@ -386,11 +397,12 @@ public sealed class TestDriver(
 		var elapsed = stopwatch.Elapsed;
 		while (stopwatch.Elapsed.TotalMilliseconds < MaxWaitMs)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var screenshot = App.GetScreenshot().AsImage();
 			if (previousImage is not null && (stopwatch.Elapsed - elapsed).TotalMilliseconds < MinMsBetweenScreenshots)
 			{
 				screenshot.Dispose();
-				Task.Delay(100).Wait();
+				WaitForAppToSettle(100);
 				continue;
 			}
 			elapsed = stopwatch.Elapsed;
@@ -493,19 +505,7 @@ public sealed class TestDriver(
 	{
 		try
 		{
-			_ = new WebDriverWait(App, timeout ?? TimeSpan.FromSeconds(5)).Until(driver =>
-			{
-				try
-				{
-					_ = driver.SwitchTo().Alert();
-					return true;
-				}
-				catch (NoAlertPresentException)
-				{
-					return false;
-				}
-			});
-
+			WaitForAlert(timeout ?? TimeSpan.FromSeconds(5));
 			Config.DismissDefaultAlert(App.SwitchTo().Alert());
 
 			// Allow the alert dismissal animation to complete before the next action.
@@ -539,18 +539,21 @@ public sealed class TestDriver(
 
 	/// <summary>Waits for a system alert to appear within the timeout.</summary>
 	public void WaitForAlert(TimeSpan timeout) =>
-		_ = new WebDriverWait(App, timeout).Until(driver =>
-		{
-			try
+		_ = new WebDriverWait(App, timeout).Until(
+			driver =>
 			{
-				_ = driver.SwitchTo().Alert();
-				return true;
-			}
-			catch (NoAlertPresentException)
-			{
-				return false;
-			}
-		});
+				try
+				{
+					_ = driver.SwitchTo().Alert();
+					return true;
+				}
+				catch (NoAlertPresentException)
+				{
+					return false;
+				}
+			},
+			cancellationToken
+		);
 
 	/// <summary>
 	/// Polls until the banner's region stops changing, and keeps that as what
@@ -568,6 +571,7 @@ public sealed class TestDriver(
 		var previous = CropToBannerRegion(CaptureDeviceScreenshotBytes());
 		while (stopwatch.Elapsed < EmptyBannerRegionSettleTimeout)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var current = CropToBannerRegion(CaptureDeviceScreenshotBytes());
 			if (ImageHelpers.AreImagesEqual(current, previous, []))
 			{
@@ -609,6 +613,7 @@ public sealed class TestDriver(
 
 		while (stopwatch.Elapsed < timeout)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var currentBytes = CaptureDeviceScreenshotBytes();
 			var current = CropToBannerRegion(currentBytes);
 			var showsBanner = !ImageHelpers.AreImagesEqual(current, emptyRegion, []);

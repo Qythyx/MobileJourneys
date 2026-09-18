@@ -41,6 +41,10 @@ internal sealed class LiveStatusReporter(IReadOnlyList<TestCase> selected) : Run
 		table.Lost(config, worker, reason);
 
 	/// <inheritdoc/>
+	/// <remarks>Shown under the table, since writing under a live display corrupts it.</remarks>
+	protected override void ReportInterrupted() => table.Stopping();
+
+	/// <inheritdoc/>
 	/// <remarks>
 	/// The row carries the reason, and nothing is written to the console: fixtures are abandoned
 	/// while the table is live now, and writing under a live display corrupts it.
