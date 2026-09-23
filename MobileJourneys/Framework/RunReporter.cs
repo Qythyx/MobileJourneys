@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Globalization;
 using Spectre.Console;
 
 namespace MobileJourneys.Framework;
@@ -39,6 +41,12 @@ internal abstract class RunReporter
 	}
 
 	private readonly List<JourneyResult> results = [];
+
+	/// <summary>Each fixture's timing record, once the fixture has finished with it.</summary>
+	private readonly Dictionary<PlatformConfig, FixtureTimings> timings = [];
+
+	/// <summary>Runs from the reporter's creation, before any device starts, to the summary.</summary>
+	private readonly Stopwatch runStopwatch = Stopwatch.StartNew();
 
 	private int skippedFixtures;
 
@@ -183,6 +191,20 @@ internal abstract class RunReporter
 	public virtual void WorkerLost(PlatformConfig config, int worker, string reason) { }
 
 	/// <summary>
+	/// Takes a fixture's timing record once its last worker has finished, for the end-of-run report.
+	/// </summary>
+	/// <param name="config">The fixture that finished.</param>
+	/// <param name="fixtureTimings">What its sessions recorded.</param>
+	public void FixtureFinished(PlatformConfig config, FixtureTimings fixtureTimings)
+	{
+		fixtureTimings.Finish();
+		lock (Gate)
+		{
+			timings[config] = fixtureTimings;
+		}
+	}
+
+	/// <summary>
 	/// Records that the reader interrupted the run, which from here on reports only the journeys
 	/// that finished and exits with <see cref="InterruptedExitCode"/>.
 	/// </summary>
@@ -210,7 +232,8 @@ internal abstract class RunReporter
 
 	/// <summary>
 	/// Prints the end-of-run summary: each failure's explanation, then the banner indexing the
-	/// failed journeys by fixture, then the verdict as the last line.
+	/// failed journeys by fixture, then how long each fixture spent waiting on its devices, then the
+	/// verdict as the last line.
 	/// </summary>
 	/// <returns>
 	/// The process exit code — 0 when everything passed, <see cref="InterruptedExitCode"/> when the
@@ -221,6 +244,7 @@ internal abstract class RunReporter
 		var failed = Failures;
 		ReportFailureDetails(failed);
 		FailureSummary.Print(Console.Out);
+		ReportTimings();
 		var journeys = results.Count == 1 ? "journey" : "journeys";
 		var abandoned =
 			skippedFixtures == 0 ? ""
@@ -257,6 +281,81 @@ internal abstract class RunReporter
 			AnsiConsole.WriteLine(Indent(result.Explanation));
 		}
 	}
+
+	/// <summary>
+	/// Prints how long each fixture spent waiting on its devices. The lookup columns are the device's
+	/// own speed, whatever the app was doing, so a device that has slowed shows there before it shows
+	/// as timeouts; the wait columns say how close the run came to the budget; and the fixture and run
+	/// times are what a fixture's device count is weighed against.
+	/// </summary>
+	private void ReportTimings()
+	{
+		List<(string Fixture, int Journeys, FixtureTimings.Summary Figures, TimeSpan Budget)> rows;
+		lock (Gate)
+		{
+			rows =
+			[
+				.. timings
+					.Select(entry =>
+						(
+							FixtureLabel(entry.Key),
+							results.Count(result => result.TestCase.Config == entry.Key),
+							entry.Value.Summarize(),
+							entry.Value.WaitBudget
+						)
+					)
+					.OrderBy(row => row.Item1, StringComparer.Ordinal),
+			];
+		}
+
+		if (rows.Count == 0)
+		{
+			return;
+		}
+
+		var table = new Table().Border(TableBorder.Rounded).BorderColor(Color.Grey);
+		_ = table.AddColumn(new TableColumn("Fixture").NoWrap());
+		foreach (
+			var header in new[] { "Journeys", "Time", "Lookup p50", "Lookup max", "Wait avg", "Wait max", "Timed out" }
+		)
+		{
+			_ = table.AddColumn(new TableColumn(header).RightAligned().NoWrap());
+		}
+
+		foreach (var (fixture, journeys, figures, budget) in rows)
+		{
+			var longestWait =
+				figures.Waits == 0
+					? "–"
+					: $"{Duration(figures.WaitMax)} {figures.LongestWaitKind.ToString().ToLowerInvariant()}"
+						+ $" ({Math.Round(figures.WaitMax / budget * 100)}% of budget)";
+			_ = table.AddRow(
+				Markup.Escape(fixture),
+				journeys.ToString(CultureInfo.InvariantCulture),
+				Duration(figures.Elapsed),
+				Duration(figures.LookupMedian),
+				Duration(figures.LookupMax),
+				Duration(figures.WaitAverage),
+				Markup.Escape(longestWait),
+				figures.WaitsTimedOut.ToString(CultureInfo.InvariantCulture)
+			);
+		}
+
+		AnsiConsole.WriteLine();
+		AnsiConsole.Write(table);
+		AnsiConsole.MarkupLine(
+			$"[dim]Run time {Duration(runStopwatch.Elapsed)}; wait budget {Duration(rows[0].Budget)}.[/]"
+		);
+		AnsiConsole.WriteLine();
+	}
+
+	/// <summary>Words a duration the way the timing report reads: <c>0.4s</c>, <c>12.3s</c>, <c>17m 3s</c>.</summary>
+	/// <param name="duration">The duration to word.</param>
+	/// <returns>The duration, in seconds to one decimal under a minute and in minutes and seconds from there.</returns>
+	internal static string Duration(TimeSpan duration) =>
+		duration.TotalMinutes < 1
+			? duration.TotalSeconds.ToString("F1", CultureInfo.InvariantCulture) + "s"
+			: $"{(int)duration.TotalMinutes}m {duration.Seconds}s";
 
 	/// <summary>Names a fixture the short way — device and theme, without the platform and version.</summary>
 	/// <param name="config">The fixture to name.</param>

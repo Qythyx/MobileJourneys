@@ -55,13 +55,13 @@ internal static class InteractiveMenu
 	private static RunOptions? ToOptions(Choice choice, FrameworkConfig config) =>
 		choice switch
 		{
-			Choice.RunAll => new RunOptions(RunMode.Run, [], [], false, null, null),
+			Choice.RunAll => new RunOptions(RunMode.Run),
 			Choice.RunSome => PromptForSelection(config),
-			Choice.RerunFailed => new RunOptions(RunMode.Run, [], [], true, null, null),
-			Choice.Review => new RunOptions(RunMode.Review, [], [], false, null, null),
-			Choice.ListExtraneous => new RunOptions(RunMode.ListExtraneous, [], [], false, null, null),
-			Choice.DeleteExtraneous => new RunOptions(RunMode.DeleteExtraneous, [], [], false, null, null),
-			Choice.Quit => new RunOptions(RunMode.Quit, [], [], false, null, null),
+			Choice.RerunFailed => new RunOptions(RunMode.Run) { Rerun = true },
+			Choice.Review => new RunOptions(RunMode.Review),
+			Choice.ListExtraneous => new RunOptions(RunMode.ListExtraneous),
+			Choice.DeleteExtraneous => new RunOptions(RunMode.DeleteExtraneous),
+			Choice.Quit => new RunOptions(RunMode.Quit),
 			_ => throw new ArgumentOutOfRangeException(nameof(choice)),
 		};
 
@@ -90,7 +90,7 @@ internal static class InteractiveMenu
 		var journeys = PromptForJourneys(config);
 		return journeys.Count == 0
 			? null
-			: new RunOptions(RunMode.Run, PromptForFilters(), journeys, false, null, null);
+			: new RunOptions(RunMode.Run) { Filters = PromptForFilters(), JourneyNames = journeys };
 	}
 
 	/// <summary>Offers every journey by name, with a group header that takes the lot.</summary>

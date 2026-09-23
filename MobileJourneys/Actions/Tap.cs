@@ -17,7 +17,7 @@ public sealed record Tap(string AutomationId) : JourneyAction(AutomationId)
 		{
 			try
 			{
-				driver.FindElement(AutomationId, TimeSpan.FromSeconds(5)).Click();
+				driver.FindElement(AutomationId).Click();
 				return;
 			}
 			catch (StaleElementReferenceException) when (attempt < 2)

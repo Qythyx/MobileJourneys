@@ -226,6 +226,7 @@ public static class SuiteRunner
 											group.Key,
 											[.. group],
 											config.Backend,
+											options.WaitBudget,
 											reporter,
 											manager,
 											cancellation.Token
@@ -280,7 +281,14 @@ public static class SuiteRunner
 	/// Name the app reads its backend URL from, kept so a replacement session can be opened on the
 	/// same terms as the first.
 	/// </param>
-	private sealed record Worker(PlatformConfig Config, int Index, string DeviceId, string BackendUrlVariable);
+	/// <param name="Timings">The fixture's timing record, which every session on the worker writes to.</param>
+	private sealed record Worker(
+		PlatformConfig Config,
+		int Index,
+		string DeviceId,
+		string BackendUrlVariable,
+		FixtureTimings Timings
+	);
 
 	/// <summary>
 	/// Orders a fixture's journeys longest first, so that a long one is never picked up last and
@@ -298,6 +306,7 @@ public static class SuiteRunner
 	/// <param name="config">The platform fixture to bring up.</param>
 	/// <param name="cases">The journeys selected for it.</param>
 	/// <param name="backendSetup">The suite's backend, or <c>null</c> for an app that needs none.</param>
+	/// <param name="waitBudget">How long any one wait for the app may take before its step fails.</param>
 	/// <param name="reporter">Told what each worker is doing, and when the fixture has to be abandoned.</param>
 	/// <param name="manager">Screenshot storage the drivers write through.</param>
 	/// <param name="cancellationToken">Cancelled when the reader interrupts the run.</param>
@@ -305,70 +314,81 @@ public static class SuiteRunner
 		PlatformConfig config,
 		IReadOnlyList<TestCase> cases,
 		FrameworkConfig.BackendSetup? backendSetup,
+		TimeSpan waitBudget,
 		RunReporter reporter,
 		ScreenshotManager manager,
 		CancellationToken cancellationToken
 	)
 	{
-		IReadOnlyList<string> deviceIds;
+		// Started before the devices are, so the fixture's time covers bringing them up: that is part
+		// of what a run with more devices per fixture costs.
+		var timings = new FixtureTimings(waitBudget);
 		try
 		{
-			deviceIds = config.StartDevices(DeviceReadyTimeout, cancellationToken);
-		}
-		catch (InvalidOperationException ex)
-		{
-			reporter.FixtureSkipped(config, cases.Count, $"its devices could not be started: {ex.Message}");
-			return;
-		}
+			IReadOnlyList<string> deviceIds;
+			try
+			{
+				deviceIds = config.StartDevices(DeviceReadyTimeout, cancellationToken);
+			}
+			catch (InvalidOperationException ex)
+			{
+				reporter.FixtureSkipped(config, cases.Count, $"its devices could not be started: {ex.Message}");
+				return;
+			}
 
-		var queue = new ConcurrentQueue<TestCase>(LongestFirst(cases));
-		var started = 0;
-		var lost = new string?[deviceIds.Count];
-		var backendUrlVariable = backendSetup?.UrlVariable ?? string.Empty;
-		// Each worker minds the token itself and closes its own session on the way out, so the fixture
-		// waits for all of them rather than leaving one mid-cleanup when the run is interrupted.
-		Task.WaitAll([
-			.. deviceIds.Select(
-				(deviceId, index) =>
-					Task.Run(() =>
-					{
-						var worker = new Worker(config, index + 1, deviceId, backendUrlVariable);
-						var driver = StartWorker(
-							worker,
-							backendSetup,
-							reporter,
-							manager,
-							cancellationToken,
-							out var failure
-						);
-						if (driver is null)
+			var queue = new ConcurrentQueue<TestCase>(LongestFirst(cases));
+			var started = 0;
+			var lost = new string?[deviceIds.Count];
+			var backendUrlVariable = backendSetup?.UrlVariable ?? string.Empty;
+			// Each worker minds the token itself and closes its own session on the way out, so the fixture
+			// waits for all of them rather than leaving one mid-cleanup when the run is interrupted.
+			Task.WaitAll([
+				.. deviceIds.Select(
+					(deviceId, index) =>
+						Task.Run(() =>
 						{
-							// Once the run is interrupted, a worker that did not come up was stopped by it,
-							// and reporting that as a lost device would blame the device.
-							cancellationToken.ThrowIfCancellationRequested();
-							lost[index] = failure;
-							reporter.WorkerLost(config, worker.Index, failure);
-							return;
-						}
+							var worker = new Worker(config, index + 1, deviceId, backendUrlVariable, timings);
+							var driver = StartWorker(
+								worker,
+								backendSetup,
+								reporter,
+								manager,
+								cancellationToken,
+								out var failure
+							);
+							if (driver is null)
+							{
+								// Once the run is interrupted, a worker that did not come up was stopped by it,
+								// and reporting that as a lost device would blame the device.
+								cancellationToken.ThrowIfCancellationRequested();
+								lost[index] = failure;
+								reporter.WorkerLost(config, worker.Index, failure);
+								return;
+							}
 
-						_ = Interlocked.Increment(ref started);
-						lost[index] = RunWorker(worker, driver, queue, reporter, manager, cancellationToken);
-					})
-			),
-		]);
+							_ = Interlocked.Increment(ref started);
+							lost[index] = RunWorker(worker, driver, queue, reporter, manager, cancellationToken);
+						})
+				),
+			]);
 
-		if (cancellationToken.IsCancellationRequested)
-		{
-			return;
+			if (cancellationToken.IsCancellationRequested)
+			{
+				return;
+			}
+
+			if (started == 0)
+			{
+				reporter.FixtureSkipped(config, cases.Count, Verdict("none of its devices could host the app", lost));
+			}
+			else if (!queue.IsEmpty)
+			{
+				reporter.FixtureSkipped(config, queue.Count, Verdict("every device it had was lost", lost));
+			}
 		}
-
-		if (started == 0)
+		finally
 		{
-			reporter.FixtureSkipped(config, cases.Count, Verdict("none of its devices could host the app", lost));
-		}
-		else if (!queue.IsEmpty)
-		{
-			reporter.FixtureSkipped(config, queue.Count, Verdict("every device it had was lost", lost));
+			reporter.FixtureFinished(config, timings);
 		}
 	}
 
@@ -469,7 +489,11 @@ public static class SuiteRunner
 		{
 			// Before the first attempt, not only between them: the retries exist to survive a session
 			// that fails, not to stand in for bringing the device up.
-			var readiness = worker.Config.WaitUntilDeviceIsReady(worker.DeviceId, DeviceReadyTimeout, cancellationToken);
+			var readiness = worker.Config.WaitUntilDeviceIsReady(
+				worker.DeviceId,
+				DeviceReadyTimeout,
+				cancellationToken
+			);
 
 			// The wait returns without looking at the token once the device is ready, and a restart
 			// the reader has already stopped the run for would take the device down for nothing.
@@ -498,6 +522,7 @@ public static class SuiteRunner
 					worker.Config,
 					manager,
 					worker.BackendUrlVariable,
+					worker.Timings,
 					cancellationToken
 				);
 			}

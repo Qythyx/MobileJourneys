@@ -17,7 +17,7 @@ public sealed record TypeText(string AutomationId, string Text) : JourneyAction(
 	/// <inheritdoc/>
 	public override void Execute(TestDriver driver)
 	{
-		var element = driver.FindElement(AutomationId, TimeSpan.FromSeconds(5));
+		var element = driver.FindElement(AutomationId);
 		element.Click();
 		element.Clear();
 		element.SendKeys(Text);

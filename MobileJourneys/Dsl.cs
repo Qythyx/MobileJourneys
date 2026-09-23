@@ -137,14 +137,9 @@ public static class Dsl
 
 	#region Expectations
 
-	/// <summary>Creates a <see cref="Expectations.Found"/> expectation with the default timeout.</summary>
+	/// <summary>Creates a <see cref="Expectations.Found"/> expectation.</summary>
 	/// <param name="automationId">AutomationId of the element that must be found.</param>
 	public static Found Found(string automationId) => new(automationId);
-
-	/// <summary>Creates a <see cref="Expectations.Found"/> expectation with an explicit timeout.</summary>
-	/// <param name="automationId">AutomationId of the element that must be found.</param>
-	/// <param name="timeoutSeconds">Maximum seconds to wait before failing.</param>
-	public static Found Found(string automationId, int timeoutSeconds) => new(automationId, timeoutSeconds);
 
 	/// <summary>Creates a <see cref="Expectations.NotFound"/> expectation.</summary>
 	/// <param name="automationId">AutomationId of the element that must be absent.</param>

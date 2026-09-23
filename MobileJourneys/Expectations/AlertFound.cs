@@ -1,11 +1,10 @@
 namespace MobileJourneys.Expectations;
 
 /// <summary>
-/// Waits for a system alert/dialog to be found within the given timeout.
+/// Waits for a system alert/dialog to be found within the wait budget.
 /// </summary>
-/// <param name="TimeoutSeconds">Maximum seconds to wait before failing.</param>
-public sealed record AlertFound(int TimeoutSeconds = 10) : Expectation
+public sealed record AlertFound() : Expectation
 {
 	/// <inheritdoc/>
-	public override void Verify(TestDriver driver) => driver.WaitForAlert(TimeSpan.FromSeconds(TimeoutSeconds));
+	public override void Verify(TestDriver driver) => driver.WaitForAlert();
 }

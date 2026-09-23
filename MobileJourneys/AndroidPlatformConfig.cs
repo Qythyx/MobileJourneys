@@ -1,7 +1,6 @@
 using OpenQA.Selenium;
 using OpenQA.Selenium.Appium;
 using OpenQA.Selenium.Appium.Android;
-using OpenQA.Selenium.Support.UI;
 
 namespace MobileJourneys;
 
@@ -63,14 +62,15 @@ public sealed record AndroidPlatformConfig(
 	/// <param name="itemIndex">Zero-based index of the item to select.</param>
 	public static void SelectPickerItem(TestDriver driver, string automationId, int itemIndex)
 	{
-		driver.FindElement(automationId, TimeSpan.FromSeconds(5)).Click();
+		driver.FindElement(automationId).Click();
 		driver.WaitForAppToSettle(500);
 
 		// Android MAUI Picker: opens an AlertDialog with CheckedTextView radio button items.
-		// Wait for the dialog to appear before looking for items.
-		var wait = new WebDriverWait(driver.App, TimeSpan.FromSeconds(5));
-		wait.IgnoreExceptionTypes(typeof(NoSuchElementException));
-		_ = wait.Until(d => d.FindElements(MobileBy.ClassName("android.widget.CheckedTextView")).Count > 0);
+		driver.WaitUntil(
+			WaitKind.Element,
+			() => driver.App.FindElements(MobileBy.ClassName("android.widget.CheckedTextView")).Count > 0,
+			"The picker's items did not appear"
+		);
 
 		var items = driver.App.FindElements(MobileBy.ClassName("android.widget.CheckedTextView"));
 		if (itemIndex >= items.Count)
@@ -452,7 +452,9 @@ public sealed record AndroidPlatformConfig(
 	/// <returns>The instance's command line, or <c>null</c> unless the listener is exactly one of them.</returns>
 	internal static string? InstanceListeningOn(string listenerPids, IEnumerable<string> runningInstances) =>
 		listenerPids.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) is [var pid]
-			? runningInstances.FirstOrDefault(commandLine => commandLine.StartsWith($"{pid} ", StringComparison.Ordinal))
+			? runningInstances.FirstOrDefault(commandLine =>
+				commandLine.StartsWith($"{pid} ", StringComparison.Ordinal)
+			)
 			: null;
 
 	private const string EmulatorSerialPrefix = "emulator-";

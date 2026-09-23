@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace MobileJourneys.Framework;
 
 /// <summary>What the runner was asked to do. Everything but <see cref="Run"/> exits without a session.</summary>
@@ -35,6 +37,7 @@ public enum RunMode
 /// of them. Empty means every journey.</param>
 /// <param name="Rerun">Whether to restrict the run to journeys with failure artifacts on disk.</param>
 /// <param name="ReportTo">URL to POST run events to, or <c>null</c> to report to the console instead.</param>
+/// <param name="WaitBudget">How long any one wait for the app may take before its step fails.</param>
 /// <param name="Error">The parse error to report, or <c>null</c> when the command line was valid.</param>
 public sealed record RunOptions(
 	RunMode Mode,
@@ -42,9 +45,21 @@ public sealed record RunOptions(
 	IReadOnlyList<string> JourneyNames,
 	bool Rerun,
 	string? ReportTo,
+	TimeSpan WaitBudget,
 	string? Error
 )
 {
+	/// <summary>
+	/// The wait budget when the command line names none. Generous, because a wait returns the moment
+	/// its condition holds and so a passing run never pays it; only a failing step does.
+	/// </summary>
+	public static readonly TimeSpan DefaultWaitBudget = TimeSpan.FromSeconds(60);
+
+	/// <summary>Options that do the given thing with nothing narrowed and every setting at its default.</summary>
+	/// <param name="mode">What to do.</param>
+	public RunOptions(RunMode mode)
+		: this(mode, [], [], false, null, DefaultWaitBudget, null) { }
+
 	/// <summary>Parses the runner's arguments, never throwing — a bad command line becomes <see cref="Error"/>.</summary>
 	/// <param name="args">The arguments as passed to <c>Main</c>.</param>
 	/// <returns>The parsed options.</returns>
@@ -55,6 +70,7 @@ public sealed record RunOptions(
 		RunMode? mode = null;
 		var rerun = false;
 		string? reportTo = null;
+		var waitBudget = DefaultWaitBudget;
 
 		// An editor that substitutes an unset filter into an argument array leaves a blank element
 		// behind rather than dropping it, and a blank is never a real argument or a useful filter
@@ -95,6 +111,19 @@ public sealed record RunOptions(
 					reportTo = args[++i];
 					break;
 
+				case "--wait-budget":
+					if (
+						i + 1 >= args.Length
+						|| !int.TryParse(args[i + 1], NumberStyles.None, CultureInfo.InvariantCulture, out var seconds)
+						|| seconds == 0
+					)
+					{
+						return Invalid("--wait-budget needs a whole number of seconds above zero.");
+					}
+					waitBudget = TimeSpan.FromSeconds(seconds);
+					i++;
+					break;
+
 				case "--list-extraneous":
 					mode = RunMode.ListExtraneous;
 					break;
@@ -122,13 +151,13 @@ public sealed record RunOptions(
 			// A run occupies every configured device for as long as it takes, so it has to be asked
 			// for by name — a narrowing flag on its own is not a request to run.
 			return args.Length == 0
-				? new RunOptions(RunMode.Interactive, [], [], false, null, null)
+				? new RunOptions(RunMode.Interactive)
 				: Invalid("Add --run to run journeys, or pass no arguments at all to choose from a menu.");
 		}
 
-		return new RunOptions(mode.Value, filters, journeyNames, rerun, reportTo, null);
+		return new RunOptions(mode.Value, filters, journeyNames, rerun, reportTo, waitBudget, null);
 
-		static RunOptions Invalid(string error) => new(RunMode.Help, [], [], false, null, error);
+		static RunOptions Invalid(string error) => new(RunMode.Help) { Error = error };
 
 		// Both repeated flags and several values after one flag, since both read naturally at a call
 		// site. False when the flag was given nothing to collect.
@@ -163,6 +192,10 @@ public sealed record RunOptions(
 			  --rerun               Restrict the run to journeys with failure artifacts on disk.
 			  --report-to <url>     POST run events to this URL instead of writing progress to the
 			                        console. Set by the review server when it launches a rerun.
+			  --wait-budget <s>     Seconds any one wait for the app may take before its step fails:
+			                        an element or alert to appear, a launch to settle, the screen to
+			                        match its baseline. A wait ends as soon as it is satisfied, so only
+			                        failing steps pay this. Default {{DefaultWaitBudget.TotalSeconds}}.
 			  --list-extraneous     List screenshots no journey references, then exit.
 			  --delete-extraneous   Delete screenshots no journey references, then exit.
 			  --review              Serve the screenshot viewer with review actions, instead of running.

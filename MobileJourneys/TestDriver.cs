@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Appium;
 using OpenQA.Selenium.Interactions;
@@ -19,6 +20,10 @@ namespace MobileJourneys;
 /// <param name="config">Platform fixture (drives platform-specific branches).</param>
 /// <param name="screenshotManager">Instance used for baseline capture and comparison.</param>
 /// <param name="backendUrlVariable">The name the app reads the backend's address under.</param>
+/// <param name="timings">
+/// Where this driver records how long its lookups and waits take, and the wait budget it holds
+/// every wait to.
+/// </param>
 /// <param name="cancellationToken">
 /// Cancelled when the reader interrupts the run; every wait this driver makes then throws
 /// <see cref="OperationCanceledException"/>.
@@ -28,6 +33,7 @@ public sealed class TestDriver(
 	PlatformConfig config,
 	ScreenshotManager screenshotManager,
 	string backendUrlVariable,
+	FixtureTimings timings,
 	CancellationToken cancellationToken
 )
 {
@@ -38,18 +44,14 @@ public sealed class TestDriver(
 	/// </summary>
 	public const string AutomationIdBelowNotification = "ScreenBelowNotification";
 
-	/// <summary>
-	/// How long to wait for a mask element while resolving a step's mask regions. Masks are resolved
-	/// around the step's action, so the element is expected to be on screen already; the wait only
-	/// absorbs render lag rather than allowing for one to appear later.
-	/// </summary>
-	private static readonly TimeSpan MaskLookupTimeout = TimeSpan.FromSeconds(5);
-
-	/// <summary>How long <see cref="CaptureEmptyBannerRegion"/> waits for its region to stop changing.</summary>
-	private static readonly TimeSpan EmptyBannerRegionSettleTimeout = TimeSpan.FromSeconds(10);
-
 	/// <summary>The underlying Appium driver.</summary>
 	public AppiumDriver App { get; } = app;
+
+	/// <summary>
+	/// How long any one wait for the app may take before its step fails. A wait returns the moment
+	/// its condition holds, so the budget is paid only by a step that fails.
+	/// </summary>
+	public TimeSpan WaitBudget => timings.WaitBudget;
 
 	/// <summary>The platform fixture this driver is bound to.</summary>
 	public PlatformConfig Config { get; } = config;
@@ -138,19 +140,18 @@ public sealed class TestDriver(
 
 	/// <summary>
 	/// Blocks until the freshly launched app is in the foreground and its accessibility tree has
-	/// stopped changing, or until a fixed timeout elapses. Without this, a slow cold start spends the
-	/// first expectation's timeout budget rather than the launch's, so a launch that is merely slow
+	/// stopped changing, or until the wait budget runs out. Without this, a slow cold start spends
+	/// the first expectation's budget rather than the launch's, so a launch that is merely slow
 	/// reads as an element that is missing.
 	/// </summary>
 	private void WaitUntilAppIsSettled()
 	{
-		const int SettleTimeoutMs = 30000;
 		const int PollIntervalMs = 250;
 		const long ForegroundState = 4;
 
-		var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+		var stopwatch = Stopwatch.StartNew();
 		string? previousTree = null;
-		while (stopwatch.ElapsedMilliseconds < SettleTimeoutMs)
+		while (stopwatch.Elapsed < WaitBudget)
 		{
 			try
 			{
@@ -160,6 +161,7 @@ public sealed class TestDriver(
 					var tree = App.PageSource;
 					if (tree == previousTree)
 					{
+						timings.RecordWait(WaitKind.Launch, stopwatch.Elapsed, true);
 						return;
 					}
 
@@ -173,6 +175,64 @@ public sealed class TestDriver(
 			}
 
 			WaitForAppToSettle(PollIntervalMs);
+		}
+
+		timings.RecordWait(WaitKind.Launch, stopwatch.Elapsed, false);
+	}
+
+	/// <summary>
+	/// Runs a wait against the budget, recording how long it took or that it ran out. A wait cut
+	/// short by the run being interrupted is neither.
+	/// </summary>
+	/// <param name="kind">What the wait is for, as the timing report names it.</param>
+	/// <param name="wait">The wait, which throws <see cref="TimeoutException"/> when the budget runs out.</param>
+	/// <returns>What the wait returned.</returns>
+	private T Measured<T>(WaitKind kind, Func<T> wait)
+	{
+		var stopwatch = Stopwatch.StartNew();
+		try
+		{
+			var result = wait();
+			timings.RecordWait(kind, stopwatch.Elapsed, true);
+			return result;
+		}
+		catch (TimeoutException) when (!cancellationToken.IsCancellationRequested)
+		{
+			timings.RecordWait(kind, stopwatch.Elapsed, false);
+			throw;
+		}
+	}
+
+	/// <summary>Polls until the condition holds, within the wait budget.</summary>
+	/// <param name="kind">What the wait is for, as the timing report names it.</param>
+	/// <param name="condition">What has to become true.</param>
+	/// <param name="whatNeverHappened">
+	/// The failure's wording, such as <c>No alert appeared</c>, which the budget is appended to.
+	/// </param>
+	/// <exception cref="TimeoutException">Thrown when the condition still does not hold when the budget runs out.</exception>
+	public void WaitUntil(WaitKind kind, Func<bool> condition, string whatNeverHappened) =>
+		_ = Measured(
+			kind,
+			() =>
+				Holds(condition, WaitBudget)
+					? true
+					: throw new TimeoutException($"{whatNeverHappened} within {WaitBudget.TotalSeconds}s.")
+		);
+
+	/// <summary>Polls until the condition holds or the timeout elapses.</summary>
+	/// <param name="condition">What has to become true.</param>
+	/// <param name="timeout">How long to keep polling.</param>
+	/// <returns>Whether the condition came to hold in time.</returns>
+	private bool Holds(Func<bool> condition, TimeSpan timeout)
+	{
+		try
+		{
+			_ = new WebDriverWait(App, timeout).Until(_ => condition(), cancellationToken);
+			return true;
+		}
+		catch (WebDriverTimeoutException)
+		{
+			return false;
 		}
 	}
 
@@ -192,32 +252,36 @@ public sealed class TestDriver(
 		}
 	}
 
-	/// <summary>Polls until the element with the given AutomationId is no longer present or the timeout elapses.</summary>
-	public void WaitForElementNotFound(string automationId, TimeSpan timeout)
-	{
-		var deadline = DateTime.UtcNow + timeout;
-		while (DateTime.UtcNow < deadline)
-		{
-			try
-			{
-				_ = FindElementNow(automationId);
-				WaitForAppToSettle(250);
-			}
-			catch (NoSuchElementException)
-			{
-				return;
-			}
-		}
+	/// <summary>Polls until the element with the given AutomationId is no longer present, within the wait budget.</summary>
+	/// <param name="automationId">The AutomationId of the element.</param>
+	/// <exception cref="TimeoutException">Thrown when the element is still present when the budget runs out.</exception>
+	public void WaitForElementNotFound(string automationId) =>
+		WaitUntil(WaitKind.Element, () => !IsElementPresent(automationId), $"Element '{automationId}' still present");
 
-		throw new TimeoutException($"Element '{automationId}' still present after {timeout.TotalSeconds}s");
+	private bool IsElementPresent(string automationId)
+	{
+		try
+		{
+			_ = FindElementNow(automationId);
+			return true;
+		}
+		catch (NoSuchElementException)
+		{
+			return false;
+		}
 	}
+
+	/// <summary>Waits for an element with the given AutomationId to be visible, within the wait budget.</summary>
+	/// <param name="automationId">The AutomationId of the element.</param>
+	/// <returns>The found element.</returns>
+	/// <exception cref="TimeoutException">Thrown when the element is not found before the budget runs out.</exception>
+	public AppiumElement FindElement(string automationId) => FindElement(automationId, null);
 
 	/// <summary>
 	/// Waits for an element with the given AutomationId to be visible, optionally verifying an
 	/// additional condition.
 	/// </summary>
 	/// <param name="automationId">The AutomationId of the element.</param>
-	/// <param name="timeout">Maximum time to wait.</param>
 	/// <param name="condition">
 	/// Optional tuple of (predicate, messageFactory). The predicate is evaluated once the element is
 	/// found; if it returns false, polling continues. On timeout, messageFactory receives the last
@@ -225,86 +289,98 @@ public sealed class TestDriver(
 	/// </param>
 	/// <returns>The found element.</returns>
 	/// <exception cref="TimeoutException">
-	/// Thrown when the element is not found before the timeout, or when a
+	/// Thrown when the element is not found before the budget runs out, or when a
 	/// <paramref name="condition"/> is supplied and its predicate never returns true.
 	/// </exception>
-	public AppiumElement FindElement(
+	private AppiumElement FindElement(
 		string automationId,
-		TimeSpan timeout,
-		(Func<AppiumElement, bool> check, Func<AppiumElement?, string> message)? condition = null
+		(Func<AppiumElement, bool> check, Func<AppiumElement?, string> message)? condition
 	)
 	{
-		var wait = new WebDriverWait(App, timeout);
+		var wait = new WebDriverWait(App, WaitBudget);
 		wait.IgnoreExceptionTypes(typeof(NoSuchElementException), typeof(StaleElementReferenceException));
 		AppiumElement? lastElement = null;
 
-		try
-		{
-			return wait.Until(
-				_ =>
+		return Measured(
+			WaitKind.Element,
+			() =>
+			{
+				try
 				{
-					var element = FindElementNow(automationId);
+					return wait.Until(
+						_ =>
+						{
+							var element = FindElementNow(automationId);
 
-					if (condition is not { } c || c.check(element))
-					{
-						return element;
-					}
+							if (condition is not { } c || c.check(element))
+							{
+								return element;
+							}
 
-					lastElement = element;
-					return null;
-				},
-				cancellationToken
-			);
-		}
-		catch (WebDriverTimeoutException) when (condition is { } c && lastElement is not null)
-		{
-			throw new TimeoutException(
-				$"Element '{automationId}' {c.message(lastElement)} after {timeout.TotalSeconds}s"
-			);
-		}
-		catch (WebDriverTimeoutException)
-		{
-			throw new TimeoutException($"Element '{automationId}' not found after {timeout.TotalSeconds}s.");
-		}
+							lastElement = element;
+							return null;
+						},
+						cancellationToken
+					);
+				}
+				catch (WebDriverTimeoutException) when (condition is { } c && lastElement is not null)
+				{
+					throw new TimeoutException(
+						$"Element '{automationId}' {c.message(lastElement)} after {WaitBudget.TotalSeconds}s"
+					);
+				}
+				catch (WebDriverTimeoutException)
+				{
+					throw new TimeoutException($"Element '{automationId}' not found after {WaitBudget.TotalSeconds}s.");
+				}
+			}
+		);
 	}
 
 	/// <summary>
 	/// Locates an element by AutomationId once, without waiting. Tries resource-id first, then falls
 	/// back to content-desc (accessibility ID): on Android, MAUI maps AutomationId to resource-id for
 	/// most elements, but Shell.ItemTemplate bindings map to content-desc instead. Every lookup goes
-	/// through here so none of them sees only half the elements.
+	/// through here so none of them sees only half the elements, and each is one round trip in the
+	/// timing report whether or not the element was there.
 	/// </summary>
 	/// <param name="automationId">The AutomationId of the element.</param>
 	/// <returns>The found element.</returns>
 	/// <exception cref="NoSuchElementException">Thrown when neither locator matches.</exception>
 	private AppiumElement FindElementNow(string automationId)
 	{
+		var stopwatch = Stopwatch.StartNew();
 		try
 		{
-			return (AppiumElement)App.FindElement(MobileBy.Id(automationId));
+			try
+			{
+				return (AppiumElement)App.FindElement(MobileBy.Id(automationId));
+			}
+			catch (NoSuchElementException)
+			{
+				return (AppiumElement)App.FindElement(MobileBy.AccessibilityId(automationId));
+			}
 		}
-		catch (NoSuchElementException)
+		finally
 		{
-			return (AppiumElement)App.FindElement(MobileBy.AccessibilityId(automationId));
+			timings.RecordLookup(stopwatch.Elapsed);
 		}
 	}
 
 	/// <summary>
 	/// Waits for an element with the given AutomationId to be visible and contain one of the
-	/// expected text values (case-insensitive).
+	/// expected text values (case-insensitive), within the wait budget.
 	/// </summary>
 	/// <param name="automationId">The AutomationId of the element.</param>
 	/// <param name="expectedTexts">One or more text values the element may contain (any match succeeds).</param>
-	/// <param name="timeout">Maximum time to wait.</param>
 	/// <returns>The found element.</returns>
 	/// <exception cref="TimeoutException">
-	/// Thrown when the element is not found within the timeout, or is found but does not contain
-	/// any of the expected texts.
+	/// Thrown when the element is not found before the budget runs out, or is found but does not
+	/// contain any of the expected texts.
 	/// </exception>
-	public AppiumElement FindElementWithText(string automationId, string[] expectedTexts, TimeSpan timeout) =>
+	public AppiumElement FindElementWithText(string automationId, string[] expectedTexts) =>
 		FindElement(
 			automationId,
-			timeout,
 			(
 				element => expectedTexts.Any(t => element.Text.Contains(t, StringComparison.OrdinalIgnoreCase)),
 				element =>
@@ -382,20 +458,19 @@ public sealed class TestDriver(
 			return screenshotManager.CompareWithBaselineAndDispose(captured, testStep, MaskRegionsFor(captured));
 		}
 
-		// A capture costs a second or two on a loaded device, so this is a budget for a handful of
-		// samples, not for many. Only a step that never matches spends all of it.
-		const int MaxWaitMs = 10000;
+		// A capture costs a second or two on a loaded device, so the budget buys a handful of samples,
+		// not many. Only a step that never matches spends all of it.
 		const int MinMsBetweenScreenshots = 300;
 
 		// With nothing to match against, two identical captures are the only signal there is, and the
 		// first run records whichever one settles as the baseline every later run is held to.
 		using var baseline = screenshotManager.TryLoadBaseline(testStep);
-		var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+		var stopwatch = Stopwatch.StartNew();
 
 		Image<Rgb24>? previousImage = null;
 		var maskRegions = Array.Empty<Rectangle>();
 		var elapsed = stopwatch.Elapsed;
-		while (stopwatch.Elapsed.TotalMilliseconds < MaxWaitMs)
+		while (stopwatch.Elapsed < WaitBudget)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var screenshot = App.GetScreenshot().AsImage();
@@ -413,6 +488,7 @@ public sealed class TestDriver(
 				: previousImage is not null && ImageHelpers.AreImagesEqual(screenshot, previousImage, maskRegions);
 			if (done)
 			{
+				timings.RecordWait(WaitKind.Screen, stopwatch.Elapsed, true);
 				previousImage?.Dispose();
 				return screenshotManager.CompareWithBaselineAndDispose(screenshot, testStep, maskRegions);
 			}
@@ -421,12 +497,13 @@ public sealed class TestDriver(
 			previousImage = screenshot;
 		}
 
+		timings.RecordWait(WaitKind.Screen, stopwatch.Elapsed, false);
 		return screenshotManager.CompareWithBaselineAndDispose(previousImage!, testStep, maskRegions);
 	}
 
 	private Rectangle GetElementRectangle(string automationId)
 	{
-		var element = FindElement(automationId, MaskLookupTimeout);
+		var element = FindElement(automationId);
 		return new(element.Location.X, element.Location.Y, element.Size.Width, element.Size.Height);
 	}
 
@@ -479,7 +556,7 @@ public sealed class TestDriver(
 		// than mobile: swipeGesture/swipe which can behave inconsistently with MAUI views.
 		// Target the upper third of the element to reliably hit the scrollable area (e.g., the
 		// image portion of a carousel item rather than the text details below).
-		var element = FindElement(automationId, TimeSpan.FromSeconds(5));
+		var element = FindElement(automationId);
 		var location = element.Location;
 		var size = element.Size;
 		var centerY = location.Y + (int)(size.Height * 0.35);
@@ -501,19 +578,18 @@ public sealed class TestDriver(
 	}
 
 	/// <summary>Dismisses any visible alert; no-op when none is shown.</summary>
-	public void DismissAlertIfPresent(TimeSpan? timeout = null)
+	/// <param name="timeout">
+	/// How long to give an alert to appear. Paid in full whenever none does, so this is a probe's
+	/// own short timeout rather than the wait budget.
+	/// </param>
+	public void DismissAlertIfPresent(TimeSpan timeout)
 	{
-		try
+		if (Holds(IsAlertPresent, timeout))
 		{
-			WaitForAlert(timeout ?? TimeSpan.FromSeconds(5));
 			Config.DismissDefaultAlert(App.SwitchTo().Alert());
 
 			// Allow the alert dismissal animation to complete before the next action.
 			WaitForAppToSettle(300);
-		}
-		catch (WebDriverTimeoutException)
-		{
-			// No alert appeared within timeout
 		}
 	}
 
@@ -537,23 +613,22 @@ public sealed class TestDriver(
 		WaitForAppToSettle(300);
 	}
 
-	/// <summary>Waits for a system alert to appear within the timeout.</summary>
-	public void WaitForAlert(TimeSpan timeout) =>
-		_ = new WebDriverWait(App, timeout).Until(
-			driver =>
-			{
-				try
-				{
-					_ = driver.SwitchTo().Alert();
-					return true;
-				}
-				catch (NoAlertPresentException)
-				{
-					return false;
-				}
-			},
-			cancellationToken
-		);
+	/// <summary>Waits for a system alert to appear, within the wait budget.</summary>
+	/// <exception cref="TimeoutException">Thrown when no alert appears before the budget runs out.</exception>
+	public void WaitForAlert() => WaitUntil(WaitKind.Alert, IsAlertPresent, "No alert appeared");
+
+	private bool IsAlertPresent()
+	{
+		try
+		{
+			_ = App.SwitchTo().Alert();
+			return true;
+		}
+		catch (NoAlertPresentException)
+		{
+			return false;
+		}
+	}
 
 	/// <summary>
 	/// Polls until the banner's region stops changing, and keeps that as what
@@ -567,14 +642,15 @@ public sealed class TestDriver(
 		_emptyBannerRegion?.Dispose();
 		_emptyBannerRegion = null;
 
-		var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+		var stopwatch = Stopwatch.StartNew();
 		var previous = CropToBannerRegion(CaptureDeviceScreenshotBytes());
-		while (stopwatch.Elapsed < EmptyBannerRegionSettleTimeout)
+		while (stopwatch.Elapsed < WaitBudget)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var current = CropToBannerRegion(CaptureDeviceScreenshotBytes());
 			if (ImageHelpers.AreImagesEqual(current, previous, []))
 			{
+				timings.RecordWait(WaitKind.Screen, stopwatch.Elapsed, true);
 				previous.Dispose();
 				_emptyBannerRegion = current;
 				return;
@@ -585,6 +661,7 @@ public sealed class TestDriver(
 		}
 
 		// Never settled — the wait's own stability check still has to agree with whatever this is.
+		timings.RecordWait(WaitKind.Screen, stopwatch.Elapsed, false);
 		_emptyBannerRegion = previous;
 	}
 
@@ -594,10 +671,19 @@ public sealed class TestDriver(
 	/// on screen when the wait starts counts, rather than being taken for the background. Leaves the
 	/// winning screenshot for the step's baseline comparison.
 	/// </summary>
-	/// <param name="timeout">Maximum time to wait.</param>
 	/// <exception cref="InvalidOperationException">Thrown when no empty region was captured.</exception>
-	/// <exception cref="TimeoutException">Thrown when no banner appears within the timeout.</exception>
-	public void WaitForNotificationBanner(TimeSpan timeout)
+	/// <exception cref="TimeoutException">Thrown when no banner appears before the wait budget runs out.</exception>
+	public void WaitForNotificationBanner() =>
+		_ = Measured(
+			WaitKind.Notification,
+			() =>
+			{
+				PollForNotificationBanner();
+				return true;
+			}
+		);
+
+	private void PollForNotificationBanner()
 	{
 		// Consumed here, so a second wait cannot quietly measure against an earlier step's screen.
 		using var emptyRegion =
@@ -608,10 +694,10 @@ public sealed class TestDriver(
 			);
 		_emptyBannerRegion = null;
 
-		var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+		var stopwatch = Stopwatch.StartNew();
 		var previous = CropToBannerRegion(CaptureDeviceScreenshotBytes());
 
-		while (stopwatch.Elapsed < timeout)
+		while (stopwatch.Elapsed < WaitBudget)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var currentBytes = CaptureDeviceScreenshotBytes();
@@ -632,7 +718,7 @@ public sealed class TestDriver(
 		previous.Dispose();
 		throw new TimeoutException(
 			$"No notification banner appeared over rows {Config.NotificationBannerTop}-"
-				+ $"{Config.NotificationBannerBottom} within {timeout.TotalSeconds}s"
+				+ $"{Config.NotificationBannerBottom} within {WaitBudget.TotalSeconds}s"
 		);
 	}
 

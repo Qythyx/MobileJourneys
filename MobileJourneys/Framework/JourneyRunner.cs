@@ -64,9 +64,12 @@ internal static class JourneyRunner
 			);
 		}
 
-		// Run every step even after one fails, collecting all failures, so a single run surfaces
-		// every issue in the journey instead of only the first.
+		// A step whose screenshot differs leaves the journey on the screen it expected, so the steps
+		// after it still run and each says what it found. A step that threw has lost the app: the
+		// screen it left is not the one the next step expects, so every step after it would fail too,
+		// each spending the whole wait budget on something that is not coming.
 		var failures = new List<JourneyFailureException>();
+		var stepsRun = 0;
 		foreach (var (number, name, execute, maskElements, prefetchMasks, journeyStep) in steps)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -77,6 +80,7 @@ internal static class JourneyRunner
 				journey.Name
 			);
 			var stepPassed = true;
+			var stepThrew = false;
 			string? detail = null;
 			try
 			{
@@ -97,6 +101,7 @@ internal static class JourneyRunner
 			catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
 			{
 				stepPassed = false;
+				stepThrew = true;
 				detail = ex.Message;
 				manager.DeleteFailureArtifactsForStep(testStep);
 				HandleStepFailure(driver, manager, ex, testStep);
@@ -104,7 +109,12 @@ internal static class JourneyRunner
 				failures.Add(new JourneyFailureException(message, journey, journeyStep, number, totalSteps, name, ex));
 			}
 
+			stepsRun = number;
 			reporter.StepCompleted(testStep, worker, number, totalSteps, name, stepPassed, detail);
+			if (stepThrew)
+			{
+				break;
+			}
 		}
 
 		stopwatch.Stop();
@@ -114,30 +124,45 @@ internal static class JourneyRunner
 			return new JourneyResult(testCase, true, stopwatch.Elapsed, string.Empty, null);
 		}
 
-		if (failures.Count == 1)
-		{
-			var failure = failures[0];
-			return new JourneyResult(testCase, false, stopwatch.Elapsed, failure.Message, failure);
-		}
-
-		var summary = BuildFailureSummary(failures, totalSteps);
+		var explanation = Explain(failures.Select(failure => failure.Message), totalSteps, stepsRun);
 		var firstFailure = failures[0];
-		var aggregate = new JourneyFailureException(
-			summary,
-			journey,
-			firstFailure.Step,
-			firstFailure.StepNumber,
-			totalSteps,
-			firstFailure.StepName,
-			firstFailure.InnerException
-		);
-		return new JourneyResult(testCase, false, stopwatch.Elapsed, summary, aggregate);
+		var aggregate =
+			failures.Count == 1
+				? firstFailure
+				: new JourneyFailureException(
+					explanation,
+					journey,
+					firstFailure.Step,
+					firstFailure.StepNumber,
+					totalSteps,
+					firstFailure.StepName,
+					firstFailure.InnerException
+				);
+		return new JourneyResult(testCase, false, stopwatch.Elapsed, explanation, aggregate);
 	}
 
-	private static string BuildFailureSummary(List<JourneyFailureException> failures, int totalSteps)
+	/// <summary>
+	/// Words a journey's failure: a lone step's message as it is, or the failed steps listed under a
+	/// count of them, either followed by the steps the journey stopped before.
+	/// </summary>
+	/// <param name="failureMessages">Each failed step's message, in step order.</param>
+	/// <param name="totalSteps">How many steps the journey has.</param>
+	/// <param name="stepsRun">How many of them ran before the journey stopped.</param>
+	/// <returns>The explanation.</returns>
+	internal static string Explain(IEnumerable<string> failureMessages, int totalSteps, int stepsRun)
 	{
-		var details = string.Join("\n", failures.Select(f => $"  • {f.Message}"));
-		return $"{failures.Count} of {totalSteps} steps failed:\n{details}";
+		var messages = failureMessages.ToList();
+		var notRun =
+			stepsRun == totalSteps ? string.Empty
+			: stepsRun + 1 == totalSteps ? $"\n  step {totalSteps} was not run"
+			: $"\n  steps {stepsRun + 1}–{totalSteps} were not run";
+		if (messages.Count == 1)
+		{
+			return messages[0] + notRun;
+		}
+
+		var details = string.Join("\n", messages.Select(message => $"  • {message}"));
+		return $"{messages.Count} of {stepsRun} steps failed:\n{details}{notRun}";
 	}
 
 	private static void ProcessExpectations(TestDriver driver, Expectation[] expectations)

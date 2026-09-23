@@ -27,7 +27,7 @@ rather than publishing progress to a test host.
 - Screenshot-baseline comparison via `SixLabors.ImageSharp` + `Codeuctivity.ImageSharpCompare` with
   maskable regions for animated UI elements.
 - A `SuiteRunner` that runs the cross-product of platform fixtures and journeys from a plain console
-  entry point, with `--run`, `--journey`, `--filter`, `--rerun`, `--report-to`,
+  entry point, with `--run`, `--journey`, `--filter`, `--rerun`, `--report-to`, `--wait-budget`,
   `--list-extraneous`, `--delete-extraneous`, `--review` CLI flags — a live
   [Spectre.Console](https://spectreconsole.net/) status table at a terminal, plain per-step lines
   when stdout is redirected, and JSON events POSTed to a listener when `--report-to` names one.
@@ -77,11 +77,10 @@ checkout. NuGet packaging is on the roadmap.
 ### 2. Implement `IJourneyEnvironment`
 
 Define a record that captures your app's per-journey state (the fields each journey can override).
-`BackendUrl` is the one value handed to the app at launch — as a process environment variable on
-iOS and an intent string extra on Android — under the name `FrameworkConfig.Backend` names.
-Everything else reaches the app from the backend, so it needs no launch plumbing. `ForFixture` lets
-you specialize the environment per-platform fixture (e.g., pin language to match the fixture's
-theme).
+`BackendUrl` is the one value handed to the app at launch — as a process environment variable on iOS
+and an intent string extra on Android — under the name `FrameworkConfig.Backend` names. Everything
+else reaches the app from the backend, so it needs no launch plumbing. `ForFixture` lets you
+specialize the environment per-platform fixture (e.g., pin language to match the fixture's theme).
 
 ```csharp
 public record MyAppEnvironment : IJourneyEnvironment
@@ -154,9 +153,9 @@ On iOS, worker 1 is the simulator the config names and the extras are simulators
 `<DeviceName> · worker <n>`, created from the base device's type on first use and kept for later
 runs. On Android every instance of a shared AVD runs read-only, since the emulator allows no
 writable one beside them; a writable instance left by an earlier run is stopped first. All are left
-running after a run, like the base device. A device that cannot be brought up, or whose session dies past its
-retry budget, drops out and the fixture's other devices take its journeys; the fixture is abandoned
-only when none of its devices can host the app.
+running after a run, like the base device. A device that cannot be brought up, or whose session dies
+past its retry budget, drops out and the fixture's other devices take its journeys; the fixture is
+abandoned only when none of its devices can host the app.
 
 ### 4. Write journeys
 
@@ -261,8 +260,8 @@ A device's automation process can also die part-way through a fixture, while the
 server both stay up. Every command after that fails identically, so the worker replaces the session
 and gives the interrupted journey the run it never got, keeping the rest of its journeys. Three lost
 sessions and the worker is lost instead — a device needing more than that is reporting its own
-condition, not the app's — and the fixture's other workers take the journeys it would have run.
-Only when a fixture's last worker is lost are its remaining journeys counted as not run.
+condition, not the app's — and the fixture's other workers take the journeys it would have run. Only
+when a fixture's last worker is lost are its remaining journeys counted as not run.
 
 ### 6. Required csproj bits
 
@@ -303,6 +302,10 @@ dotnet run --project test/MyApp.UITests -- --run --journey Login --filter "iPhon
 
 # Re-run only journeys with failure artifacts on disk
 dotnet run --project test/MyApp.UITests -- --run --rerun
+
+# Give every wait for the app 20s instead of the default 60s. Only failing steps pay the
+# budget, so a short one speeds up a run expected to fail on many screenshots.
+dotnet run --project test/MyApp.UITests -- --run --wait-budget 20
 
 # Report progress as JSON events instead of to the console. Machine-facing: the review
 # server passes its own endpoint here when it launches a rerun.
@@ -346,9 +349,28 @@ Those diagnostics take seconds, which is long enough for a screen that was merel
 rendering — and evidence showing a perfectly good screen makes a timing failure look inexplicable.
 
 `RelaunchApp` waits for the app to reach the foreground with an accessibility tree that has stopped
-changing (capped at 30s) before returning. A cold start is therefore absorbed by the launch rather
-than spending the first expectation's timeout budget, which is what otherwise turns a slow launch
+changing (within the wait budget) before returning. A cold start is therefore absorbed by the launch
+rather than spending the first expectation's budget, which is what otherwise turns a slow launch
 into an "element not found" on the very first step.
+
+## Waits and the timing report
+
+Every wait for the app — an element or alert to appear, a launch to settle, the screen to match its
+baseline, a notification banner to arrive — has the same budget: 60s, or what
+`--wait-budget <seconds>` says. A wait returns the moment its condition holds, so a generous budget
+costs a passing run nothing; only a failing step pays it. That is also why a step that throws ends
+its journey — the steps after it would each spend the whole budget on a screen that is not coming —
+while a screenshot that merely differs lets the journey carry on, since the app is still on the
+screen the next step expects. Probes that usually find nothing, such as `DismissAlert` giving an
+alert 2s to show up, keep their own short timeouts, because they pay them in full every time.
+
+Every session records how long each lookup round trip to its device took and how long each wait
+took, and the end of a run prints them per fixture: how many journeys it ran and how long it took,
+the median and slowest lookup, the average and longest wait that succeeded (with what it was for and
+how much of the budget it used), and how many waits ran out. The lookup figures are the device's own
+speed, independent of what the app is doing, so a device that has slowed down over hours of use
+shows there before it shows as timeouts. The run time is the whole run, devices starting included,
+which is the number to weigh a fixture's `Instances` against.
 
 ## Screenshot viewer
 
@@ -383,15 +405,15 @@ the child as `--report-to`, the child's `WebReporter` POSTs one JSON object per 
 with each fixture's journey and step counts, fixture ready, fixture skipped with its reason, step
 completed, journey completed, run finished with the exit code), and the server relays each to the
 page over Server-Sent Events on `api/events`. A step event names the fixture, the screenshot
-container and the numbered step, which is what lets the page recolour that one screenshot the
-moment it is known: green as it passes, red the instant it fails, yellow for everything still to
-come. A post that fails is swallowed by the child — the listener is a spectator and must never fail
-the run it is watching.
+container and the numbered step, which is what lets the page recolour that one screenshot the moment
+it is known: green as it passes, red the instant it fails, yellow for everything still to come. A
+post that fails is swallowed by the child — the listener is a spectator and must never fail the run
+it is watching.
 
-Posting is synchronous and the server records an event before answering, so events reach the page
-in the order the run produced them. The stream replays from the first event on every connection,
-so a reloaded or reconnected page rebuilds the whole picture rather than resuming mid-run — nothing
-on the page is accumulated by counting.
+Posting is synchronous and the server records an event before answering, so events reach the page in
+the order the run produced them. The stream replays from the first event on every connection, so a
+reloaded or reconnected page rebuilds the whole picture rather than resuming mid-run — nothing on
+the page is accumulated by counting.
 
 The child's console output is still captured, because a child that fails to _build_ posts no events
 at all and its stdout is then the only evidence. It is held back while the run is live and handed
