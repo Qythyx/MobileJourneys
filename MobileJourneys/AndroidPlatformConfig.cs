@@ -1,6 +1,12 @@
+using System.Buffers.Binary;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Globalization;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Appium;
 using OpenQA.Selenium.Appium.Android;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 
 namespace MobileJourneys;
 
@@ -48,6 +54,13 @@ public sealed record AndroidPlatformConfig(
 	private static string AdbPath => Path.Combine(AndroidHome, "platform-tools", "adb");
 
 	private static string EmulatorPath => Path.Combine(AndroidHome, "emulator", "emulator");
+
+	/// <summary>
+	/// The system dialog's buttons, in the order they are preferred: closing the app clears the
+	/// dialog for good, while waiting only asks the system for more patience with an app that has
+	/// already run out of it. A given Android version may offer either.
+	/// </summary>
+	private static readonly string[] NotRespondingButtons = ["android:id/aerr_close", "android:id/aerr_wait"];
 
 	private const string MissingAndroidHomeMessage =
 		"ANDROID_HOME environment variable is not set. Install the Android SDK "
@@ -168,6 +181,27 @@ public sealed record AndroidPlatformConfig(
 
 	internal override void DismissDefaultAlert(IAlert alert) => alert.Dismiss();
 
+	/// <inheritdoc/>
+	/// <remarks>
+	/// The dialog is recognised by the platform's own ids for its buttons, which hold whatever
+	/// language the device is set to and whichever of the buttons this Android version offers.
+	/// Closing the app is the answer rather than waiting: the journey is run again on a fresh launch
+	/// either way, and an app left frozen raises the dialog again over the run that follows.
+	/// </remarks>
+	internal override bool ClearNotRespondingDialog(AppiumDriver driver)
+	{
+		foreach (var button in NotRespondingButtons)
+		{
+			if (driver.FindElements(MobileBy.Id(button)) is [var found, ..])
+			{
+				found.Click();
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	internal override By GetAlertButtonLocator(string buttonLabel)
 	{
 		// Android AlertDialog buttons don't have AccessibilityId. Find by text content.
@@ -235,13 +269,78 @@ public sealed record AndroidPlatformConfig(
 
 	internal override void ClearAppLogs(string deviceId) => _ = RunAdb(deviceId, "logcat", "-c");
 
-	internal override void CaptureDeviceScreenshot(string deviceId, string outPath)
+	/// <inheritdoc/>
+	/// <remarks>
+	/// Raw pixels rather than a PNG. Compressing the PNG runs on the emulated device and is most of
+	/// what a capture costs, only for the host to decode it straight back into these same pixels.
+	/// </remarks>
+	internal override Image<Rgb24> CaptureDeviceScreen(string deviceId)
 	{
-		const string DeviceTmp = "/data/local/tmp/test_screenshot.png";
-		_ = RunAdb(deviceId, "shell", "screencap", "-p", DeviceTmp);
-		_ = RunAdb(deviceId, "pull", DeviceTmp, outPath);
-		_ = RunAdb(deviceId, "shell", "rm", DeviceTmp);
+		var result = ProcessRunner.RunForBytes(
+			AdbPath,
+			["-s", deviceId, "exec-out", "screencap"],
+			ScreenCaptureTimeoutSeconds
+		);
+		return result is { Status: ProcessRunner.ShellResultStatus.Completed, ExitCode: 0 }
+			? DecodeRawScreencap(result.Output)
+			: throw new InvalidOperationException(
+				$"`adb exec-out screencap` failed on {deviceId}: {result.Error.Trim()}"
+			);
 	}
+
+	/// <summary>
+	/// Reads the raw form of <c>screencap</c>: its width, height and pixel format as little-endian
+	/// 32-bit words, then the pixels, row after row with no padding. Newer Android versions put a
+	/// colour-space word after the format, so the header's length is told by what the pixels leave
+	/// over, and has to be one of the two lengths Android writes.
+	/// </summary>
+	/// <param name="raw">Everything <c>screencap</c> wrote.</param>
+	/// <returns>The screen.</returns>
+	/// <exception cref="InvalidOperationException">
+	/// Thrown when the pixels are in a format other than 8-bit RGBA, or do not fit what the header says.
+	/// </exception>
+	internal static Image<Rgb24> DecodeRawScreencap(byte[] raw)
+	{
+		const int MinHeaderLength = 12;
+		const int MaxHeaderLength = 16;
+		const int BytesPerPixel = 4;
+		if (raw.Length < MinHeaderLength)
+		{
+			throw new InvalidOperationException($"screencap wrote {raw.Length} bytes, too few for its header.");
+		}
+
+		var width = BinaryPrimitives.ReadInt32LittleEndian(raw);
+		var height = BinaryPrimitives.ReadInt32LittleEndian(raw.AsSpan(4));
+		var format = BinaryPrimitives.ReadInt32LittleEndian(raw.AsSpan(8));
+		if (format is not (RgbaPixelFormat or RgbxPixelFormat))
+		{
+			throw new InvalidOperationException($"screencap wrote pixel format {format}, which is not 8-bit RGBA.");
+		}
+
+		var pixelLength = width * height * BytesPerPixel;
+		var headerLength = raw.Length - pixelLength;
+		if (headerLength is not (MinHeaderLength or MaxHeaderLength))
+		{
+			throw new InvalidOperationException(
+				$"screencap wrote {raw.Length} bytes, which is not a {width}x{height} screen behind either header it writes."
+			);
+		}
+
+		using var screen = Image.LoadPixelData<Rgba32>(raw.AsSpan(headerLength, pixelLength), width, height);
+		return screen.CloneAs<Rgb24>();
+	}
+
+	/// <summary>Android's <c>PIXEL_FORMAT_RGBA_8888</c>.</summary>
+	private const int RgbaPixelFormat = 1;
+
+	/// <summary>Android's <c>PIXEL_FORMAT_RGBX_8888</c>: the same layout, its fourth byte unused.</summary>
+	private const int RgbxPixelFormat = 2;
+
+	/// <summary>
+	/// How long one capture may take. It is a few hundred milliseconds on an idle host, and several
+	/// seconds on one driving too many devices.
+	/// </summary>
+	private const int ScreenCaptureTimeoutSeconds = 15;
 
 	internal override int GetStatusBarHeight(AppiumDriver driver) =>
 		driver.GetDict("mobile: getSystemBars").GetDict("statusBar").GetInt("height");
@@ -254,7 +353,7 @@ public sealed record AndroidPlatformConfig(
 
 	internal override void SetSystemFontSize(string deviceId, SystemFontSize size)
 	{
-		var scale = ToAndroidFontScale(size).ToString(System.Globalization.CultureInfo.InvariantCulture);
+		var scale = ToAndroidFontScale(size).ToString(CultureInfo.InvariantCulture);
 		ProcessRunner.Run(AdbPath, ["-s", deviceId, "shell", "settings", "put", "system", "font_scale", scale]);
 	}
 
@@ -339,26 +438,38 @@ public sealed record AndroidPlatformConfig(
 
 	/// <inheritdoc/>
 	/// <remarks>
-	/// Running instances are counted in the process table, which answers correctly while an
-	/// emulator is still coming up and cannot block on one that is wedged. An AVD may be shared
-	/// only by instances that all run read-only: the emulator refuses to start a read-only instance
-	/// beside a writable one. A lone instance runs writable, so its quick-boot snapshot is saved.
+	/// Instances already running are kept while they are fresh, and all of them are stopped and
+	/// booted again once any has been up longer than <see cref="MaxInstanceAge"/>. An emulator gets
+	/// slower the longer it runs, several times over within a few days, and a boot from its
+	/// quick-boot snapshot takes seconds. Instances are killed rather than stopped gracefully, since a
+	/// writable instance stopped gracefully saves its snapshot, and the boot would load the very state
+	/// it was stopped to escape. They are found in the process table, which cannot block on one that
+	/// is wedged.
+	/// <para/>
+	/// An AVD may be shared only by instances that all run read-only: the emulator refuses to start a
+	/// read-only instance beside a writable one, so a writable instance is stopped too when the
+	/// fixture wants several. A lone instance runs writable.
 	/// </remarks>
 	internal override IReadOnlyList<string> StartDevices(TimeSpan timeout, CancellationToken cancellationToken)
 	{
 		var deadline = DateTime.UtcNow + timeout;
 		var running = RunningInstances();
-		if (Instances > 1 && running.Any(commandLine => !commandLine.Contains(ReadOnlyFlag, StringComparison.Ordinal)))
+		if (running.Any(MustRestart))
 		{
-			// A writable instance is the runner's own, left from a run wanting one; it has to go
-			// before any read-only sibling can start.
-			foreach (var serial in AttachedDevices().Where(serial => AvdNameOf(serial) == AvdName))
+			foreach (var instance in running)
 			{
-				_ = RunAdb(serial, "emu", "kill");
+				Kill(PidOf(instance));
 			}
 
-			while (DateTime.UtcNow < deadline && RunningInstances().Count > 0)
+			while (RunningInstances().Count > 0)
 			{
+				if (DateTime.UtcNow >= deadline)
+				{
+					throw new InvalidOperationException(
+						$"the running instances of {AvdName} did not stop within {timeout.TotalSeconds}s."
+					);
+				}
+
 				cancellationToken.Sleep(BootPollInterval);
 			}
 
@@ -390,9 +501,63 @@ public sealed record AndroidPlatformConfig(
 		}
 	}
 
+	/// <summary>
+	/// How long an instance may have been up and still be kept for a run. Measured, instances a few
+	/// hours old launched apps as fast as a fresh boot, and ones a few days old six times slower; the
+	/// margin is wide because a restart costs well under a minute.
+	/// </summary>
+	private static readonly TimeSpan MaxInstanceAge = TimeSpan.FromHours(1);
+
+	/// <summary>
+	/// Whether a running instance cannot be kept for this run: it has been up long enough to have
+	/// slowed, or its age cannot be told, or it runs writable where the fixture wants read-only
+	/// instances.
+	/// </summary>
+	/// <param name="instance">The instance, as <see cref="RunningInstances"/> lists it.</param>
+	/// <returns>Whether it has to be restarted.</returns>
+	private bool MustRestart(string instance) =>
+		(Instances > 1 && !instance.Contains(ReadOnlyFlag, StringComparison.Ordinal))
+		|| UptimeOf(PidOf(instance)) is not { } uptime
+		|| uptime > MaxInstanceAge;
+
+	/// <summary>How long a process has been running.</summary>
+	/// <param name="pid">The process.</param>
+	/// <returns>Its uptime, or <c>null</c> when it cannot be told, as when it has already exited.</returns>
+	internal static TimeSpan? UptimeOf(int pid)
+	{
+		try
+		{
+			using var process = Process.GetProcessById(pid);
+			return DateTime.Now - process.StartTime;
+		}
+		catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+		{
+			return null;
+		}
+	}
+
+	/// <summary>
+	/// Kills a process outright, giving it no chance to save anything on the way down. A process that
+	/// has already exited, or cannot be killed, is left to the caller's wait for it to be gone.
+	/// </summary>
+	/// <param name="pid">The process.</param>
+	internal static void Kill(int pid)
+	{
+		try
+		{
+			using var process = Process.GetProcessById(pid);
+			process.Kill();
+		}
+		catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception) { }
+	}
+
+	private static int PidOf(string instance) => int.Parse(instance.Split(' ')[0], CultureInfo.InvariantCulture);
+
 	private const string ReadOnlyFlag = "-read-only";
 
 	private string[] EmulatorArguments(bool readOnly) => readOnly ? ["-avd", AvdName, ReadOnlyFlag] : ["-avd", AvdName];
+
+	internal override bool CanRestartDevice => true;
 
 	/// <inheritdoc/>
 	/// <remarks>
@@ -425,7 +590,7 @@ public sealed record AndroidPlatformConfig(
 			}
 
 			readOnly = instance.Contains(ReadOnlyFlag, StringComparison.Ordinal);
-			_ = ProcessRunner.RunWithResult(KillPath, ["-9", pid]);
+			Kill(PidOf(instance));
 			while (InstanceListeningOn(pid, RunningInstances()) is not null)
 			{
 				if (DateTime.UtcNow >= deadline)
@@ -460,8 +625,6 @@ public sealed record AndroidPlatformConfig(
 	private const string EmulatorSerialPrefix = "emulator-";
 
 	private const string LsofPath = "/usr/sbin/lsof";
-
-	private const string KillPath = "/bin/kill";
 
 	/// <summary>The process ids and command lines of this AVD's running emulator instances.</summary>
 	private List<string> RunningInstances() =>
@@ -578,7 +741,7 @@ public sealed record AndroidPlatformConfig(
 		}
 	}
 
-	private static ProcessRunner.ShellResult? RunAdb(string deviceId, params string[] arguments)
+	private static ProcessRunner.ShellResult<string>? RunAdb(string deviceId, params string[] arguments)
 	{
 		var args = new List<string>(arguments.Length + 2) { "-s", deviceId };
 		args.AddRange(arguments);

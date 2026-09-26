@@ -274,7 +274,7 @@ public sealed class ScreenshotManagerTests
 		_ = manager.CompareWithBaselineAndDispose(new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0)), key, []);
 		_ = manager.CompareWithBaselineAndDispose(new Image<Rgb24>(100, 100, new Rgb24(255, 0, 0)), key, liveMasks);
 
-		using var newCapture = Image.Load(storage.ReadNewScreenshot(key)!);
+		using var newCapture = Image.Load(storage.ReadNewScreenshot(key));
 		_ = ImageHelpers.GetMaskMetadata(newCapture).Should().Equal(liveMasks);
 	}
 

@@ -42,6 +42,27 @@ public sealed class ProcessRunnerTests
 	}
 
 	[Test]
+	public void RunForBytesReturnsBinaryOutputUnaltered()
+	{
+		// Every byte value, most of which are not valid UTF-8 on their own: any decoding as text on
+		// the way through would replace or drop them.
+		byte[] expected = [.. Enumerable.Range(0, 256).Select(value => (byte)value)];
+		var path = Path.Combine(Path.GetTempPath(), $"process_runner_bytes_{Guid.NewGuid():N}.bin");
+		File.WriteAllBytes(path, expected);
+		try
+		{
+			var result = ProcessRunner.RunForBytes("cat", [path], 10);
+
+			_ = result.ExitCode.Should().Be(0);
+			_ = result.Output.Should().Equal(expected);
+		}
+		finally
+		{
+			File.Delete(path);
+		}
+	}
+
+	[Test]
 	public void RunWithResultLargeStderrDoesNotDeadlock()
 	{
 		// dd writes its progress summary to stderr (omitted via status=none); use sh -c to

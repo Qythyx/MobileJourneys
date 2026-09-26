@@ -17,6 +17,7 @@ internal static class JourneyRunner
 		var config = testCase.Config;
 		var deviceId = driver.GetDeviceId();
 		var stopwatch = Stopwatch.StartNew();
+		reporter.JourneyStarting(config, worker, journey.Name);
 		config.SetSystemFontSize(deviceId, SystemFontSize.Large);
 		config.SetSystemTheme(deviceId, config.IsLightTheme);
 

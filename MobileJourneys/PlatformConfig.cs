@@ -2,6 +2,8 @@ using System.Net;
 using System.Net.Sockets;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Appium;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 
 namespace MobileJourneys;
 
@@ -207,6 +209,12 @@ public abstract record PlatformConfig(
 	/// </returns>
 	internal virtual bool RestartDevice(string deviceId, TimeSpan timeout) => false;
 
+	/// <summary>
+	/// Whether <see cref="RestartDevice"/> does anything on this platform. Announcing a restart that
+	/// cannot happen would leave a worker reading as busy with something it is not doing.
+	/// </summary>
+	internal virtual bool CanRestartDevice => false;
+
 	// --- Keyboard / alerts ---
 
 	/// <summary>
@@ -233,6 +241,16 @@ public abstract record PlatformConfig(
 	/// <returns>Whether a prompt was answered.</returns>
 	internal virtual bool AnswerFirstLaunchPrompt(AppiumDriver driver) => false;
 
+	/// <summary>
+	/// Clears the system's "the app is not responding" dialog, if one is showing. The dialog is the
+	/// system's verdict on a frozen app rather than a screen the app drew, and it answers to the
+	/// alert endpoint like any other, so a journey that meets one reports the state of the device it
+	/// ran on. Does nothing on a platform whose system raises no such dialog.
+	/// </summary>
+	/// <param name="driver">The session to look for the dialog in.</param>
+	/// <returns>Whether one was showing.</returns>
+	internal virtual bool ClearNotRespondingDialog(AppiumDriver driver) => false;
+
 	// --- Crash logs / device logs ---
 
 	internal abstract string? ReadCrashLog(string deviceId);
@@ -241,7 +259,13 @@ public abstract record PlatformConfig(
 
 	// --- Screenshots / system UI ---
 
-	internal abstract void CaptureDeviceScreenshot(string deviceId, string outPath);
+	/// <summary>
+	/// Captures the whole screen from the device's side rather than through the Appium session, so
+	/// system UI such as a notification banner is in it.
+	/// </summary>
+	/// <param name="deviceId">The device to capture.</param>
+	/// <returns>The screen, in the device's own pixels.</returns>
+	internal abstract Image<Rgb24> CaptureDeviceScreen(string deviceId);
 
 	internal abstract int GetStatusBarHeight(AppiumDriver driver);
 

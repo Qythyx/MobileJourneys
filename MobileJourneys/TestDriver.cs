@@ -92,11 +92,12 @@ public sealed class TestDriver(
 		_screenScale = (double)imageHeight / windowHeight;
 
 	/// <summary>
-	/// When set, <see cref="DoActionAndCompareWithBaseline"/> uses these bytes instead of
-	/// taking an Appium screenshot. Cleared after use. Used for device-level screenshots
-	/// (e.g., native notification banners captured via <c>xcrun simctl io</c>).
+	/// When set, <see cref="DoActionAndCompareWithBaseline"/> compares this capture instead of
+	/// taking an Appium screenshot, and takes ownership of it. Set by
+	/// <see cref="WaitForNotificationBanner"/>, so the step is compared on the very frame that
+	/// showed the banner rather than on a later one it may have left.
 	/// </summary>
-	private byte[]? _screenshotPngBytes;
+	private Image<Rgb24>? _bannerScreenshot;
 
 	private Image<Rgb24>? _emptyBannerRegion;
 
@@ -449,12 +450,9 @@ public sealed class TestDriver(
 			action();
 		}
 
-		// If a device-level screenshot was captured (e.g., native notification banner),
-		// use it directly instead of polling Appium.
-		if (_screenshotPngBytes is not null)
+		if (_bannerScreenshot is { } captured)
 		{
-			var captured = Image.Load<Rgb24>(_screenshotPngBytes);
-			_screenshotPngBytes = null;
+			_bannerScreenshot = null;
 			return screenshotManager.CompareWithBaselineAndDispose(captured, testStep, MaskRegionsFor(captured));
 		}
 
@@ -594,6 +592,16 @@ public sealed class TestDriver(
 	}
 
 	/// <summary>
+	/// Clears the system's "the app is not responding" dialog if the device has raised one over the
+	/// app, so that the next journey starts on the app's own screen.
+	/// </summary>
+	/// <returns>
+	/// Whether one was showing, which makes whatever the journey just reported a description of the
+	/// device rather than of the app.
+	/// </returns>
+	public bool ClearNotRespondingDialog() => Config.ClearNotRespondingDialog(App);
+
+	/// <summary>
 	/// Finds and taps a specific button within a visible alert/dialog by its label text.
 	/// This is more reliable than Selenium's <c>alert.Accept()</c>/<c>alert.Dismiss()</c>,
 	/// which have inconsistent platform mappings for two-button MAUI alerts.
@@ -643,11 +651,11 @@ public sealed class TestDriver(
 		_emptyBannerRegion = null;
 
 		var stopwatch = Stopwatch.StartNew();
-		var previous = CropToBannerRegion(CaptureDeviceScreenshotBytes());
+		var previous = CaptureBannerRegion();
 		while (stopwatch.Elapsed < WaitBudget)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			var current = CropToBannerRegion(CaptureDeviceScreenshotBytes());
+			var current = CaptureBannerRegion();
 			if (ImageHelpers.AreImagesEqual(current, previous, []))
 			{
 				timings.RecordWait(WaitKind.Screen, stopwatch.Elapsed, true);
@@ -695,22 +703,24 @@ public sealed class TestDriver(
 		_emptyBannerRegion = null;
 
 		var stopwatch = Stopwatch.StartNew();
-		var previous = CropToBannerRegion(CaptureDeviceScreenshotBytes());
+		var previous = CaptureBannerRegion();
 
 		while (stopwatch.Elapsed < WaitBudget)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			var currentBytes = CaptureDeviceScreenshotBytes();
-			var current = CropToBannerRegion(currentBytes);
+			var screen = Config.CaptureDeviceScreen(GetDeviceId());
+			var current = CropToBannerRegion(screen);
 			var showsBanner = !ImageHelpers.AreImagesEqual(current, emptyRegion, []);
 			if (showsBanner && ImageHelpers.AreImagesEqual(current, previous, []))
 			{
 				previous.Dispose();
 				current.Dispose();
-				_screenshotPngBytes = currentBytes;
+				_bannerScreenshot?.Dispose();
+				_bannerScreenshot = screen;
 				return;
 			}
 
+			screen.Dispose();
 			previous.Dispose();
 			previous = current;
 		}
@@ -722,33 +732,22 @@ public sealed class TestDriver(
 		);
 	}
 
-	/// <summary>Crops a full-screen PNG to the rows this fixture's notification banner occupies.</summary>
-	/// <param name="pngBytes">Raw PNG bytes of the full screenshot.</param>
-	/// <returns>The banner's rows of that screenshot.</returns>
-	private Image<Rgb24> CropToBannerRegion(byte[] pngBytes)
+	/// <summary>Captures the device's screen and keeps only the rows its notification banner occupies.</summary>
+	/// <returns>The banner's rows of a fresh capture.</returns>
+	private Image<Rgb24> CaptureBannerRegion()
 	{
-		var image = Image.Load<Rgb24>(pngBytes);
-		var top = Math.Clamp(Config.NotificationBannerTop, 0, image.Height);
-		var bottom = Math.Clamp(Config.NotificationBannerBottom, top, image.Height);
-		image.Mutate(x => x.Crop(new SixLabors.ImageSharp.Rectangle(0, top, image.Width, bottom - top)));
-		return image;
+		using var screen = Config.CaptureDeviceScreen(GetDeviceId());
+		return CropToBannerRegion(screen);
 	}
 
-	/// <summary>
-	/// Captures a device-level screenshot and returns the raw PNG bytes.
-	/// </summary>
-	private byte[] CaptureDeviceScreenshotBytes()
+	/// <summary>Copies out the rows this fixture's notification banner occupies.</summary>
+	/// <param name="screen">A full-screen capture, left as it was.</param>
+	/// <returns>The banner's rows of that capture.</returns>
+	private Image<Rgb24> CropToBannerRegion(Image<Rgb24> screen)
 	{
-		var tmpPath = Path.Combine(Path.GetTempPath(), $"device_screenshot_{Guid.NewGuid():N}.png");
-		try
-		{
-			Config.CaptureDeviceScreenshot(GetDeviceId(), tmpPath);
-			return File.ReadAllBytes(tmpPath);
-		}
-		finally
-		{
-			File.Delete(tmpPath);
-		}
+		var top = Math.Clamp(Config.NotificationBannerTop, 0, screen.Height);
+		var bottom = Math.Clamp(Config.NotificationBannerBottom, top, screen.Height);
+		return screen.Clone(x => x.Crop(new SixLabors.ImageSharp.Rectangle(0, top, screen.Width, bottom - top)));
 	}
 
 	/// <summary>

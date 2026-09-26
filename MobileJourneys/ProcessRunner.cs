@@ -17,8 +17,8 @@ internal static class ProcessRunner
 		TimedOut,
 	}
 
-	internal sealed record ShellResult(
-		string Output,
+	internal sealed record ShellResult<TOutput>(
+		TOutput Output,
 		string Error,
 		int ExitCode,
 		ShellResultStatus Status = ShellResultStatus.Completed
@@ -88,11 +88,57 @@ internal static class ProcessRunner
 	}
 
 	/// <summary>
-	/// Captures stdout/stderr/exit code. Returns <c>null</c> if the process fails to start.
-	/// Both streams are drained concurrently so a child writing &gt;64 KB to either pipe
-	/// can't deadlock against a serial reader.
+	/// Captures stdout as text, with stderr and the exit code.
 	/// </summary>
-	public static ShellResult? RunWithResult(string fileName, IReadOnlyList<string> arguments, int timeoutSeconds = 5)
+	public static ShellResult<string>? RunWithResult(
+		string fileName,
+		IReadOnlyList<string> arguments,
+		int timeoutSeconds = 5
+	) => Capture(fileName, arguments, timeoutSeconds, static stdout => stdout.ReadToEndAsync(), string.Empty);
+
+	/// <summary>
+	/// Captures stdout as bytes, with stderr and the exit code, for a tool whose output is binary.
+	/// </summary>
+	/// <param name="fileName">The program to run.</param>
+	/// <param name="arguments">Its arguments, passed through without shell interpretation.</param>
+	/// <param name="timeoutSeconds">How long it may run before it is killed.</param>
+	/// <returns>What it wrote and how it ended; the output is empty unless it completed.</returns>
+	public static ShellResult<byte[]> RunForBytes(
+		string fileName,
+		IReadOnlyList<string> arguments,
+		int timeoutSeconds
+	) =>
+		Capture(
+			fileName,
+			arguments,
+			timeoutSeconds,
+			static async stdout =>
+			{
+				using var buffer = new MemoryStream();
+				await stdout.BaseStream.CopyToAsync(buffer).ConfigureAwait(false);
+				return buffer.ToArray();
+			},
+			[]
+		);
+
+	/// <summary>
+	/// Runs a process to completion, capturing stdout with the given reader, and stderr and the exit
+	/// code with it. Both streams are drained concurrently so a child writing &gt;64 KB to either
+	/// pipe can't deadlock against a serial reader.
+	/// </summary>
+	/// <param name="fileName">The program to run.</param>
+	/// <param name="arguments">Its arguments, passed through without shell interpretation.</param>
+	/// <param name="timeoutSeconds">How long it may run before it is killed.</param>
+	/// <param name="readOutput">Drains stdout into the form the caller wants.</param>
+	/// <param name="noOutput">The output reported when the process did not complete.</param>
+	/// <returns>What it wrote and how it ended.</returns>
+	private static ShellResult<TOutput> Capture<TOutput>(
+		string fileName,
+		IReadOnlyList<string> arguments,
+		int timeoutSeconds,
+		Func<StreamReader, Task<TOutput>> readOutput,
+		TOutput noOutput
+	)
 	{
 		var psi = new ProcessStartInfo
 		{
@@ -112,15 +158,15 @@ internal static class ProcessRunner
 			using var process = new Process { StartInfo = psi };
 			if (!process.Start())
 			{
-				return new ShellResult(
-					"",
+				return new ShellResult<TOutput>(
+					noOutput,
 					$"Process '{Describe(fileName, arguments)}' failed to start",
 					-1,
 					ShellResultStatus.FailedToStart
 				);
 			}
 
-			var stdoutTask = process.StandardOutput.ReadToEndAsync();
+			var stdoutTask = readOutput(process.StandardOutput);
 			var stderrTask = process.StandardError.ReadToEndAsync();
 			if (!process.WaitForExit(timeoutSeconds * 1000))
 			{
@@ -146,8 +192,8 @@ internal static class ProcessRunner
 					// Drain tasks may fault after Kill — discard.
 				}
 
-				return new ShellResult(
-					"",
+				return new ShellResult<TOutput>(
+					noOutput,
 					$"Process '{Describe(fileName, arguments)}' did not exit within {timeoutSeconds}s",
 					-1,
 					ShellResultStatus.TimedOut
@@ -160,12 +206,12 @@ internal static class ProcessRunner
 			// results below cannot race against an in-flight pipe drain.
 			process.WaitForExit();
 
-			return new ShellResult(stdoutTask.Result, stderrTask.Result, process.ExitCode);
+			return new ShellResult<TOutput>(stdoutTask.Result, stderrTask.Result, process.ExitCode);
 		}
 		catch (Exception ex)
 		{
-			return new ShellResult(
-				"",
+			return new ShellResult<TOutput>(
+				noOutput,
 				$"Exception running '{Describe(fileName, arguments)}': {ex.Message}",
 				-1,
 				ShellResultStatus.FailedToStart

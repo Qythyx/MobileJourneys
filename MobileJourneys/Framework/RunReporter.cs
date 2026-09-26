@@ -181,6 +181,17 @@ internal abstract class RunReporter
 	public virtual void FixtureRetrying(PlatformConfig config, int worker, string reason) { }
 
 	/// <summary>
+	/// Notes that a worker has taken a journey and is setting its device and the app up for it.
+	/// Nothing is reported between here and the journey's first finished step — a minute or more of
+	/// theme, backend and app launch — so without this a worker reads as stuck on whatever it said
+	/// last.
+	/// </summary>
+	/// <param name="config">The fixture the worker belongs to.</param>
+	/// <param name="worker">The worker that took the journey, 1-based.</param>
+	/// <param name="journeyName">The journey being prepared.</param>
+	public virtual void JourneyStarting(PlatformConfig config, int worker, string journeyName) { }
+
+	/// <summary>
 	/// Notes that one of a fixture's workers is gone for the rest of the run — its device would not
 	/// come up, or its session died more times than it may recover from. The fixture's other
 	/// workers take the journeys it would have run, so this does not fail the run by itself.

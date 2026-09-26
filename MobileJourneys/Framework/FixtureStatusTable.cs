@@ -104,10 +104,22 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 			})
 			.ConfigureAwait(false);
 
-	/// <summary>Shows a worker's device as up, with its journeys about to start.</summary>
+	/// <summary>Shows a worker's device as up, with the app being made ready on it.</summary>
 	/// <param name="config">The fixture the worker belongs to.</param>
 	/// <param name="worker">The worker's 1-based index.</param>
-	public void Ready(PlatformConfig config, int worker) => SetCurrent(config, worker, string.Empty);
+	public void Ready(PlatformConfig config, int worker) => SetCurrent(config, worker, "device up — preparing it…");
+
+	/// <summary>
+	/// Shows a worker as setting a journey up: its device's theme and font size, its backend's data,
+	/// and the app relaunched onto the journey's first screen. None of that produces a step, so
+	/// without it the row would hold the step it last finished — or nothing at all, on the first
+	/// journey — for as long as the preparation takes.
+	/// </summary>
+	/// <param name="config">The fixture the worker belongs to.</param>
+	/// <param name="worker">The worker's 1-based index.</param>
+	/// <param name="journeyName">The journey being prepared.</param>
+	public void Preparing(PlatformConfig config, int worker, string journeyName) =>
+		SetCurrent(config, worker, $"{journeyName} — launching the app…");
 
 	/// <summary>Shows a worker as trying its session again.</summary>
 	/// <param name="config">The fixture the worker belongs to.</param>

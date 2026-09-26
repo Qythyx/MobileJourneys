@@ -93,10 +93,11 @@ public sealed class IosPlatformConfigTests
 		var runtime = IosPlatformConfig.ParseSimulatorRuntime(SimctlList, "26.2");
 
 		_ = runtime.Should().NotBeNull();
-		_ = runtime!.Id.Should().Be("com.apple.CoreSimulator.SimRuntime.iOS-26-2");
-		_ = runtime.ByName["iPhone 17 Pro"].Should().Be(
-			new IosPlatformConfig.Simulator("BBBB", "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro")
-		);
+		_ = runtime.Id.Should().Be("com.apple.CoreSimulator.SimRuntime.iOS-26-2");
+		_ = runtime
+			.ByName["iPhone 17 Pro"]
+			.Should()
+			.Be(new IosPlatformConfig.Simulator("BBBB", "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro"));
 		_ = runtime.ByName["iPhone 17 Pro · worker 2"].Udid.Should().Be("CCCC");
 	}
 

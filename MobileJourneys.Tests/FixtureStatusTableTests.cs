@@ -32,6 +32,27 @@ public sealed class FixtureStatusTableTests
 	}
 
 	[Test]
+	public void AReadyWorkerSaysWhatItIsDoingRatherThanNothing()
+	{
+		var table = new FixtureStatusTable([(Single, 3)]);
+
+		table.Ready(Single, 1);
+
+		_ = table.CurrentCell(Single).Should().Be("device up — preparing it…");
+	}
+
+	[Test]
+	public void APreparingWorkerNamesTheJourneyItIsSettingUp()
+	{
+		var table = new FixtureStatusTable([(Single, 3)]);
+
+		table.Step(Single, 1, "Login", 5, 5, "tap sign in");
+		table.Preparing(Single, 1, "Checkout");
+
+		_ = table.CurrentCell(Single).Should().Be("Checkout — launching the app…");
+	}
+
+	[Test]
 	public void MultiInstanceCellHasOneNumberedLinePerWorker()
 	{
 		var table = new FixtureStatusTable([(Paired, 3)]);

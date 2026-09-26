@@ -30,7 +30,7 @@ public sealed class ArtifactNamingTests
 		var parsed = ArtifactNaming.ParseFailureArtifact(fileName);
 
 		_ = parsed.Should().NotBeNull();
-		_ = parsed!.Kind.Should().Be("diff");
+		_ = parsed.Kind.Should().Be("diff");
 		_ = parsed.DiffPercent.Should().Be(5.123);
 		_ = parsed.DiffPixelCount.Should().Be(42);
 	}
@@ -52,7 +52,7 @@ public sealed class ArtifactNamingTests
 		var parsed = ArtifactNaming.ParseFailureArtifact("01 Step [Journey]_diff_5.123%.png");
 
 		_ = parsed.Should().NotBeNull();
-		_ = parsed!.Kind.Should().Be("diff");
+		_ = parsed.Kind.Should().Be("diff");
 		_ = parsed.DiffPercent.Should().Be(5.123);
 		_ = parsed.DiffPixelCount.Should().BeNull();
 	}

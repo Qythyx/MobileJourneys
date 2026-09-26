@@ -3,6 +3,8 @@ using OpenQA.Selenium;
 using OpenQA.Selenium.Appium;
 using OpenQA.Selenium.Appium.iOS;
 using OpenQA.Selenium.Support.UI;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 
 namespace MobileJourneys;
 
@@ -188,8 +190,19 @@ public sealed record IosPlatformConfig(
 		return string.IsNullOrWhiteSpace(content) ? null : content.Trim();
 	}
 
-	internal override void CaptureDeviceScreenshot(string deviceId, string outPath) =>
-		ProcessRunner.RunWithResult("xcrun", ["simctl", "io", deviceId, "screenshot", outPath]);
+	internal override Image<Rgb24> CaptureDeviceScreen(string deviceId)
+	{
+		var path = Path.Combine(Path.GetTempPath(), $"device_screenshot_{Guid.NewGuid():N}.png");
+		try
+		{
+			_ = ProcessRunner.RunWithResult("xcrun", ["simctl", "io", deviceId, "screenshot", path]);
+			return Image.Load<Rgb24>(path);
+		}
+		finally
+		{
+			File.Delete(path);
+		}
+	}
 
 	internal override int GetStatusBarHeight(AppiumDriver driver) =>
 		driver.GetDict("mobile: deviceScreenInfo").GetDict("statusBarSize").GetInt("height");

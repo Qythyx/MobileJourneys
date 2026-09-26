@@ -1,6 +1,9 @@
+using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Xml.XPath;
 using AwesomeAssertions;
 using NUnit.Framework;
+using SixLabors.ImageSharp.PixelFormats;
 
 namespace MobileJourneys.Tests;
 
@@ -98,6 +101,93 @@ public sealed class AndroidPlatformConfigTests
 	public void GetAlertButtonLocatorBothQuoteLabelProducesValidXPath() =>
 		// Pathological label with both ' and " forces the concat() branch.
 		_ = Compile(Config.GetAlertButtonLocator("a'b\"c"));
+
+	[TestCase(3, TestName = "Before Android added a colour-space word")]
+	[TestCase(4, TestName = "With the colour-space word")]
+	public void DecodeRawScreencapReadsThePixelsWhateverTheHeaderLength(int headerWords)
+	{
+		using var screen = AndroidPlatformConfig.DecodeRawScreencap(
+			RawScreencap(headerWords, 1, [10, 20, 30, 255, 40, 50, 60, 255])
+		);
+
+		_ = screen.Width.Should().Be(2);
+		_ = screen[0, 0].Should().Be(new Rgb24(10, 20, 30));
+		_ = screen[1, 0].Should().Be(new Rgb24(40, 50, 60));
+	}
+
+	[Test]
+	public void DecodeRawScreencapRefusesAFormatThatIsNotRgba() =>
+		// 4 is PIXEL_FORMAT_RGB_565, two bytes a pixel, which read as RGBA would be garbage.
+		_ = FluentActions
+			.Invoking(() => AndroidPlatformConfig.DecodeRawScreencap(RawScreencap(4, 4, [0, 0, 0, 0])))
+			.Should()
+			.Throw<InvalidOperationException>()
+			.WithMessage("*pixel format 4*");
+
+	[Test]
+	public void DecodeRawScreencapRefusesACaptureCutShort() =>
+		_ = FluentActions
+			.Invoking(() => AndroidPlatformConfig.DecodeRawScreencap(RawScreencap(4, 1, [10, 20, 30, 255, 40])))
+			.Should()
+			.Throw<InvalidOperationException>()
+			.WithMessage("*not a 2x1 screen*");
+
+	[Test]
+	public void UptimeOfAProcessIsHowLongAgoItStarted()
+	{
+		using var started = Process.Start("sleep", "30");
+		try
+		{
+			_ = AndroidPlatformConfig.UptimeOf(started.Id).Should().BeCloseTo(TimeSpan.Zero, TimeSpan.FromSeconds(10));
+		}
+		finally
+		{
+			started.Kill();
+		}
+	}
+
+	[Test]
+	public void UptimeOfAProcessThatIsGoneCannotBeTold()
+	{
+		using var started = Process.Start("true");
+		started.WaitForExit();
+
+		_ = AndroidPlatformConfig.UptimeOf(started.Id).Should().BeNull();
+	}
+
+	[Test]
+	public void KillEndsAProcess()
+	{
+		using var started = Process.Start("sleep", "30");
+
+		AndroidPlatformConfig.Kill(started.Id);
+
+		_ = started.WaitForExit(TimeSpan.FromSeconds(5)).Should().BeTrue();
+	}
+
+	[Test]
+	public void KillOfAProcessThatIsGoneDoesNothing()
+	{
+		using var started = Process.Start("true");
+		started.WaitForExit();
+
+		_ = FluentActions.Invoking(() => AndroidPlatformConfig.Kill(started.Id)).Should().NotThrow();
+	}
+
+	/// <summary>Builds what <c>screencap</c> writes for a 2x1 screen.</summary>
+	/// <param name="headerWords">How many 32-bit words lead the pixels.</param>
+	/// <param name="format">The pixel format the header declares.</param>
+	/// <param name="pixels">The pixel bytes that follow.</param>
+	/// <returns>The raw capture.</returns>
+	private static byte[] RawScreencap(int headerWords, int format, byte[] pixels)
+	{
+		var raw = new byte[(headerWords * 4) + pixels.Length];
+		BinaryPrimitives.WriteInt32LittleEndian(raw, 2);
+		BinaryPrimitives.WriteInt32LittleEndian(raw.AsSpan(4), 1);
+		BinaryPrimitives.WriteInt32LittleEndian(raw.AsSpan(8), format);
+		pixels.CopyTo(raw, headerWords * 4);
+		return raw;
+	}
 
 	private static XPathExpression Compile(OpenQA.Selenium.By by)
 	{

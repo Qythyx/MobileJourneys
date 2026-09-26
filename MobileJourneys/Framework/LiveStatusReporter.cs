@@ -37,6 +37,10 @@ internal sealed class LiveStatusReporter(IReadOnlyList<TestCase> selected) : Run
 		table.Retrying(config, worker, reason);
 
 	/// <inheritdoc/>
+	public override void JourneyStarting(PlatformConfig config, int worker, string journeyName) =>
+		table.Preparing(config, worker, journeyName);
+
+	/// <inheritdoc/>
 	public override void WorkerLost(PlatformConfig config, int worker, string reason) =>
 		table.Lost(config, worker, reason);
 

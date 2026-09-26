@@ -35,6 +35,13 @@ public static class SuiteRunner
 	/// </summary>
 	private const int SessionRecoveryAttempts = 3;
 
+	/// <summary>
+	/// How many journeys a worker may run again because the system froze the app under them. One is
+	/// the device having a bad moment; a device that keeps doing it is telling us about the machine
+	/// it runs on, and every journey it takes after that says the same thing.
+	/// </summary>
+	private const int NotRespondingRetries = 3;
+
 	/// <summary>How many lines of the Appium server's output to keep back for a post-mortem.</summary>
 	private const int AppiumOutputTailLines = 200;
 
@@ -501,16 +508,23 @@ public static class SuiteRunner
 			if (!restartTried && ShouldRestartDevice(readiness, attempt == SessionStartAttempts, lastFailure))
 			{
 				restartTried = true;
-				restarted = worker.Config.RestartDevice(worker.DeviceId, DeviceReadyTimeout);
-				if (restarted)
+
+				// Said before the restart, not after it: the restart takes the device down and waits
+				// out its whole boot, minutes in which the worker would otherwise say nothing.
+				if (worker.Config.CanRestartDevice)
 				{
 					reporter.FixtureRetrying(
 						worker.Config,
 						worker.Index,
 						readiness == PlatformConfig.DeviceReadiness.Unresponsive
-							? "its device is not responding, restarting it"
-							: "restarting its device for the last attempt"
+							? "its device stopped responding — restarting it and waiting for it to boot"
+							: "restarting its device for the last attempt, and waiting for it to boot"
 					);
+				}
+
+				restarted = worker.Config.RestartDevice(worker.DeviceId, DeviceReadyTimeout);
+				if (restarted)
+				{
 					_ = worker.Config.WaitUntilDeviceIsReady(worker.DeviceId, DeviceReadyTimeout, cancellationToken);
 				}
 			}
@@ -589,6 +603,7 @@ public static class SuiteRunner
 	{
 		var backend = driver.Backend;
 		var recoveriesLeft = SessionRecoveryAttempts;
+		var freezesLeft = NotRespondingRetries;
 		var live = driver;
 		try
 		{
@@ -601,13 +616,19 @@ public static class SuiteRunner
 					return null;
 				}
 
-				if (result.Passed || live.IsSessionAlive())
+				var sessionDied = !result.Passed && !live.IsSessionAlive();
+
+				// Asked of a live session only, and only about a journey that failed: the dialog is
+				// the system's, it sits over whatever the app was showing, and an expectation waiting
+				// for an alert accepts it — so the journey reports a frozen device as a broken app.
+				var frozen = !result.Passed && !sessionDied && live.ClearNotRespondingDialog();
+				if (!sessionDied && !frozen)
 				{
 					reporter.JourneyCompleted(result);
 					continue;
 				}
 
-				if (recoveriesLeft == 0)
+				if (sessionDied && recoveriesLeft == 0)
 				{
 					queue.Enqueue(testCase);
 					return Lose(
@@ -615,18 +636,45 @@ public static class SuiteRunner
 					);
 				}
 
-				recoveriesLeft--;
-				if (ReplaceSession() is not { } replacement)
+				if (frozen && freezesLeft == 0)
 				{
-					live = null;
+					// Put back rather than failed, like a worker that has lost its session: the
+					// journey has still not been run against a device in a state to run it, and a
+					// healthy worker of the same fixture may yet take it.
 					queue.Enqueue(testCase);
-					return Lose("its session died and would not reopen.");
+					return Lose(
+						$"the app stopped responding on it during {NotRespondingRetries + 1} journeys, so its device "
+							+ "is not fit to run on — the machine is most likely driving more devices than it can."
+					);
 				}
 
-				live = replacement;
+				if (sessionDied)
+				{
+					recoveriesLeft--;
+					if (ReplaceSession() is not { } replacement)
+					{
+						live = null;
+						queue.Enqueue(testCase);
+						return Lose("its session died and would not reopen.");
+					}
 
-				// The journey ran against a session that was already dying, so its result describes
-				// the session rather than the app.
+					live = replacement;
+				}
+				else
+				{
+					freezesLeft--;
+				}
+
+				reporter.FixtureRetrying(
+					worker.Config,
+					worker.Index,
+					frozen
+						? $"the app stopped responding under {testCase.Journey.Name}, so it runs again"
+						: $"its session died under {testCase.Journey.Name}, so it runs again on a new one"
+				);
+
+				// The journey ran against a device that was not in a state to run it, so its result
+				// describes the device rather than the app.
 				if (RunJourney(live, testCase) is not { } rerun)
 				{
 					return null;

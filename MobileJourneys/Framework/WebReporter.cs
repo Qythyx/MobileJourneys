@@ -69,6 +69,18 @@ internal sealed class WebReporter(string url, IReadOnlyList<TestCase> selected) 
 		);
 
 	/// <inheritdoc/>
+	public override void JourneyStarting(PlatformConfig config, int worker, string journeyName) =>
+		Post(
+			new
+			{
+				type = "journey-starting",
+				config = config.DisplayName,
+				worker,
+				journey = journeyName,
+			}
+		);
+
+	/// <inheritdoc/>
 	public override void WorkerLost(PlatformConfig config, int worker, string reason) =>
 		Post(
 			new

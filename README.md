@@ -152,10 +152,19 @@ new IosPlatformConfig(...) { Instances = 3 },
 On iOS, worker 1 is the simulator the config names and the extras are simulators named
 `<DeviceName> · worker <n>`, created from the base device's type on first use and kept for later
 runs. On Android every instance of a shared AVD runs read-only, since the emulator allows no
-writable one beside them; a writable instance left by an earlier run is stopped first. All are left
-running after a run, like the base device. A device that cannot be brought up, or whose session dies
-past its retry budget, drops out and the fixture's other devices take its journeys; the fixture is
-abandoned only when none of its devices can host the app.
+writable one beside them. All are left running after a run, like the base device.
+
+A run keeps the Android emulators it finds running while they are fresh, and restarts all of an
+AVD's instances once any of them has been up for more than an hour: each is killed and a new one
+booted from the AVD's quick-boot snapshot, which takes seconds. An emulator gets slower the longer
+it runs — one left up for three days launched apps six times slower than a fresh boot of the same
+AVD, while ones a few hours old were as quick — and that slowness reaches every step of every
+journey. Killing rather than stopping gracefully keeps a writable instance from saving its worn
+state into the snapshot the next boot loads.
+
+A device that cannot be brought up, or whose session dies past its retry budget, drops out and the
+fixture's other devices take its journeys; the fixture is abandoned only when none of its devices
+can host the app.
 
 ### 4. Write journeys
 
@@ -262,6 +271,15 @@ and gives the interrupted journey the run it never got, keeping the rest of its 
 sessions and the worker is lost instead — a device needing more than that is reporting its own
 condition, not the app's — and the fixture's other workers take the journeys it would have run. Only
 when a fixture's last worker is lost are its remaining journeys counted as not run.
+
+A loaded host freezes an app the same way. Android then puts its own "isn't responding" dialog over
+whatever was on screen, and because that dialog answers to the alert endpoint like any other, an
+expectation waiting for an alert accepts it and the journey fails on a screenshot of the system's
+verdict rather than of the app. So a failed journey is asked, before it is recorded, whether that
+dialog is up: if it is, it is cleared by closing the app and the journey runs again, exactly as a
+lost session does. Three journeys frozen and the worker is lost instead, with the run saying that
+the machine is most likely driving more devices than it can — which is the real finding, and one no
+journey's failure would have shown.
 
 ### 6. Required csproj bits
 

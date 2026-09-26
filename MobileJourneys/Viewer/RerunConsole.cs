@@ -90,6 +90,9 @@ internal sealed class RerunConsole(FrameworkConfig config)
 			case "fixture-retrying":
 				current.Retrying(fixture, Number(root, "worker"), Text(root, "reason") ?? string.Empty);
 				return;
+			case "journey-starting":
+				current.Preparing(fixture, Number(root, "worker"), Text(root, "journey") ?? string.Empty);
+				return;
 			case "worker-lost":
 				current.Lost(fixture, Number(root, "worker"), Text(root, "reason") ?? string.Empty);
 				return;
