@@ -95,17 +95,25 @@ public sealed record IosPlatformConfig(
 	internal override bool DismissKeyboard(AppiumDriver driver)
 	{
 		// HideKeyboard() is unreliable on iOS 26+ — it may silently fail
-		// or throw. Try the MAUI Done button (input accessory toolbar added by
-		// MauiDoneAccessoryView for Editor/Picker controls) first, then fall
+		// or throw. Try the MAUI Done button (the input accessory MauiDoneAccessoryView adds
+		// for Editor/Picker controls and keyboards without a Return key) first, then fall
 		// back to the keyboard Return key for Entry controls. Either resigns the input.
+		// MAUI 10.0.110+ draws it as a floating close button on iOS 26+ and names the accessory
+		// DoneAccessory; earlier versions draw an unnamed toolbar.
 		try
 		{
-			driver.FindElement(By.XPath("//XCUIElementTypeToolbar//XCUIElementTypeButton")).Click();
+			driver
+				.FindElement(
+					By.XPath(
+						"//*[@name='DoneAccessory']//XCUIElementTypeButton | //XCUIElementTypeToolbar//XCUIElementTypeButton"
+					)
+				)
+				.Click();
 			return true;
 		}
 		catch
 		{
-			/* no toolbar button — not an Editor/Picker, or keyboard not visible */
+			/* no Done button — not an Editor/Picker, or keyboard not visible */
 		}
 
 		try
