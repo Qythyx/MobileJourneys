@@ -751,18 +751,18 @@ public sealed record AndroidPlatformConfig(
 	internal static double ToAndroidFontScale(SystemFontSize size) =>
 		size switch
 		{
-			SystemFontSize.ExtraSmall => 0.82,
-			SystemFontSize.Small => 0.88,
-			SystemFontSize.Medium => 0.94,
+			SystemFontSize.ExtraSmall => 0.85,
+			SystemFontSize.Small => 0.85,
+			SystemFontSize.Medium => 1.0,
 			SystemFontSize.Large => 1.0,
 			SystemFontSize.ExtraLarge => 1.15,
 			SystemFontSize.ExtraExtraLarge => 1.30,
-			SystemFontSize.ExtraExtraExtraLarge => 1.45,
-			SystemFontSize.AccessibilityMedium => 1.6,
+			SystemFontSize.ExtraExtraExtraLarge => 1.50,
+			SystemFontSize.AccessibilityMedium => 1.50,
 			SystemFontSize.AccessibilityLarge => 1.8,
 			SystemFontSize.AccessibilityExtraLarge => 2.0,
-			SystemFontSize.AccessibilityExtraExtraLarge => 2.25,
-			SystemFontSize.AccessibilityExtraExtraExtraLarge => 2.5,
+			SystemFontSize.AccessibilityExtraExtraLarge => 2.0,
+			SystemFontSize.AccessibilityExtraExtraExtraLarge => 2.0,
 			_ => throw new ArgumentOutOfRangeException(nameof(size), size, null),
 		};
 }

@@ -24,18 +24,18 @@ public sealed class AndroidPlatformConfigTests
 		0.005
 	);
 
-	[TestCase(SystemFontSize.ExtraSmall, 0.82)]
-	[TestCase(SystemFontSize.Small, 0.88)]
-	[TestCase(SystemFontSize.Medium, 0.94)]
+	[TestCase(SystemFontSize.ExtraSmall, 0.85)]
+	[TestCase(SystemFontSize.Small, 0.85)]
+	[TestCase(SystemFontSize.Medium, 1.0)]
 	[TestCase(SystemFontSize.Large, 1.0)]
 	[TestCase(SystemFontSize.ExtraLarge, 1.15)]
 	[TestCase(SystemFontSize.ExtraExtraLarge, 1.30)]
-	[TestCase(SystemFontSize.ExtraExtraExtraLarge, 1.45)]
-	[TestCase(SystemFontSize.AccessibilityMedium, 1.6)]
+	[TestCase(SystemFontSize.ExtraExtraExtraLarge, 1.50)]
+	[TestCase(SystemFontSize.AccessibilityMedium, 1.50)]
 	[TestCase(SystemFontSize.AccessibilityLarge, 1.8)]
 	[TestCase(SystemFontSize.AccessibilityExtraLarge, 2.0)]
-	[TestCase(SystemFontSize.AccessibilityExtraExtraLarge, 2.25)]
-	[TestCase(SystemFontSize.AccessibilityExtraExtraExtraLarge, 2.5)]
+	[TestCase(SystemFontSize.AccessibilityExtraExtraLarge, 2.0)]
+	[TestCase(SystemFontSize.AccessibilityExtraExtraExtraLarge, 2.0)]
 	public void ToAndroidFontScaleMapsEveryEnumValue(SystemFontSize size, double expected) =>
 		AndroidPlatformConfig.ToAndroidFontScale(size).Should().Be(expected);
 
