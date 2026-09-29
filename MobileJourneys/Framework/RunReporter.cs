@@ -327,7 +327,17 @@ internal abstract class RunReporter
 		var table = new Table().Border(TableBorder.Rounded).BorderColor(Color.Grey);
 		_ = table.AddColumn(new TableColumn("Fixture").NoWrap());
 		foreach (
-			var header in new[] { "Journeys", "Time", "Lookup p50", "Lookup max", "Wait avg", "Wait max", "Timed out" }
+			var header in new[]
+			{
+				"Journeys",
+				"Time",
+				"Lookup p50",
+				"Lookup max",
+				"Wait avg",
+				"Wait max",
+				"Timed out",
+				"Budget",
+			}
 		)
 		{
 			_ = table.AddColumn(new TableColumn(header).RightAligned().NoWrap());
@@ -348,14 +358,15 @@ internal abstract class RunReporter
 				Duration(figures.LookupMax),
 				Duration(figures.WaitAverage),
 				Markup.Escape(longestWait),
-				figures.WaitsTimedOut.ToString(CultureInfo.InvariantCulture)
+				figures.WaitsTimedOut.ToString(CultureInfo.InvariantCulture),
+				Duration(budget)
 			);
 		}
 
 		AnsiConsole.WriteLine();
 		AnsiConsole.Write(table);
 		AnsiConsole.MarkupLine(
-			$"[dim]Run time {Duration(runStopwatch.Elapsed)}; wait budget {Duration(rows[0].Budget)}.[/]"
+			$"[dim]Run time {Duration(runStopwatch.Elapsed)}.[/]"
 		);
 		AnsiConsole.WriteLine();
 	}

@@ -37,14 +37,6 @@ public sealed class RunOptionsTests
 	}
 
 	[Test]
-	public void WaitBudgetDefaultsToAMinute()
-	{
-		var options = RunOptions.Parse(["--run"]);
-
-		_ = options.WaitBudget.Should().Be(TimeSpan.FromSeconds(60));
-	}
-
-	[Test]
 	public void WaitBudgetCarriesItsSeconds()
 	{
 		var options = RunOptions.Parse(["--run", "--wait-budget", "20"]);

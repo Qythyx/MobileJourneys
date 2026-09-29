@@ -66,6 +66,21 @@ public abstract record PlatformConfig(
 	} = 1;
 
 	/// <summary>
+	/// How long any one wait for the app may take on this fixture before its step fails: an element
+	/// or alert to appear, a launch to settle, the screen to match its baseline. A wait ends as soon
+	/// as it is satisfied, so only a failing step pays it. A run's <c>--wait-budget</c> overrides it.
+	/// </summary>
+	public TimeSpan WaitBudget
+	{
+		get;
+		init
+		{
+			ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value, TimeSpan.Zero, nameof(WaitBudget));
+			field = value;
+		}
+	} = TimeSpan.FromSeconds(60);
+
+	/// <summary>
 	/// Allow small per-pixel color differences (e.g., JPEG decoding non-determinism).
 	/// The number is the sum of the delta for each component, R, G, and B.
 	/// </summary>

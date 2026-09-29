@@ -71,6 +71,16 @@ public sealed class PlatformConfigTests
 			.Throw<ArgumentOutOfRangeException>();
 
 	[Test]
+	public void WaitBudgetDefaultsToAMinute() => _ = IosLight.WaitBudget.Should().Be(TimeSpan.FromSeconds(60));
+
+	[Test]
+	public void WaitBudgetRejectsZero() =>
+		_ = FluentActions
+			.Invoking(() => IosLight with { WaitBudget = TimeSpan.Zero })
+			.Should()
+			.Throw<ArgumentOutOfRangeException>();
+
+	[Test]
 	public void ColorToleranceIsHigherForAndroidThanIos() =>
 		// Higher Android tolerance compensates for emulator rendering differences.
 		AndroidDark.ColorTolerance.Should().BeGreaterThan(IosLight.ColorTolerance);

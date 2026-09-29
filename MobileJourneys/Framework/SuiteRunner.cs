@@ -233,7 +233,7 @@ public static class SuiteRunner
 											group.Key,
 											[.. group],
 											config.Backend,
-											options.WaitBudget,
+											options.WaitBudget ?? group.Key.WaitBudget,
 											reporter,
 											manager,
 											cancellation.Token
