@@ -27,8 +27,8 @@ rather than publishing progress to a test host.
 - Screenshot-baseline comparison via `SixLabors.ImageSharp` + `Codeuctivity.ImageSharpCompare` with
   maskable regions for animated UI elements.
 - A `SuiteRunner` that runs the cross-product of platform fixtures and journeys from a plain console
-  entry point, with `--run`, `--journey`, `--filter`, `--rerun`, `--report-to`, `--wait-budget`,
-  `--list-extraneous`, `--delete-extraneous`, `--review` CLI flags — a live
+  entry point, with `--run`, `--journey`, `--filter`, `--rerun`, `--report-to`, `--list-extraneous`,
+  `--delete-extraneous`, `--review` CLI flags — a live
   [Spectre.Console](https://spectreconsole.net/) status table at a terminal, plain per-step lines
   when stdout is redirected, and JSON events POSTed to a listener when `--report-to` names one.
 - An interactive front door: with no arguments the runner offers its modes as a menu, and after a
@@ -321,10 +321,6 @@ dotnet run --project test/MyApp.UITests -- --run --journey Login --filter "iPhon
 # Re-run only journeys with failure artifacts on disk
 dotnet run --project test/MyApp.UITests -- --run --rerun
 
-# Give every wait for the app 20s instead of the default 60s. Only failing steps pay the
-# budget, so a short one speeds up a run expected to fail on many screenshots.
-dotnet run --project test/MyApp.UITests -- --run --wait-budget 20
-
 # Report progress as JSON events instead of to the console. Machine-facing: the review
 # server passes its own endpoint here when it launches a rerun.
 dotnet run --project test/MyApp.UITests -- --run --report-to http://localhost:8017/api/run-events?job=<id>
@@ -374,13 +370,13 @@ into an "element not found" on the very first step.
 ## Waits and the timing report
 
 Every wait for the app — an element or alert to appear, a launch to settle, the screen to match its
-baseline, a notification banner to arrive — has the same budget: 60s, or what
-`--wait-budget <seconds>` says. A wait returns the moment its condition holds, so a generous budget
+baseline, a notification banner to arrive — has the same budget: the fixture's `WaitBudget`, set on
+its config like `Instances`. A wait returns the moment its condition holds, so a generous budget
 costs a passing run nothing; only a failing step pays it. That is also why a step that throws ends
 its journey — the steps after it would each spend the whole budget on a screen that is not coming —
 while a screenshot that merely differs lets the journey carry on, since the app is still on the
 screen the next step expects. Probes that usually find nothing, such as `DismissAlert` giving an
-alert 2s to show up, keep their own short timeouts, because they pay them in full every time.
+alert a moment to show up, keep their own short timeouts, because they pay them in full every time.
 
 Every session records how long each lookup round trip to its device took and how long each wait
 took, and the end of a run prints them per fixture: how many journeys it ran and how long it took,

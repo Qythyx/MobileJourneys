@@ -68,7 +68,7 @@ public abstract record PlatformConfig(
 	/// <summary>
 	/// How long any one wait for the app may take on this fixture before its step fails: an element
 	/// or alert to appear, a launch to settle, the screen to match its baseline. A wait ends as soon
-	/// as it is satisfied, so only a failing step pays it. A run's <c>--wait-budget</c> overrides it.
+	/// as it is satisfied, so only a failing step pays it.
 	/// </summary>
 	public TimeSpan WaitBudget
 	{

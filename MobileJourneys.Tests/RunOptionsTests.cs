@@ -37,33 +37,6 @@ public sealed class RunOptionsTests
 	}
 
 	[Test]
-	public void WaitBudgetCarriesItsSeconds()
-	{
-		var options = RunOptions.Parse(["--run", "--wait-budget", "20"]);
-
-		_ = options.Mode.Should().Be(RunMode.Run);
-		_ = options.WaitBudget.Should().Be(TimeSpan.FromSeconds(20));
-	}
-
-	[Test]
-	public void WaitBudgetWithoutAValueIsRejected()
-	{
-		var options = RunOptions.Parse(["--run", "--wait-budget"]);
-
-		_ = options.Mode.Should().Be(RunMode.Help);
-		_ = options.Error.Should().Contain("--wait-budget");
-	}
-
-	[Test]
-	public void WaitBudgetOfZeroIsRejected()
-	{
-		var options = RunOptions.Parse(["--run", "--wait-budget", "0"]);
-
-		_ = options.Mode.Should().Be(RunMode.Help);
-		_ = options.Error.Should().Contain("--wait-budget");
-	}
-
-	[Test]
 	public void ReportToCarriesItsUrl()
 	{
 		var options = RunOptions.Parse(["--run", "--report-to", "http://localhost:8017/api/run-events?job=abc"]);
