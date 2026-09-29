@@ -12,7 +12,9 @@ namespace MobileJourneys.Viewer;
 /// <remarks>
 /// There is no table until the run declares its fixture totals, which is a build away from the
 /// child starting. The child's output shows until then, and goes on showing for a rerun that never
-/// reported at all — one that failed to build.
+/// reported at all — one that failed to build. What the child writes while the table is up — its
+/// end-of-run summary: failure details, timings, verdict — is held and written once the table is
+/// down.
 /// </remarks>
 /// <param name="config">The suite, used to resolve the fixture an event names.</param>
 internal sealed class RerunConsole(FrameworkConfig config)
@@ -30,6 +32,9 @@ internal sealed class RerunConsole(FrameworkConfig config)
 
 	private Task? display;
 
+	/// <summary>The child's lines written while the table was up, to be shown once it is down.</summary>
+	private readonly List<string> heldLines = [];
+
 	/// <summary>Announces the rerun that is starting.</summary>
 	/// <param name="description">What is being rerun, as the page describes it.</param>
 	internal static void Announce(string description)
@@ -39,7 +44,7 @@ internal sealed class RerunConsole(FrameworkConfig config)
 	}
 
 	/// <summary>
-	/// Writes one line of the child's output, while there is no table to disturb.
+	/// Writes one line of the child's output, or holds it for <see cref="Finish"/> while the table is up.
 	/// </summary>
 	/// <param name="text">The line, as the child wrote it.</param>
 	internal void Line(string text)
@@ -48,9 +53,11 @@ internal sealed class RerunConsole(FrameworkConfig config)
 		{
 			if (table is null)
 			{
-				// Not through Spectre: the child has already rendered this line, and a second pass
-				// would read its brackets as markup and re-wrap its paths at the profile width.
-				Console.WriteLine(text);
+				WriteRaw(text);
+			}
+			else
+			{
+				heldLines.Add(text);
 			}
 		}
 	}
@@ -118,7 +125,7 @@ internal sealed class RerunConsole(FrameworkConfig config)
 	}
 
 	/// <summary>
-	/// Brings the table down and states how the rerun ended. Blocks briefly while the display
+	/// Brings the table down, writes the child's end-of-run summary under it, and states how the rerun ended. Blocks briefly while the display
 	/// finishes, so the verdict is not written into a table still redrawing itself.
 	/// </summary>
 	/// <param name="exitCode">The exit code <c>dotnet run</c> returned.</param>
@@ -132,6 +139,17 @@ internal sealed class RerunConsole(FrameworkConfig config)
 		}
 
 		_ = pending?.Wait(TeardownTimeout);
+		string[] held;
+		lock (gate)
+		{
+			held = [.. heldLines];
+		}
+
+		foreach (var line in held)
+		{
+			WriteRaw(line);
+		}
+
 		AnsiConsole.MarkupLine(
 			exitCode == 0 ? "[green]Rerun finished.[/]" : $"[red]Rerun finished with exit code {exitCode}.[/]"
 		);
@@ -182,6 +200,14 @@ internal sealed class RerunConsole(FrameworkConfig config)
 			});
 		}
 	}
+
+	/// <summary>Writes a line the child has already rendered.</summary>
+	/// <param name="text">The line.</param>
+	/// <remarks>
+	/// Not through Spectre: a second pass would read the line's brackets as markup and re-wrap its
+	/// paths at the profile width.
+	/// </remarks>
+	private static void WriteRaw(string text) => Console.WriteLine(text);
 
 	private PlatformConfig? Fixture(JsonElement root) => config.FindPlatform(Text(root, "config"));
 
