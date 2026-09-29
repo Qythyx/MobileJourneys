@@ -446,10 +446,11 @@ you move on with `j`/`k`, which clears the green state. The log box persists as 
 run and is dismissed with `Esc` or its ✕.
 
 Press `?` in the page for the keymap. Highlights: `1`–`4` and `[`/`]` switch fixture, `j`/`k` step
-through failures (centering each), `z` zooms the selected one, `b`/`n`/`d`/`space` rotate the
-leading image pane through baseline/new/diff, `f` fits the tree, `u` reloads from disk, `a` accepts,
-`x` discards, and rerun is a two-key chord (`r` then `r`/`a`/`f`) so an expensive run can't fire on
-a single keypress.
+through failures (centering each), `z` zooms the selected one, `←`/`→` step through the journey,
+`space` rotates the leading image pane through baseline/new/diff, `d` blinks the differing pixels
+red on every pane, `D` zooms 300% on the first of them (and back out), `f` fits the tree, `u`
+reloads from disk, `a` accepts, `x` discards, and rerun is a two-key chord (`r` then `r`/`a`/`f`) so
+an expensive run can't fire on a single keypress.
 
 Anything that has to stay legible while zoomed — emphasis outlines, the selection ring, node titles
 — is sized in units divided by the zoom scale (`--inv`), so outlines keep a constant on-screen

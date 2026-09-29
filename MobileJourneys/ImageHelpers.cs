@@ -1,6 +1,7 @@
 using System.Text.Json;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Png.Chunks;
+using SixLabors.ImageSharp.Metadata;
 using SixLabors.ImageSharp.PixelFormats;
 using Image = SixLabors.ImageSharp.Image;
 using Rectangle = System.Drawing.Rectangle;
@@ -80,11 +81,11 @@ internal static class ImageHelpers
 	/// Reads mask regions previously stored by <see cref="SetMaskMetadata"/> from an image's PNG
 	/// text metadata. Returns an empty array when the chunk is absent (e.g. older baselines).
 	/// </summary>
-	/// <param name="image">The image to read metadata from.</param>
-	internal static Rectangle[] GetMaskMetadata(Image image)
+	/// <param name="metadata">The metadata of the image to read, from a loaded or only identified image.</param>
+	internal static Rectangle[] GetMaskMetadata(ImageMetadata metadata)
 	{
 		// PngTextData is a struct, so a missing keyword yields default(PngTextData) with a null Value.
-		var entry = image.Metadata.GetPngMetadata().TextData.FirstOrDefault(t => t.Keyword == MaskMetadataKeyword);
+		var entry = metadata.GetPngMetadata().TextData.FirstOrDefault(t => t.Keyword == MaskMetadataKeyword);
 		if (string.IsNullOrEmpty(entry.Value))
 		{
 			return [];

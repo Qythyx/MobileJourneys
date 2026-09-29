@@ -39,7 +39,7 @@ public sealed class ScreenshotManagerTests
 		image.SaveAsPng(stream);
 		using var reloaded = Image.Load(stream.ToArray());
 
-		_ = ImageHelpers.GetMaskMetadata(reloaded).Should().Equal(regions);
+		_ = ImageHelpers.GetMaskMetadata(reloaded.Metadata).Should().Equal(regions);
 	}
 
 	[Test]
@@ -50,7 +50,7 @@ public sealed class ScreenshotManagerTests
 		image.SaveAsPng(stream);
 		using var reloaded = Image.Load(stream.ToArray());
 
-		_ = ImageHelpers.GetMaskMetadata(reloaded).Should().BeEmpty();
+		_ = ImageHelpers.GetMaskMetadata(reloaded.Metadata).Should().BeEmpty();
 	}
 
 	[Test]
@@ -275,7 +275,7 @@ public sealed class ScreenshotManagerTests
 		_ = manager.CompareWithBaselineAndDispose(new Image<Rgb24>(100, 100, new Rgb24(255, 0, 0)), key, liveMasks);
 
 		using var newCapture = Image.Load(storage.ReadNewScreenshot(key));
-		_ = ImageHelpers.GetMaskMetadata(newCapture).Should().Equal(liveMasks);
+		_ = ImageHelpers.GetMaskMetadata(newCapture.Metadata).Should().Equal(liveMasks);
 	}
 
 	[Test]

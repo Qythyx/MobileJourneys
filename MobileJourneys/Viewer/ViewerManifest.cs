@@ -116,6 +116,12 @@ internal static class ViewerManifest
 								"error" => ReadErrorText(config.Storage, platform, container, fileName),
 								_ => string.Empty,
 							},
+							masks = parsed.Kind == "diff"
+								? ReadComparedMasks(
+									config.Storage,
+									new TestStep(platform, container, parsed.StepName, parsed.JourneyName)
+								)
+								: null,
 						}
 					);
 				}
@@ -150,6 +156,57 @@ internal static class ViewerManifest
 			dims,
 		};
 		return $"window.MANIFEST = {JsonSerializer.Serialize(manifest, SerializerOptions)};";
+	}
+
+	/// <summary>
+	/// The regions the comparison behind a step's diff left out, which its diff image tints rather
+	/// than blanks: those stored in the new capture when it was taken, with the baseline's own, as
+	/// <see cref="ScreenshotManager.EffectiveMasks"/> unions them.
+	/// </summary>
+	/// <param name="storage">Storage to read the screenshots from.</param>
+	/// <param name="testStep">The step and journey the diff belongs to.</param>
+	private static object[] ReadComparedMasks(ScreenshotStorage storage, TestStep testStep) =>
+		[
+			.. new[] { ArtifactNaming.NewFileName(testStep), ArtifactNaming.BaselineFileName(testStep) }
+				.SelectMany(file => ReadStoredMasks(storage, testStep.Config, testStep.Container, file))
+				.Select(r => new
+				{
+					x = r.X,
+					y = r.Y,
+					w = r.Width,
+					h = r.Height,
+				}),
+		];
+
+	/// <summary>
+	/// Reads the mask regions stored in a screenshot's PNG metadata without decoding its pixels.
+	/// Returns none if the file is missing, empty, or not a readable image.
+	/// </summary>
+	/// <param name="storage">Storage to read the screenshot from.</param>
+	/// <param name="platform">Platform fixture the screenshot belongs to.</param>
+	/// <param name="container">Container path holding the screenshot.</param>
+	/// <param name="fileName">The screenshot's filename.</param>
+	private static System.Drawing.Rectangle[] ReadStoredMasks(
+		ScreenshotStorage storage,
+		PlatformConfig platform,
+		string container,
+		string fileName
+	)
+	{
+		var bytes = storage.ReadFile(platform, container, fileName);
+		if (bytes is null or { Length: 0 })
+		{
+			return [];
+		}
+
+		try
+		{
+			return ImageHelpers.GetMaskMetadata(SixLabors.ImageSharp.Image.Identify(bytes).Metadata);
+		}
+		catch (SixLabors.ImageSharp.ImageFormatException)
+		{
+			return [];
+		}
 	}
 
 	/// <summary>

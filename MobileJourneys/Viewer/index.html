@@ -699,6 +699,7 @@
 		}
 
 		#zoomview .zoombox {
+			position: relative;
 			flex: 1;
 			min-height: 0;
 			overflow: hidden;
@@ -711,8 +712,32 @@
 			justify-content: center;
 		}
 
+		#zoomview .zoombox canvas.diffmark {
+			position: absolute;
+			pointer-events: none;
+			image-rendering: pixelated;
+			transform-origin: center center;
+			visibility: hidden;
+		}
+
+		#zoomview.blinking .zoombox canvas.diffmark {
+			visibility: visible;
+			animation: diffblink 1s steps(1) infinite;
+		}
+
+		@keyframes diffblink {
+			50% {
+				opacity: 0;
+			}
+		}
+
 		#zoomview .zoombox.dragging {
 			cursor: grabbing;
+		}
+
+		#zoomview .zoombox .missing {
+			align-self: center;
+			color: var(--muted);
 		}
 
 		#zoomview .zoombox img {
@@ -934,6 +959,8 @@
 			let selectedKey = null;  // failureKey of that failure, so a re-scan can find it where it moved to
 			let resolved = null;     // a failure just cleared (rerun passed / accepted / discarded), shown in place
 			let zoomed = false;      // the z view is open
+			let stepNav = null;      // { container, step, journeys } ← / → last moved to, and the journeys it keeps to
+			let lightboxStep = null; // { container, step, journeys } the full-size image shows, when it is a step
 			let chord = null, chordTimer = null, runEvents = null, clockTimer = null;
 			// The rerun being watched, built from the events its process reports. `steps` maps a fixture
 			// to that fixture's "container/step" results; absent entries render as pending (yellow).
@@ -989,7 +1016,7 @@
 					if (!byJourney.has(key)) {
 						byJourney.set(key, {
 							container: f.container, step: f.step, journey: f.journey, journeys: [f.journey],
-							kinds: {}, percent: null, pixels: null, failureText: "",
+							kinds: {}, percent: null, pixels: null, failureText: "", masks: [],
 						});
 					}
 					const g = byJourney.get(key);
@@ -997,6 +1024,7 @@
 					if (f.percent != null) { g.percent = f.percent; }
 					if (f.pixels != null) { g.pixels = f.pixels; }
 					if (f.details) { g.failureText = f.details; }
+					if (f.masks) { g.masks = f.masks; }
 				}
 				// Folded in sorted order, so the entry that represents a collapsed group — the one whose
 				// artifacts the panes show — is always its alphabetically first journey, and the list stays
@@ -1011,7 +1039,7 @@
 				return [...groups.values()];
 			};
 			// How a failure names the journeys it stands for.
-			const journeyLabel = (f) => f.journeys.length === 1 ? f.journey : plural(f.journeys.length, "journey");
+			const journeyLabel = (f) => f.journeys.length === 1 ? f.journeys[0] : plural(f.journeys.length, "journey");
 			const currentFailures = () => failureGroups(config);
 			const selectedFailure = () => currentFailures()[selected];
 
@@ -1231,7 +1259,7 @@
 					img.src = shotUrl(container, file);
 					img.addEventListener("click", () => {
 						if (stepFails.length > 0) { triageFailure(stepFails[0]); }
-						else { openLightbox(img.src, container + "/" + file); }
+						else { openLightbox(container, file, isExtra ? null : label); }
 					});
 					fig.appendChild(img);
 				} else {
@@ -1324,7 +1352,7 @@
 				add(`Rerun ${f.journey} here`, "", "r r", () => rerun(f.journey, "this"));
 				add("on all devices", "", "r a", () => rerun(f.journey, "all"));
 				add("on failed devices", "", "r f", () => rerun(f.journey, "failed"));
-				if (paneKinds(f).length > 1) { add("Cycle image", "", "space", () => rotatePane(null), true); }
+				if (paneKinds(f).length > 1) { add("Cycle image", "", "space", () => rotatePane(), true); }
 				add(big ? "Close zoom" : "Zoom", "", "z", () => (big ? closeZoom() : openZoom()), true);
 				return actions;
 			}
@@ -1346,24 +1374,85 @@
 			}
 
 			// ---------- zoom view (z) ----------
-			const zoomImgState = new Map();
-			function openZoom() {
-				const f = selectedFailure();
-				if (!f) { toast("no failure selected"); return; }
+			let zoomStep = null;     // { container, step, journeys } the zoom view shows
+			// Every pane shares one pan and zoom, so the panes keep showing the same region of the screen.
+			const paneZoom = { s: 1, x: 0, y: 0 };
+			let zoomPanes = [];      // { box, img, mark } for each image the zoom view shows
+			let blinking = false;    // d: the differing pixels blink red on every pane
+			function zoomFrame(at) {
+				if (!zoomStep || zoomStep.container !== at.container || zoomStep.step !== at.step) { resetZoom(); }
 				zoomed = true;
+				zoomStep = at;
 				const view = $("#zoomview");
 				view.innerHTML = "";
 				view.style.display = "flex";
+				zoomPanes = [];
 
 				const head = document.createElement("div");
 				head.className = "zhead";
 				const b = document.createElement("b");
-				b.textContent = f.step + " — " + journeyLabel(f);
-				b.title = f.journeys.join("\n");
+				b.textContent = at.step + " — " + journeyLabel(at);
+				b.title = at.journeys.join("\n");
 				const where = document.createElement("span");
 				where.style.color = "var(--muted)";
-				where.textContent = config + "/" + f.container;
+				where.textContent = config + "/" + at.container;
 				head.append(b, where);
+				view.appendChild(head);
+				return { view, head };
+			}
+			function zoomCloseButton(head) {
+				const close = document.createElement("span");
+				close.className = "close";
+				close.style.marginLeft = "0";
+				close.textContent = "✕ close (z / Esc)";
+				close.addEventListener("click", closeZoom);
+				head.appendChild(close);
+			}
+			// `marked` panes carry the layer the differing pixels are painted on.
+			function zoomFigure(caption, src, rotating, marked) {
+				const fig = document.createElement("figure");
+				if (rotating) { fig.className = "rotating"; }
+				const cap = document.createElement("figcaption");
+				cap.textContent = caption;
+				const boxEl = document.createElement("div");
+				boxEl.className = "zoombox";
+				if (src) {
+					const img = document.createElement("img");
+					img.draggable = false;
+					img.src = src;
+					onArtifactError(img);
+					boxEl.appendChild(img);
+					const mark = marked ? document.createElement("canvas") : null;
+					if (mark) {
+						mark.className = "diffmark";
+						boxEl.appendChild(mark);
+						// The layer lies exactly over the image as laid out, and takes the same transform.
+						const cover = new ResizeObserver(() => {
+							mark.style.left = img.offsetLeft + "px";
+							mark.style.top = img.offsetTop + "px";
+							mark.style.width = img.clientWidth + "px";
+							mark.style.height = img.clientHeight + "px";
+						});
+						cover.observe(img);
+						cover.observe(boxEl);
+					}
+					zoomPanes.push({ box: boxEl, img, mark });
+					attachImageZoom(boxEl, img);
+					applyPaneZoom();
+				} else {
+					const miss = document.createElement("div");
+					miss.className = "missing";
+					miss.textContent = "no baseline yet";
+					boxEl.appendChild(miss);
+				}
+				fig.append(cap, boxEl);
+				return fig;
+			}
+
+			function openZoom() {
+				const f = selectedFailure();
+				if (!f) { toast("no failure selected"); return; }
+				const { view, head } = zoomFrame({ container: f.container, step: f.step, journeys: f.journeys });
 				if (f.percent != null) {
 					const p = document.createElement("span");
 					p.className = "pct";
@@ -1378,35 +1467,21 @@
 				pos.style.cssText = "margin-left:auto;color:var(--muted)";
 				pos.textContent = `failure ${selected + 1} / ${currentFailures().length}`;
 				head.appendChild(pos);
-				const close = document.createElement("span");
-				close.className = "close";
-				close.style.marginLeft = "0";
-				close.textContent = "✕ close (z / Esc)";
-				close.addEventListener("click", closeZoom);
-				head.appendChild(close);
-				view.appendChild(head);
+				zoomCloseButton(head);
 				if (!f.kinds.new) { view.appendChild(explainBlock(f)); }
 
 				const body = document.createElement("div");
 				body.className = "zbody";
-				zoomImgState.clear();
 				orderedKinds(f).forEach((k, i) => {
-					const fig = document.createElement("figure");
-					if (i === 0) { fig.className = "rotating"; }
-					const cap = document.createElement("figcaption");
-					cap.textContent = kindLabel[k] + (i === 0 ? " ⟳" : "");
-					const boxEl = document.createElement("div");
-					boxEl.className = "zoombox";
-					const img = document.createElement("img");
-					img.draggable = false;
-					img.src = shotUrl(f.container, kindFile(f, k));
-					onArtifactError(img);
-					boxEl.appendChild(img);
-					attachImageZoom(boxEl, img);
-					fig.append(cap, boxEl);
-					body.appendChild(fig);
+					body.appendChild(zoomFigure(
+						kindLabel[k] + (i === 0 ? " ⟳" : ""),
+						shotUrl(f.container, kindFile(f, k)),
+						i === 0,
+						f.kinds.diff && k !== "fail"
+					));
 				});
 				view.appendChild(body);
+				if (f.kinds.diff) { markDiff(f); }
 				view.appendChild(triageActions(f, true));
 				if (f.kinds.crash) {
 					const a = document.createElement("a");
@@ -1418,21 +1493,89 @@
 				}
 			}
 
+			// A step with no failure on this device, reached with ← / →: its baseline alone, nothing to triage.
+			function openPassedZoom(at) {
+				const { view, head } = zoomFrame(at);
+				const passed = document.createElement("span");
+				passed.style.cssText = "margin-left:auto;color:var(--muted)";
+				passed.textContent = "no failure";
+				head.appendChild(passed);
+				zoomCloseButton(head);
+				const body = document.createElement("div");
+				body.className = "zbody";
+				const file = at.step + ".png";
+				const present = baselineSet(config).has(at.container + "/" + file);
+				body.appendChild(zoomFigure(kindLabel.baseline, present ? shotUrl(at.container, file) : null, false, false));
+				view.appendChild(body);
+			}
+
 			function closeZoom() {
 				zoomed = false;
+				zoomStep = null;
+				stepNav = null;
+				setBlinking(false);
 				$("#zoomview").style.display = "none";
+			}
+
+			// ---------- stepping through a journey (← / →) ----------
+			const stepsOf = (container) => (M.nodes.find((n) => n.path === container) || { steps: [] }).steps;
+			const journeyPath = (name) => M.journeys[name].flatMap((c) => stepsOf(c).map((step) => ({ container: c, step })));
+			const journeysThrough = (container) => Object.keys(M.journeys).filter((name) => M.journeys[name].includes(container));
+			// The step `delta` away along every one of `journeys`, or null where one of them ends or they part.
+			function stepAlong(journeys, at, delta) {
+				const targets = journeys.map((name) => {
+					const path = journeyPath(name);
+					const i = path.findIndex((s) => s.container === at.container && s.step === at.step);
+					return i < 0 ? undefined : path[i + delta];
+				});
+				const first = targets[0];
+				return first && targets.every((t) => t && t.container === first.container && t.step === first.step) ? first : null;
+			}
+			// The journeys stay the ones the view showed at the first press, so stepping back into a node the
+			// journeys share and forward again returns along the same journey rather than stopping where they
+			// part. Anything that changes the view some other way starts over from what it then shows.
+			function stepThroughJourney(delta) {
+				const inLightbox = $("#lightbox").style.display === "flex";
+				const at = inLightbox ? lightboxStep : zoomStep;
+				if (!at) { return; }
+				const journeys = stepNav && stepNav.container === at.container && stepNav.step === at.step
+					? stepNav.journeys
+					: at.journeys;
+				const next = stepAlong(journeys, at, delta);
+				if (!next) { return; }
+				stepNav = { ...next, journeys };
+				if (inLightbox) {
+					openLightbox(next.container, next.step + ".png", next.step);
+					return;
+				}
+				const i = currentFailures().findIndex((f) => f.container === next.container && f.step === next.step
+					&& f.journeys.some((j) => journeys.includes(j)));
+				resolved = null;
+				setSelected(i);
+				render();
+				if (i >= 0) { openZoom(); }
+				else { openPassedZoom(stepNav); }
 			}
 
 			// Scroll to zoom, drag to pan — inside the zoom view only, where there is no graph behind it.
 			function attachImageZoom(box, img) {
-				const st = { s: 1, x: 0, y: 0 };
-				zoomImgState.set(img, st);
-				const apply = () => { img.style.transform = `translate(${st.x}px, ${st.y}px) scale(${st.s})`; };
 				box.addEventListener("wheel", (e) => {
 					e.preventDefault();
-					st.s = Math.min(10, Math.max(1, st.s * Math.exp(-e.deltaY * 0.002)));
-					if (st.s === 1) { st.x = 0; st.y = 0; }
-					apply();
+					const s = Math.min(10, Math.max(1, paneZoom.s * Math.exp(-e.deltaY * 0.002)));
+					if (s === 1) {
+						paneZoom.s = 1; paneZoom.x = 0; paneZoom.y = 0;
+					} else {
+						// Keep the image point under the cursor where it is: it sits at q = c + t + s(p - c)
+						// before and after, with c the image's centre, so the translation scales with the zoom.
+						const r = box.getBoundingClientRect();
+						const q = { x: e.clientX - r.left - img.offsetLeft, y: e.clientY - r.top - img.offsetTop };
+						const c = { x: img.clientWidth / 2, y: img.clientHeight / 2 };
+						const k = s / paneZoom.s;
+						paneZoom.x = q.x - c.x - k * (q.x - c.x - paneZoom.x);
+						paneZoom.y = q.y - c.y - k * (q.y - c.y - paneZoom.y);
+						paneZoom.s = s;
+					}
+					applyPaneZoom();
 				}, { passive: false });
 				let dragging = false, lx = 0, ly = 0;
 				box.addEventListener("pointerdown", (e) => {
@@ -1442,37 +1585,136 @@
 				});
 				box.addEventListener("pointermove", (e) => {
 					if (!dragging) { return; }
-					st.x += e.clientX - lx; st.y += e.clientY - ly;
+					paneZoom.x += e.clientX - lx; paneZoom.y += e.clientY - ly;
 					lx = e.clientX; ly = e.clientY;
-					apply();
+					applyPaneZoom();
 				});
 				box.addEventListener("pointerup", () => { dragging = false; box.classList.remove("dragging"); });
 			}
 
-			function resetZoom() {
-				for (const [img, st] of zoomImgState) {
-					st.s = 1; st.x = 0; st.y = 0;
-					img.style.transform = "";
+			function applyPaneZoom() {
+				const transform = paneZoom.s === 1 && paneZoom.x === 0 && paneZoom.y === 0
+					? ""
+					: `translate(${paneZoom.x}px, ${paneZoom.y}px) scale(${paneZoom.s})`;
+				for (const pane of zoomPanes) {
+					pane.img.style.transform = transform;
+					if (pane.mark) { pane.mark.style.transform = transform; }
 				}
 			}
 
-			function rotatePane(kind) {
+			function resetZoom() {
+				paneZoom.s = 1; paneZoom.x = 0; paneZoom.y = 0;
+				applyPaneZoom();
+			}
+
+			function rotatePane() {
 				const f = selectedFailure();
 				if (!f) { return; }
 				const kinds = paneKinds(f);
 				if (kinds.length === 0) { return; }
 				const key = failureKey(f);
-				if (kind === null) {
-					const i = kinds.indexOf(paneKind.get(key) ?? kinds[0]);
-					paneKind.set(key, kinds[(i + 1) % kinds.length]);
-				} else if (kinds.includes(kind)) {
-					paneKind.set(key, kind);
-				} else {
-					toast(`no ${kind} image for this failure`);
-					return;
-				}
+				const i = kinds.indexOf(paneKind.get(key) ?? kinds[0]);
+				paneKind.set(key, kinds[(i + 1) % kinds.length]);
 				render();
 				if (zoomed) { openZoom(); }
+			}
+
+			// ---------- differing pixels (d / D) ----------
+			// The colour RecolorDiff (ImageHelpers.cs) paints the pixels a comparison found unchanged.
+			const DIFF_UNCHANGED = [0xbb, 0xbb, 0x88];
+			const diffReads = new Map(); // diff image URL -> Promise of what readDiff found in it
+			// The pixels the comparator counted: every one its diff image doesn't paint unchanged, except
+			// those in the regions it left out, which the image tints rather than blanks.
+			async function readDiff(url, masks) {
+				const res = await fetch(url);
+				if (!res.ok) { throw new Error("the diff image returned " + res.status); }
+				const bitmap = await createImageBitmap(await res.blob(), { colorSpaceConversion: "none", premultiplyAlpha: "none" });
+				const { width, height } = bitmap;
+				const canvas = document.createElement("canvas");
+				canvas.width = width; canvas.height = height;
+				const ctx = canvas.getContext("2d", { willReadFrequently: true });
+				ctx.drawImage(bitmap, 0, 0);
+				const pixels = ctx.getImageData(0, 0, width, height);
+				const d = pixels.data;
+				const masked = (x, y) => masks.some((m) => x >= m.x && x < m.x + m.w && y >= m.y && y < m.y + m.h);
+				let count = 0, first = null;
+				for (let y = 0; y < height; y++) {
+					for (let x = 0; x < width; x++) {
+						const i = (y * width + x) * 4;
+						const unchanged = d[i] === DIFF_UNCHANGED[0] && d[i + 1] === DIFF_UNCHANGED[1] && d[i + 2] === DIFF_UNCHANGED[2];
+						if (!unchanged && !masked(x, y)) {
+							count++;
+							first ??= { x, y };
+							d[i] = 255; d[i + 1] = 0; d[i + 2] = 0; d[i + 3] = 255;
+						} else {
+							d[i + 3] = 0;
+						}
+					}
+				}
+				return { marks: pixels, width, height, count, first };
+			}
+			function diffOf(f) {
+				const url = shotUrl(f.container, f.kinds.diff);
+				if (!diffReads.has(url)) {
+					const read = readDiff(url, f.masks);
+					read.then((diff) => {
+						if (f.pixels != null && diff.count !== f.pixels) {
+							toast(`highlighting ${diff.count.toLocaleString()} px, but the comparison counted ${f.pixels.toLocaleString()}`);
+						}
+					}, () => diffReads.delete(url)); // a failed read is retried on the next press, not repeated
+					diffReads.set(url, read);
+				}
+				return diffReads.get(url);
+			}
+			async function markDiff(f) {
+				let diff;
+				try { diff = await diffOf(f); }
+				catch (err) { if (blinking) { toast(diffUnreadable(err)); } return; }
+				if (!zoomStep || zoomStep.container !== f.container || zoomStep.step !== f.step) { return; }
+				for (const { mark } of zoomPanes) {
+					if (!mark) { continue; }
+					mark.width = diff.width; mark.height = diff.height;
+					mark.getContext("2d").putImageData(diff.marks, 0, 0);
+				}
+			}
+			const diffUnreadable = (err) => (httpServed
+				? "couldn't read the diff image: " + err.message
+				: "highlighting needs the review server (--review)");
+			function shownDiff() {
+				const f = zoomed ? selectedFailure() : null;
+				return f && f.kinds.diff && zoomStep && zoomStep.container === f.container && zoomStep.step === f.step ? f : null;
+			}
+			function setBlinking(on) {
+				blinking = on;
+				$("#zoomview").classList.toggle("blinking", on);
+			}
+			function toggleBlinking() {
+				if (!zoomed) { toast("open a failure with z first"); return; }
+				setBlinking(!blinking);
+				if (blinking && !shownDiff()) { toast("this step has no diff to highlight"); }
+			}
+			// Zooms to 300% on the first differing pixel in reading order, or back out if already zoomed.
+			async function zoomToFirstDiff() {
+				if (paneZoom.s > 1) { resetZoom(); return; }
+				const f = shownDiff();
+				if (!f) { toast(zoomed ? "this step has no diff to zoom to" : "open a failure with z first"); return; }
+				let diff;
+				try { diff = await diffOf(f); }
+				catch (err) { toast(diffUnreadable(err)); return; }
+				if (!diff.first) { toast("no differing pixels outside the masked regions"); return; }
+				if (zoomPanes.length === 0) { return; }
+				const { box, img } = zoomPanes[0];
+				const s = 3;
+				// Transformed about its centre c, a point p of the image lands at c + t + s(p - c); solve for
+				// the translation t that brings the pixel to the middle of the pane.
+				const k = img.clientWidth / diff.width;
+				const p = { x: (diff.first.x + 0.5) * k, y: (diff.first.y + 0.5) * k };
+				const c = { x: img.clientWidth / 2, y: img.clientHeight / 2 };
+				const v = { x: box.clientWidth / 2 - img.offsetLeft, y: box.clientHeight / 2 - img.offsetTop };
+				paneZoom.s = s;
+				paneZoom.x = v.x - c.x - s * (p.x - c.x);
+				paneZoom.y = v.y - c.y - s * (p.y - c.y);
+				applyPaneZoom();
 			}
 
 			// ---------- pan & zoom (graph) ----------
@@ -1788,13 +2030,26 @@
 			}
 
 			// ---------- overlays ----------
-			function openLightbox(src, caption) {
+			// `step` is null for a file that is not one, an extraneous screenshot, which ← / → cannot step from.
+			function openLightbox(container, file, step) {
+				lightboxStep = step === null ? null : { container, step, journeys: journeysThrough(container) };
+				const present = step === null || baselineSet(config).has(container + "/" + file);
+				const failed = lightboxStep && stepNav && currentFailures().some((f) => f.container === container
+					&& f.step === step && f.journeys.some((j) => stepNav.journeys.includes(j)));
 				const lb = $("#lightbox");
-				lb.querySelector("img").src = src;
-				lb.querySelector(".cap").textContent = caption;
+				const img = lb.querySelector("img");
+				img.style.display = present ? "" : "none";
+				if (present) { img.src = shotUrl(container, file); }
+				lb.querySelector(".cap").textContent = container + "/" + file
+					+ (present ? "" : " — no baseline yet") + (failed ? " — failed on this device" : "");
 				lb.style.display = "flex";
 			}
-			$("#lightbox").addEventListener("click", () => { $("#lightbox").style.display = "none"; });
+			function closeLightbox() {
+				$("#lightbox").style.display = "none";
+				lightboxStep = null;
+				stepNav = null;
+			}
+			$("#lightbox").addEventListener("click", closeLightbox);
 
 			function toast(text, isChord) {
 				const t = $("#toast");
@@ -1818,7 +2073,9 @@
 					["j / ↓", "next failure (expands it in place)"],
 					["k / ↑", "previous failure"],
 					["z", "zoom the selected failure to fill the window"],
-					["b / n / d", "rotating pane → baseline / new / diff"],
+					["← / →", "previous / next step of the journey (zoom view, full-size image)"],
+					["d", "blink the differing pixels red on every pane"],
+					["D", "zoom 300% on the first differing pixel, or back out"],
 					["space", "cycle the rotating pane"],
 					["0", "reset image zoom (in the zoom view)"],
 				]],
@@ -1901,7 +2158,7 @@
 				if (k === "Escape") {
 					chord = null;
 					$("#help").style.display = "none";
-					$("#lightbox").style.display = "none";
+					closeLightbox();
 					closeRunnerPanel();
 					closeZoom();
 					return;
@@ -1921,13 +2178,13 @@
 				}
 				if (k === "j" || k === "ArrowDown") { e.preventDefault(); moveSelection(1); return; }
 				if (k === "k" || k === "ArrowUp") { e.preventDefault(); moveSelection(-1); return; }
+				if (k === "ArrowLeft" || k === "ArrowRight") { e.preventDefault(); stepThroughJourney(k === "ArrowRight" ? 1 : -1); return; }
 				if (k === "f") { fitView(); return; }
 				if (k === "u") { refresh("Reloaded from disk"); return; }
 				if (k === "z") { zoomed ? closeZoom() : openZoom(); return; }
-				if (k === "b") { rotatePane("baseline"); return; }
-				if (k === "n") { rotatePane("new"); return; }
-				if (k === "d") { rotatePane("diff"); return; }
-				if (k === " ") { e.preventDefault(); rotatePane(null); return; }
+				if (k === "d") { toggleBlinking(); return; }
+				if (k === "D") { zoomToFirstDiff(); return; }
+				if (k === " ") { e.preventDefault(); rotatePane(); return; }
 				if (k === "0") { resetZoom(); return; }
 				if (k === "r") { e.preventDefault(); startChord("r"); return; }
 				if (k === "R") { e.preventDefault(); startChord("R"); return; }
@@ -1982,7 +2239,13 @@
 					resolveSelection();
 				}
 				render();
-				if (zoomed) { if (selectedFailure()) { openZoom(); } else { closeZoom(); } }
+				if (zoomed) {
+					if (selectedFailure()) { openZoom(); }
+					else if (stepNav && zoomStep && stepNav.container === zoomStep.container && stepNav.step === zoomStep.step) {
+						openPassedZoom(stepNav);
+					}
+					else { closeZoom(); }
+				}
 				if (message) { toast(message); }
 			}
 

@@ -140,7 +140,7 @@ public sealed class ScreenshotManager(ScreenshotStorage storage)
 	/// <param name="maskRegions">The regions measured from the actual image.</param>
 	internal static Rectangle[] EffectiveMasks(Image baseline, Rectangle[] maskRegions)
 	{
-		var baselineMasks = ImageHelpers.GetMaskMetadata(baseline);
+		var baselineMasks = ImageHelpers.GetMaskMetadata(baseline.Metadata);
 		return baselineMasks.Length > 0 ? [.. maskRegions, .. baselineMasks] : maskRegions;
 	}
 
