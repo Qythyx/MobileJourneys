@@ -31,6 +31,28 @@ public sealed class FrameworkConfigTests
 	}
 
 	[Test]
+	public void FrameworkConfigOrdersJourneysLongestFirst()
+	{
+		var platform = new IosPlatformConfig("26.2", "iPhone", true, "com.example.app", "/path/app", 100, 210, 3 * 2, 0.005);
+		static JourneyDefinition MakeJourney(string name, int steps) =>
+			new(
+				new TestEnv(),
+				[new TestExpectation()],
+				[.. Enumerable.Range(1, steps).Select(_ => new JourneyStep(Dsl.None(), [new TestExpectation()]))],
+				[],
+				name
+			);
+
+		var config = new FrameworkConfig(
+			"D",
+			[platform],
+			[MakeJourney("short", 1), MakeJourney("long", 5), MakeJourney("mid", 3), MakeJourney("alsoMid", 3)]
+		);
+
+		_ = config.Journeys.Select(journey => journey.Name).Should().Equal("long", "mid", "alsoMid", "short");
+	}
+
+	[Test]
 	public void JourneyDefinitionThrowsWhenInitialExpectIsEmpty()
 	{
 		var ctor = () => _ = new JourneyDefinition(new TestEnv(), [], [], [], "j");

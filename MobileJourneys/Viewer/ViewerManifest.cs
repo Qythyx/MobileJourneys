@@ -19,8 +19,8 @@ internal static class ViewerManifest
 	{
 		var expected = new ExpectedScreenshots(config.Journeys);
 
-		// Nodes in first-seen (tree DFS) order, materializing ancestors that contribute no steps
-		// of their own so every node's parent chain is present.
+		// Nodes in the order the journeys run in reach them, materializing ancestors that contribute no
+		// steps of their own so every node's parent chain is present.
 		var nodeOrder = new List<string>();
 		var nodeSteps = new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal);
 

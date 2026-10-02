@@ -298,14 +298,6 @@ public static class SuiteRunner
 	);
 
 	/// <summary>
-	/// Orders a fixture's journeys longest first, so that a long one is never picked up last and
-	/// left running alone while the fixture's other devices sit idle.
-	/// </summary>
-	/// <param name="cases">The journeys selected for one fixture.</param>
-	internal static IEnumerable<TestCase> LongestFirst(IEnumerable<TestCase> cases) =>
-		cases.OrderByDescending(testCase => testCase.Journey.ExpectedStepLocations().Count());
-
-	/// <summary>
 	/// Brings one fixture's devices up and runs its journeys across them, each device a worker
 	/// pulling the next journey from a shared queue. Abandons the fixture, rather than the run, when
 	/// no device can host the suite.
@@ -343,7 +335,7 @@ public static class SuiteRunner
 				return;
 			}
 
-			var queue = new ConcurrentQueue<TestCase>(LongestFirst(cases));
+			var queue = new ConcurrentQueue<TestCase>(cases);
 			var started = 0;
 			var lost = new string?[deviceIds.Count];
 			var backendUrlVariable = backendSetup?.UrlVariable ?? string.Empty;

@@ -15,11 +15,14 @@ public sealed record FrameworkConfig(
 )
 {
 	/// <summary>
-	/// The journey definitions to discover and execute. Validated at construction to have
-	/// distinct names — journey names key test identity, artifact attribution, and (for
-	/// tree-defined journeys) the screenshot folder layout.
+	/// The journey definitions to discover and execute, in the order they run: longest first, so
+	/// that a long one is never picked up last and left running alone while the fixture's other
+	/// devices sit idle. Journeys with the same number of steps keep the order they were given in.
+	/// Validated at construction to have distinct names — journey names key test identity,
+	/// artifact attribution, and (for tree-defined journeys) the screenshot folder layout.
 	/// </summary>
-	public IReadOnlyList<JourneyDefinition> Journeys { get; } = EnsureDistinctNames(Journeys);
+	public IReadOnlyList<JourneyDefinition> Journeys { get; } =
+	[.. EnsureDistinctNames(Journeys).OrderByDescending(journey => journey.ExpectedStepLocations().Count())];
 
 	/// <summary>
 	/// Optional storage backend for screenshots and journey artifacts. Defaults to a
