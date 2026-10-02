@@ -51,13 +51,12 @@ an install hint) if any required tool is missing — only the platforms you've c
 | Android SDK platform-tools (`adb`)  | Android emulator control, theme/font, logcat               | If any `AndroidPlatformConfig` is configured | Android Studio → SDK Manager → "Android SDK Platform-Tools", or [standalone download](https://developer.android.com/tools/releases/platform-tools) |
 | `ANDROID_HOME` environment variable | Resolves `$ANDROID_HOME/platform-tools/adb`                | If any `AndroidPlatformConfig` is configured | `export ANDROID_HOME=$HOME/Library/Android/sdk` (typical macOS path)                                                                               |
 
-A simulator/emulator must be **booted before the test session starts** (the framework attaches via
-Appium; it does not boot devices itself). On macOS:
+A simulator or emulator need not be running before a run: Appium boots a shut-down iOS simulator,
+and the framework starts each Android emulator from its AVD. Both have to exist. On macOS:
 
 ```bash
-xcrun simctl list devices       # list simulators
-xcrun simctl boot "iPhone 17 Pro"
-emulator -avd Pixel_8_API35     # Android (in a separate terminal)
+xcrun simctl list devices       # the simulators that exist
+emulator -list-avds             # the AVDs that exist
 ```
 
 ## Quick start
@@ -161,6 +160,11 @@ it runs — one left up for three days launched apps six times slower than a fre
 AVD, while ones a few hours old were as quick — and that slowness reaches every step of every
 journey. Killing rather than stopping gracefully keeps a writable instance from saving its worn
 state into the snapshot the next boot loads.
+
+Android emulators run without a window (`-no-window`), and a run restarts one it finds running with
+a window. macOS drops an emulator whose window is covered to background priority, where its virtual
+CPUs share the Mac's few efficiency cores, and the app then takes longer to start than a journey
+waits — while the Mac as a whole looks far from busy.
 
 A device that cannot be brought up, or whose session dies past its retry budget, drops out and the
 fixture's other devices take its journeys; the fixture is abandoned only when none of its devices

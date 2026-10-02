@@ -449,6 +449,11 @@ public sealed record AndroidPlatformConfig(
 	/// An AVD may be shared only by instances that all run read-only: the emulator refuses to start a
 	/// read-only instance beside a writable one, so a writable instance is stopped too when the
 	/// fixture wants several. A lone instance runs writable.
+	/// <para/>
+	/// Every instance runs without a window. macOS drops an emulator whose window is covered to
+	/// background priority, where its virtual CPUs share the few efficiency cores, and the app then
+	/// takes longer to start than a journey waits. An instance found running with a window is stopped
+	/// for the same reason.
 	/// </remarks>
 	internal override IReadOnlyList<string> StartDevices(TimeSpan timeout, CancellationToken cancellationToken)
 	{
@@ -511,12 +516,13 @@ public sealed record AndroidPlatformConfig(
 	/// <summary>
 	/// Whether a running instance cannot be kept for this run: it has been up long enough to have
 	/// slowed, or its age cannot be told, or it runs writable where the fixture wants read-only
-	/// instances.
+	/// instances, or it runs with a window.
 	/// </summary>
 	/// <param name="instance">The instance, as <see cref="RunningInstances"/> lists it.</param>
 	/// <returns>Whether it has to be restarted.</returns>
 	private bool MustRestart(string instance) =>
 		(Instances > 1 && !instance.Contains(ReadOnlyFlag, StringComparison.Ordinal))
+		|| !instance.Contains(NoWindowFlag, StringComparison.Ordinal)
 		|| UptimeOf(PidOf(instance)) is not { } uptime
 		|| uptime > MaxInstanceAge;
 
@@ -555,7 +561,10 @@ public sealed record AndroidPlatformConfig(
 
 	private const string ReadOnlyFlag = "-read-only";
 
-	private string[] EmulatorArguments(bool readOnly) => readOnly ? ["-avd", AvdName, ReadOnlyFlag] : ["-avd", AvdName];
+	private const string NoWindowFlag = "-no-window";
+
+	private string[] EmulatorArguments(bool readOnly) =>
+		readOnly ? ["-avd", AvdName, NoWindowFlag, ReadOnlyFlag] : ["-avd", AvdName, NoWindowFlag];
 
 	internal override bool CanRestartDevice => true;
 
