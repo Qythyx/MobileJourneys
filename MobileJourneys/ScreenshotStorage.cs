@@ -159,7 +159,7 @@ public abstract class ScreenshotStorage
 	/// <param name="container">'/'-separated container path relative to the platform folder.</param>
 	/// <param name="fileName">Filename within the container.</param>
 	/// <returns>The SHA-256 of the file's contents in lowercase hex, or an empty string.</returns>
-	internal string FileVersion(PlatformConfig config, string container, string fileName) =>
+	internal virtual string FileVersion(PlatformConfig config, string container, string fileName) =>
 		ReadFile(config, container, fileName) is { } bytes
 			? Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes))
 			: string.Empty;

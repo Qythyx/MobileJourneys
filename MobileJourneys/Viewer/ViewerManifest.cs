@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 
 namespace MobileJourneys.Viewer;
@@ -12,6 +13,12 @@ namespace MobileJourneys.Viewer;
 internal static class ViewerManifest
 {
 	private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
+
+	/// <summary>
+	/// The mask regions stored in each screenshot read so far, by its
+	/// <see cref="ScreenshotStorage.FileVersion"/>.
+	/// </summary>
+	private static readonly ConcurrentDictionary<string, System.Drawing.Rectangle[]> StoredMasks = new();
 
 	/// <summary>Builds the manifest as a <c>window.MANIFEST = …;</c> JavaScript statement.</summary>
 	/// <param name="config">Framework configuration providing the journeys, platforms, and storage.</param>
@@ -168,7 +175,12 @@ internal static class ViewerManifest
 	private static object[] ReadComparedMasks(ScreenshotStorage storage, TestStep testStep) =>
 		[
 			.. new[] { ArtifactNaming.NewFileName(testStep), ArtifactNaming.BaselineFileName(testStep) }
-				.SelectMany(file => ReadStoredMasks(storage, testStep.Config, testStep.Container, file))
+				.SelectMany(file =>
+					StoredMasks.GetOrAdd(
+						storage.FileVersion(testStep.Config, testStep.Container, file),
+						_ => ReadStoredMasks(storage, testStep.Config, testStep.Container, file)
+					)
+				)
 				.Select(r => new
 				{
 					x = r.X,

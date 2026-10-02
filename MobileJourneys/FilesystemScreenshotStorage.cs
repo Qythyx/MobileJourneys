@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using MobileJourneys.Framework;
 
 namespace MobileJourneys;
@@ -11,6 +12,12 @@ namespace MobileJourneys;
 /// <param name="rootDir">Absolute path to the screenshots root (e.g., <c>&lt;project&gt;/Screenshots</c>).</param>
 internal sealed class FilesystemScreenshotStorage(string rootDir) : ScreenshotStorage
 {
+	/// <summary>The largest step between modified times any filesystem records: FAT's two seconds.</summary>
+	private static readonly TimeSpan CoarsestModifiedTimeStep = TimeSpan.FromSeconds(2);
+
+	private readonly ConcurrentDictionary<string, ((long Length, DateTime Modified) Stamp, string Version)> versions =
+		new();
+
 	/// <summary>The screenshots root directory this instance writes under.</summary>
 	internal string RootDir { get; } = rootDir;
 
@@ -138,6 +145,37 @@ internal sealed class FilesystemScreenshotStorage(string rootDir) : ScreenshotSt
 	{
 		var path = Path.Combine(ContainerDir(config, container), fileName);
 		return File.Exists(path) ? File.ReadAllBytes(path) : null;
+	}
+
+	/// <summary>
+	/// A token that changes whenever the file's contents change and is stable while they don't. Hashes
+	/// the file only when its size or modified time differs from the last time it was hashed.
+	/// </summary>
+	/// <param name="config">Platform fixture the file belongs to.</param>
+	/// <param name="container">'/'-separated container path relative to the platform folder.</param>
+	/// <param name="fileName">Filename within the container.</param>
+	/// <returns>The SHA-256 of the file's contents in lowercase hex, or an empty string when it is missing.</returns>
+	internal override string FileVersion(PlatformConfig config, string container, string fileName)
+	{
+		var file = new FileInfo(Path.Combine(ContainerDir(config, container), fileName));
+		if (!file.Exists)
+		{
+			return string.Empty;
+		}
+
+		var stamp = (file.Length, file.LastWriteTimeUtc);
+		if (!versions.TryGetValue(file.FullName, out var hashed) || hashed.Stamp != stamp)
+		{
+			hashed = (stamp, base.FileVersion(config, container, fileName));
+			// A file modified this recently could be rewritten and keep the same modified time, so its
+			// hash is not kept.
+			if (DateTime.UtcNow - file.LastWriteTimeUtc > CoarsestModifiedTimeStep)
+			{
+				versions[file.FullName] = hashed;
+			}
+		}
+
+		return hashed.Version;
 	}
 
 	/// <inheritdoc/>

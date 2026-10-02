@@ -203,6 +203,45 @@ public sealed class FilesystemScreenshotStorageTests
 	}
 
 	[Test]
+	public void FileVersionChangesWhenAJustWrittenFileIsRewrittenWithTheSameModifiedTime()
+	{
+		_storage.WriteBaseline(K("Journey", "01 Step"), [1, 2, 3]);
+		var modified = File.GetLastWriteTimeUtc(FilePath("Journey", "01 Step.png"));
+		var before = _storage.FileVersion(_config, "Journey", "01 Step.png");
+
+		_storage.WriteBaseline(K("Journey", "01 Step"), [3, 2, 1]);
+		File.SetLastWriteTimeUtc(FilePath("Journey", "01 Step.png"), modified);
+
+		_ = _storage.FileVersion(_config, "Journey", "01 Step.png").Should().NotBe(before);
+	}
+
+	[Test]
+	public void FileVersionChangesWhenAFileHashedLongAfterItWasWrittenIsRewritten()
+	{
+		_storage.WriteBaseline(K("Journey", "01 Step"), [1, 2, 3]);
+		File.SetLastWriteTimeUtc(FilePath("Journey", "01 Step.png"), DateTime.UtcNow.AddHours(-1));
+		var before = _storage.FileVersion(_config, "Journey", "01 Step.png");
+
+		_storage.WriteBaseline(K("Journey", "01 Step"), [3, 2, 1]);
+
+		_ = _storage.FileVersion(_config, "Journey", "01 Step.png").Should().NotBe(before);
+	}
+
+	[Test]
+	public void FileVersionIsNotRecomputedWhileSizeAndModifiedTimeAreUnchanged()
+	{
+		var modified = DateTime.UtcNow.AddHours(-1);
+		_storage.WriteBaseline(K("Journey", "01 Step"), [1, 2, 3]);
+		File.SetLastWriteTimeUtc(FilePath("Journey", "01 Step.png"), modified);
+		var before = _storage.FileVersion(_config, "Journey", "01 Step.png");
+
+		_storage.WriteBaseline(K("Journey", "01 Step"), [3, 2, 1]);
+		File.SetLastWriteTimeUtc(FilePath("Journey", "01 Step.png"), modified);
+
+		_ = _storage.FileVersion(_config, "Journey", "01 Step.png").Should().Be(before);
+	}
+
+	[Test]
 	public void FileVersionIsEmptyWhenTheFileIsMissing() =>
 		_ = _storage.FileVersion(_config, "Journey", "01 Step.png").Should().BeEmpty();
 
