@@ -429,16 +429,22 @@ public static class SuiteRunner
 
 		if (driver.IsAppCrashed())
 		{
-			var crashLog = driver.CaptureDeviceCrashLog() ?? "No crash log available.";
-			QuitDriver(driver, cancellationToken);
-			failure =
-				"the app crashed on startup. "
-				+ (
-					crashLog.Contains(MissingAssembliesMarker, StringComparison.Ordinal)
-						? "Rebuild with -p:EmbedAssemblies=true to embed assemblies into the APK."
-						: $"Crash log:\n{crashLog}"
-				);
-			return null;
+			// One crash is not yet the build's: an app can die once on a device that has only just
+			// booted and then run. A build that cannot start dies again.
+			reporter.FixtureRetrying(worker.Config, worker.Index, "the app crashed on startup, so it is started again");
+			if (!driver.TryStartApp())
+			{
+				var crashLog = driver.CaptureDeviceCrashLog() ?? "No crash log available.";
+				QuitDriver(driver, cancellationToken);
+				failure =
+					"the app crashed on startup, and again when started a second time. "
+					+ (
+						crashLog.Contains(MissingAssembliesMarker, StringComparison.Ordinal)
+							? "Rebuild with -p:EmbedAssemblies=true to embed assemblies into the APK."
+							: $"Crash log:\n{crashLog}"
+					);
+				return null;
+			}
 		}
 
 		// The backend is built after the session, not before it, because it may have to bind itself to

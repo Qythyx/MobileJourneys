@@ -140,6 +140,26 @@ public sealed class TestDriver(
 	private bool _firstLaunchPromptAnswered;
 
 	/// <summary>
+	/// Starts the app with nothing handed to it, as the device's own launcher would, and waits for it
+	/// to come up.
+	/// </summary>
+	/// <returns>Whether the app is running afterwards.</returns>
+	public bool TryStartApp()
+	{
+		try
+		{
+			App.ActivateApp(Config.AppIdentifier);
+		}
+		catch (WebDriverException)
+		{
+			return false;
+		}
+
+		WaitUntilAppIsSettled();
+		return !IsAppCrashed();
+	}
+
+	/// <summary>
 	/// Blocks until the freshly launched app is in the foreground and its accessibility tree has
 	/// stopped changing, or until the wait budget runs out. Without this, a slow cold start spends
 	/// the first expectation's budget rather than the launch's, so a launch that is merely slow
