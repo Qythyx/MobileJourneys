@@ -292,12 +292,24 @@
 			cursor: grabbing;
 		}
 
+		/* The top-level boxes run left to right in order and wrap. min-content is the width of the
+		   widest of them, so the rows are as wide as the tree has to be anyway, at any window size. */
 		#world {
 			position: absolute;
 			transform-origin: 0 0;
 			--inv: 1;
 			padding: 20px;
 			user-select: none;
+			display: flex;
+			flex-wrap: wrap;
+			align-items: flex-start;
+			gap: 26px 20px;
+			width: min-content;
+		}
+
+		#world>.node {
+			flex: none;
+			margin-left: 0;
 		}
 
 		/* Fill and edge are both translucent white, so each nested box sits a step lighter than its
@@ -1165,12 +1177,7 @@
 					if (!byContainer.has(f.container)) { byContainer.set(f.container, []); }
 					byContainer.get(f.container).push(f);
 				}
-				for (const r of roots) {
-					const band = document.createElement("div");
-					band.style.marginBottom = "26px";
-					band.appendChild(renderNode(r, byContainer));
-					world.appendChild(band);
-				}
+				for (const r of roots) { world.appendChild(renderNode(r, byContainer)); }
 			}
 
 			function renderNode(n, byContainer) {
