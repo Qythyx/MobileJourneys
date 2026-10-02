@@ -926,6 +926,8 @@
 					<button data-failed="false" data-embed="true">Rerun all + rebuild app<span class="keyhint">R R</span></button>
 					<button data-failed="true" data-embed="false">Failures only<span class="keyhint">R f</span></button>
 					<button data-failed="true" data-embed="true">Failures + rebuild app<span class="keyhint">R F</span></button>
+					<button data-failed="false" data-embed="false" data-device="true">This device<span class="keyhint">R d</span></button>
+					<button data-failed="false" data-embed="true" data-device="true">This device + rebuild app<span class="keyhint">R D</span></button>
 				</div>
 			</span>
 			<button class="btn delete" id="del-extra" style="display:none">Delete all extraneous</button>
@@ -1109,7 +1111,7 @@
 				const b = e.target.closest("button[data-failed]");
 				if (!b) { return; }
 				$("#rerun-menu").classList.remove("open");
-				rerunAll(b.dataset.failed === "true", b.dataset.embed === "true");
+				rerunAll(b.dataset.failed === "true", b.dataset.embed === "true", b.dataset.device === "true");
 			});
 			document.addEventListener("click", () => $("#rerun-menu").classList.remove("open"));
 
@@ -1829,11 +1831,11 @@
 				const r = (run.steps.get(config) || NO_STEPS).get(key);
 				if (r === "fail") { return "fail"; }
 				if (r === "pass") { return "pass"; }
-				// Not yet reported → pending if in scope. scope null = the whole tree ("all"); a Map keyed
-				// by device = only that device's was-failing steps ("failures").
-				if (run.overlay.scope === null) { return "pending"; }
+				// Not yet reported → pending if in scope. The scope holds each device in the run: null for
+				// all of its steps, or the set of its was-failing steps ("failures").
+				if (!run.overlay.scope.has(config)) { return null; }
 				const set = run.overlay.scope.get(config);
-				return set && set.has(key) ? "pending" : null;
+				return !set || set.has(key) ? "pending" : null;
 			}
 			function applyShotProgress(fig) {
 				const st = progressState(fig.dataset.container, fig.dataset.step);
@@ -1857,22 +1859,20 @@
 				if (!res.ok) { toast("rerun failed: " + (await res.text())); return; }
 				const job = await res.json();
 				closeRunnerPanel();
+				run = { description: job.description, endpoint, body, live, overlay: null, startedAt: Date.now(), endedAt: null, ...emptyRunProgress() };
 				// Only rerun-all (live) drives the overlay; a single-journey rerun would wrongly paint the
 				// whole tree. "failures" reruns just the failing journeys, so pre-mark only each device's
 				// currently-failing steps pending — snapshot them per device now, before the run starts
-				// clearing artifacts. "all" marks the whole tree pending (scope = null). render() paints it.
-				let overlay = null;
+				// clearing artifacts. Otherwise every step of each device in the run is pending. render()
+				// paints it.
 				if (live) {
-					let scope = null;
-					if (body.failed) {
-						scope = new Map();
-						for (const cfg of M.configs) {
-							scope.set(cfg, new Set(failureGroups(cfg).map((f) => f.container + "/" + f.step)));
-						}
-					}
-					overlay = { scope };
+					run.overlay = {
+						scope: new Map(runConfigs().map((cfg) => [
+							cfg,
+							body.failed ? new Set(failureGroups(cfg).map((f) => f.container + "/" + f.step)) : null,
+						])),
+					};
 				}
-				run = { description: job.description, endpoint, body, live, overlay, startedAt: Date.now(), endedAt: null, ...emptyRunProgress() };
 				startClock();
 				render();
 				watchRun(job.id);
@@ -1882,7 +1882,9 @@
 			// The whole suite runs for many minutes, so tick the graph forward as journeys finish
 			// (live = true). failed = only currently-failing journeys; embed = rebuild the app first.
 			// The two combine.
-			const rerunAll = (failed, embed) => startRerun("rerun-all", { failed, embed }, true);
+			// thisDevice = only on the device being viewed, instead of on all of them.
+			const rerunAll = (failed, embed, thisDevice) =>
+				startRerun("rerun-all", { failed, embed, config: thisDevice ? config : null }, true);
 			$("#runner .close").addEventListener("click", () => { closeRunnerPanel(); });
 
 			// Everything the event stream fills in. A dropped connection replays the run from its first
@@ -2070,27 +2072,29 @@
 					["Esc", "close overlay, cancel a pending chord"],
 				]],
 				["Failures", [
-					["j / ↓", "next failure (expands it in place)"],
+					["j / ↓", "next failure"],
 					["k / ↑", "previous failure"],
-					["z", "zoom the selected failure to fill the window"],
-					["← / →", "previous / next step of the journey (zoom view, full-size image)"],
+					["z", "open the selected failure in the zoom view, or close it"],
+					["a", "accept the selected failure's new baseline"],
+					["x", "discard the selected failure's result"],
+				]],
+				["Only in the zoom view", [
+					["← / →", "previous / next step of the journey (also in the full-size image)"],
 					["d", "blink the differing pixels red on every pane"],
 					["D", "zoom 300% on the first differing pixel, or back out"],
 					["space", "cycle the rotating pane"],
-					["0", "reset image zoom (in the zoom view)"],
+					["0", "reset image zoom"],
+					["r then r", "rerun the journey shown, on this device"],
+					["r then a", "rerun the journey shown, on all devices"],
+					["r then f", "rerun the journey shown, on the devices where it is failing"],
 				]],
-				["Actions", [
-					["a", "accept new baseline"],
-					["x", "discard result"],
-					["r then r", "rerun this device"],
-					["r then a", "rerun all devices"],
-					["r then f", "rerun failed devices"],
-				]],
-				["Whole suite", [
+				["Rerun many journeys", [
 					["R then r", "rerun every journey on every device (updates live)"],
 					["R then R", "rerun everything, rebuilding the app first (EmbedAssemblies)"],
 					["R then f", "rerun only journeys that currently have failures"],
 					["R then F", "rerun failing journeys, rebuilding the app first"],
+					["R then d", "rerun every journey on this device"],
+					["R then D", "rerun every journey on this device, rebuilding the app first"],
 				]],
 			];
 			function renderHelp() {
@@ -2129,27 +2133,29 @@
 			function startChord(prefix) {
 				chord = prefix;
 				toast(prefix === "R"
-					? "rerun all:  r = as-is   R = + rebuild app   f = failures only   F = failures + rebuild   (Esc cancels)"
-					: "rerun:  r = this device   a = all devices   f = failed devices   (Esc cancels)", true);
+					? "rerun all:  r = as-is   R = + rebuild app   f = failures only   F = failures + rebuild   d = this device   D = this device + rebuild   (Esc cancels)"
+					: `rerun ${zoomStep.journeys[0]}:  r = this device   a = all devices   f = failed devices   (Esc cancels)`, true);
 				clearTimeout(chordTimer);
 				chordTimer = setTimeout(() => { chord = null; }, 4000);
 			}
 			function resolveChord(key) {
 				clearTimeout(chordTimer);
 				chord = null;
-				const f = selectedFailure();
-				if (!f) { toast("no failure selected"); return; }
 				const scope = key === "r" ? "this" : key === "a" ? "all" : key === "f" ? "failed" : null;
-				if (!scope) { toast("rerun cancelled"); return; }
-				rerun(f.journey, scope);
+				if (!scope || !zoomed) { toast("rerun cancelled"); return; }
+				rerun(zoomStep.journeys[0], scope);
 			}
 			function resolveAllChord(key) {
 				clearTimeout(chordTimer);
 				chord = null;
-				const combos = { r: [false, false], R: [false, true], f: [true, false], F: [true, true] };
+				const combos = {
+					r: [false, false, false], R: [false, true, false],
+					f: [true, false, false], F: [true, true, false],
+					d: [false, false, true], D: [false, true, true],
+				};
 				const combo = combos[key];
 				if (!combo) { toast("rerun cancelled"); return; }
-				rerunAll(combo[0], combo[1]);
+				rerunAll(...combo);
 			}
 
 			document.addEventListener("keydown", (e) => {
@@ -2186,7 +2192,12 @@
 				if (k === "D") { zoomToFirstDiff(); return; }
 				if (k === " ") { e.preventDefault(); rotatePane(); return; }
 				if (k === "0") { resetZoom(); return; }
-				if (k === "r") { e.preventDefault(); startChord("r"); return; }
+				if (k === "r") {
+					e.preventDefault();
+					if (zoomed) { startChord("r"); }
+					else { toast("open a failure with z first"); }
+					return;
+				}
 				if (k === "R") { e.preventDefault(); startChord("R"); return; }
 				if (k === "a" || k === "x") {
 					const f = selectedFailure();
@@ -2309,11 +2320,11 @@
 				return badge;
 			}
 
-			// Which devices this run covers. Known exactly once run-started arrives; before that, a
-			// single-journey rerun names its device and a whole-suite rerun means all of them.
+			// Which devices this run covers. Known exactly once run-started arrives; before that, a run
+			// that names a device means that one and any other means all of them.
 			function runConfigs() {
 				if (run.fixtures) { return run.fixtures.map((f) => f.config); }
-				return run.endpoint === "rerun" ? [run.body.config] : M.configs;
+				return run.body.config ? [run.body.config] : M.configs;
 			}
 
 			function renderConfigBadges() {

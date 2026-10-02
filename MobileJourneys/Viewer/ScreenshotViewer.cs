@@ -439,25 +439,39 @@ public static class ScreenshotViewer
 	}
 
 	/// <summary>
-	/// Reruns the whole suite. Two orthogonal flags: <see cref="RerunAllRequest.Failed"/> passes
-	/// <c>--rerun</c> to run only the journeys that currently have failure artifacts (otherwise every
-	/// journey on every platform); <see cref="RerunAllRequest.Embed"/> passes
-	/// <c>-p:EmbedAssemblies=true</c> to rebuild and re-embed the app first (needed after app-code
-	/// changes). The two combine.
+	/// Reruns the whole suite, or the part of it that runs on one platform. Two orthogonal flags:
+	/// <see cref="RerunAllRequest.Failed"/> passes <c>--rerun</c> to run only the journeys that
+	/// currently have failure artifacts (otherwise every journey); <see cref="RerunAllRequest.Embed"/>
+	/// passes <c>-p:EmbedAssemblies=true</c> to rebuild and re-embed the app first (needed after
+	/// app-code changes). The two combine.
 	/// </summary>
 	/// <param name="context">The request to respond to.</param>
 	/// <param name="config">Framework configuration providing the platforms the run reports against.</param>
-	/// <param name="request">Whether to limit to failing journeys and/or rebuild the app first.</param>
+	/// <param name="request">
+	/// Whether to limit to failing journeys and/or rebuild the app first, and the one platform to run
+	/// on, if not all of them.
+	/// </param>
 	private static void StartRerunAll(HttpListenerContext context, FrameworkConfig config, RerunAllRequest? request)
 	{
 		var failed = request?.Failed ?? false;
 		var embed = request?.Embed ?? false;
+		var platform = config.FindPlatform(request?.Config);
+		if (request?.Config is not null && platform is null)
+		{
+			TryRespond(context, 400, "text/plain", Encoding.UTF8.GetBytes("unknown platform"));
+			return;
+		}
+
+		List<string> journeyArgs = failed ? ["--rerun"] : [];
+		List<string> platformArgs = platform is null ? [] : ["--filter", platform.DisplayName];
 		LaunchRerun(
 			context,
 			config,
-			(failed ? "failed journeys" : "all journeys") + (embed ? " (rebuilding app)" : ""),
+			(failed ? "failed journeys" : "all journeys")
+				+ (platform is null ? string.Empty : $" on {platform.DisplayName}")
+				+ (embed ? " (rebuilding app)" : string.Empty),
 			embed ? ["-p:EmbedAssemblies=true"] : [],
-			failed ? ["--rerun"] : []
+			[.. journeyArgs, .. platformArgs]
 		);
 	}
 
@@ -618,7 +632,7 @@ public static class ScreenshotViewer
 
 	private sealed record RerunRequest(string Config, string Journey, string Scope);
 
-	private sealed record RerunAllRequest(bool Failed, bool Embed);
+	private sealed record RerunAllRequest(bool Failed, bool Embed, string? Config);
 
 	/// <summary>
 	/// A running or finished <c>dotnet run</c> rerun: the events it has reported so far, and the
