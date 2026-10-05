@@ -350,6 +350,20 @@
 			outline: calc(2px * var(--inv)) solid var(--ok);
 		}
 
+		/* The box found with /, and the label naming what was found. */
+		.node.found {
+			outline: calc(2px * var(--inv)) solid var(--accent);
+		}
+
+		.nname.found {
+			color: var(--accent);
+		}
+
+		.chip.found {
+			background: var(--accent);
+			color: #fff;
+		}
+
 		.shot.passed img {
 			outline: calc(2px * var(--inv)) solid var(--ok);
 			outline-offset: calc(-1px * var(--inv));
@@ -793,6 +807,75 @@
 			font-size: 12px;
 		}
 
+		#search {
+			position: fixed;
+			top: 56px;
+			left: 50%;
+			transform: translateX(-50%);
+			min-width: 360px;
+			max-width: calc(100vw - 32px);
+			z-index: 35;
+			display: none;
+			flex-direction: column;
+			background: var(--panel);
+			border: 1px solid var(--accent);
+			border-radius: 10px;
+			overflow: hidden;
+			box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+		}
+
+		#search input {
+			font: inherit;
+			font-size: 14px;
+			padding: 8px 12px;
+			background: var(--panel2);
+			color: var(--text);
+			border: 0;
+			outline: none;
+		}
+
+		#search ul {
+			list-style: none;
+			margin: 0;
+			padding: 4px;
+			max-height: 240px;
+			overflow: auto;
+		}
+
+		#search ul:empty {
+			display: none;
+		}
+
+		#search li {
+			padding: 4px 8px;
+			border-radius: 5px;
+			cursor: pointer;
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
+		}
+
+		#search li.active {
+			background: var(--accent);
+			color: #fff;
+		}
+
+		#search li .where {
+			margin-left: 8px;
+			color: var(--muted);
+			font-size: 11px;
+		}
+
+		#search li.active .where {
+			color: inherit;
+			opacity: 0.75;
+		}
+
+		#search li.none {
+			color: var(--muted);
+			cursor: default;
+		}
+
 		#help {
 			position: fixed;
 			inset: 0;
@@ -950,6 +1033,10 @@
 		<div id="world"></div>
 	</div>
 	<div id="zoomview"></div>
+	<div id="search">
+		<input type="text" placeholder="Find a journey or branch" aria-label="Find a journey or branch" autocomplete="off" spellcheck="false" />
+		<ul></ul>
+	</div>
 	<div id="lightbox"><img alt="" />
 		<div class="cap"></div>
 	</div>
@@ -975,6 +1062,8 @@
 			let zoomed = false;      // the z view is open
 			let stepNav = null;      // { container, step, journeys } ← / → last moved to, and the journeys it keeps to
 			let lightboxStep = null; // { container, step, journeys } the full-size image shows, when it is a step
+			let found = null;        // { name, path } of the journey or branch last found with /, which ← / → open from the graph
+			let search = null;       // while the / box is open: { matches, active, before: what to go back to }
 			let chord = null, chordTimer = null, runEvents = null, clockTimer = null;
 			// The rerun being watched, built from the events its process reports. `steps` maps a fixture
 			// to that fixture's "container/step" results; absent entries render as pending (yellow).
@@ -1074,11 +1163,12 @@
 				setSelected(found >= 0 ? found : Math.min(selected, fails.length - 1));
 			}
 
+			const journeyEnd = (name) => M.journeys[name][M.journeys[name].length - 1];
 			// A journey-end chip only earns its space when the node is not already named after it.
 			const journeyEnds = (() => {
 				const ends = new Map();
-				for (const [name, containers] of Object.entries(M.journeys)) {
-					const end = containers[containers.length - 1];
+				for (const name of Object.keys(M.journeys)) {
+					const end = journeyEnd(name);
 					if (!ends.has(end)) { ends.set(end, []); }
 					ends.get(end).push(name);
 				}
@@ -1193,6 +1283,8 @@
 				const sel = selectedFailure();
 				const resolvedHere = resolved && resolved.container === n.path;
 				if (resolvedHere && nodeFails.length === 0) { el.classList.add("resolved"); }
+				const foundHere = found !== null && found.path === n.path;
+				if (foundHere) { el.classList.add("found"); }
 
 				const head = document.createElement("div");
 				head.className = "nhead";
@@ -1200,11 +1292,12 @@
 				name.className = "nname";
 				name.textContent = n.name;
 				name.title = n.path;
+				if (foundHere && found.name === n.name) { name.classList.add("found"); }
 				head.appendChild(name);
 				if (n.extraFiles.length > 0) { head.appendChild(mark("extra")); }
 				for (const j of chipsFor(n.path)) {
 					const c = document.createElement("span");
-					c.className = "chip";
+					c.className = foundHere && found.name === j ? "chip found" : "chip";
 					c.textContent = j;
 					c.title = `Journey “${j}” ends here`;
 					head.appendChild(c);
@@ -1543,27 +1636,44 @@
 			// The journeys stay the ones the view showed at the first press, so stepping back into a node the
 			// journeys share and forward again returns along the same journey rather than stopping where they
 			// part. Anything that changes the view some other way starts over from what it then shows.
+			// From the graph, they open what / found at its first (→) or last (←) step: a journey's from end to
+			// end, a branch's only those in its own box.
 			function stepThroughJourney(delta) {
 				const inLightbox = $("#lightbox").style.display === "flex";
 				const at = inLightbox ? lightboxStep : zoomStep;
-				if (!at) { return; }
+				if (!at) {
+					if (found !== null) {
+						const isJourney = M.journeys[found.name] !== undefined && journeyEnd(found.name) === found.path;
+						const steps = isJourney
+							? journeyPath(found.name)
+							: stepsOf(found.path).map((step) => ({ container: found.path, step }));
+						if (steps.length > 0) {
+							openStepZoom({ ...steps[delta > 0 ? 0 : steps.length - 1], journeys: isJourney ? [found.name] : journeysThrough(found.path) });
+						}
+					}
+					return;
+				}
 				const journeys = stepNav && stepNav.container === at.container && stepNav.step === at.step
 					? stepNav.journeys
 					: at.journeys;
 				const next = stepAlong(journeys, at, delta);
 				if (!next) { return; }
-				stepNav = { ...next, journeys };
 				if (inLightbox) {
+					stepNav = { ...next, journeys };
 					openLightbox(next.container, next.step + ".png", next.step);
 					return;
 				}
-				const i = currentFailures().findIndex((f) => f.container === next.container && f.step === next.step
-					&& f.journeys.some((j) => journeys.includes(j)));
+				openStepZoom({ ...next, journeys });
+			}
+			function openStepZoom(at) {
+				stepNav = at;
+				const i = currentFailures().findIndex((f) => f.container === at.container && f.step === at.step
+					&& f.journeys.some((j) => at.journeys.includes(j)));
 				resolved = null;
 				setSelected(i);
 				render();
 				if (i >= 0) { openZoom(); }
-				else { openPassedZoom(stepNav); }
+				else { openPassedZoom(at); }
 			}
 
 			// Scroll to zoom, drag to pan — inside the zoom view only, where there is no graph behind it.
@@ -1742,29 +1852,41 @@
 				ty = 20;
 				applyTransform();
 			}
+			let animation = 0;
 			function animateTo(nx, ny, ns) {
+				cancelAnimationFrame(animation);
 				const sx = tx, sy = ty, ss = scale, t0 = performance.now(), dur = 260;
 				const step = (now) => {
 					const t = Math.min(1, (now - t0) / dur);
 					const e = t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t);
 					tx = sx + (nx - sx) * e; ty = sy + (ny - sy) * e; scale = ss + (ns - ss) * e;
 					applyTransform();
-					if (t < 1) { requestAnimationFrame(step); }
+					if (t < 1) { animation = requestAnimationFrame(step); }
 				};
-				requestAnimationFrame(step);
+				animation = requestAnimationFrame(step);
 			}
-			function focusSelected(animate) {
+			// Centres `el` in the graph's window, below the / box while it is open. Titles and
+			// outlines are sized by --inv, so the layout differs between zooms: it is measured as it will be
+			// at the zoom the move ends at. The next frame sets --inv back before anything is painted.
+			function focusOn(el) {
+				const r = wrap.getBoundingClientRect();
+				const top = search ? $("#search").getBoundingClientRect().bottom - r.top : 0;
+				const measure = () => {
+					const wr = world.getBoundingClientRect(), er = el.getBoundingClientRect();
+					const w = er.width / scale, h = er.height / scale;
+					return { w, h, cx: (er.left - wr.left) / scale + w / 2, cy: (er.top - wr.top) / scale + h / 2 };
+				};
+				const fit = ({ w, h }) => Math.min(1.2, (r.width - 80) / Math.max(1, w), (r.height - top - 80) / Math.max(1, h));
+				world.style.setProperty("--inv", 1 / fit(measure()));
+				const at = measure(), ns = fit(at);
+				animateTo(r.width / 2 - at.cx * ns, top + (r.height - top) / 2 - at.cy * ns, ns);
+			}
+			function focusSelected() {
 				const f = selectedFailure();
 				if (!f) { return; }
 				const el = $(`#world .node[data-path="${cssEscape(f.container)}"] .shot.current`)
 					|| $(`#world .node[data-path="${cssEscape(f.container)}"]`);
-				if (!el) { return; }
-				const r = wrap.getBoundingClientRect(), wr = world.getBoundingClientRect(), er = el.getBoundingClientRect();
-				const w = er.width / scale, h = er.height / scale;
-				const cx = (er.left - wr.left) / scale + w / 2, cy = (er.top - wr.top) / scale + h / 2;
-				const ns = Math.min(1.2, (r.width - 80) / Math.max(1, w), (r.height - 80) / Math.max(1, h));
-				const nx = r.width / 2 - cx * ns, ny = r.height / 2 - cy * ns;
-				if (animate) { animateTo(nx, ny, ns); } else { tx = nx; ty = ny; scale = ns; applyTransform(); }
+				if (el) { focusOn(el); }
 			}
 			const cssEscape = (s) => (window.CSS && CSS.escape ? CSS.escape(s) : s.replace(/["\\]/g, "\\$&"));
 
@@ -1810,7 +1932,7 @@
 
 			function selectFailure(f) {
 				const i = currentFailures().findIndex((x) => failureKey(x) === failureKey(f));
-				if (i >= 0) { resolved = null; setSelected(i); render(); focusSelected(true); }
+				if (i >= 0) { resolved = null; setSelected(i); render(); focusSelected(); }
 			}
 			// Click a failed thumbnail → select it and open the zoom/triage view straight away.
 			function triageFailure(f) {
@@ -1823,7 +1945,7 @@
 				resolved = null;
 				setSelected((selected + delta + fails.length) % fails.length);
 				render();
-				focusSelected(true);
+				focusSelected();
 				if (zoomed) { openZoom(); }
 				const f = fails[selected];
 				toast(`${selected + 1}/${fails.length} · ${f.step} — ${journeyLabel(f)}`);
@@ -2038,6 +2160,102 @@
 				runner.querySelector("pre").textContent = "";
 			}
 
+			// ---------- find a journey or branch (/) ----------
+			// Boxes and journeys whose name, or the capitals its words start with, contain `query`, ignoring
+			// case. A journey is its own entry only where its box is named otherwise, as its chip is.
+			function boxesMatching(query) {
+				const q = query.toLowerCase();
+				const rank = (name) => {
+					const lower = name.toLowerCase(), capitals = name.replace(/[^A-Z]/g, "").toLowerCase();
+					return [lower.startsWith(q), capitals.startsWith(q), lower.includes(q), capitals.includes(q)].indexOf(true);
+				};
+				return M.nodes
+					.flatMap((n) => [n.name, ...chipsFor(n.path)].map((name) => ({ name, path: n.path, rank: rank(name) })))
+					.filter((m) => m.rank >= 0)
+					.sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name) || a.path.localeCompare(b.path))
+					.map(({ name, path }) => ({ name, path }));
+			}
+			function openSearch() {
+				closeZoom();
+				closeLightbox();
+				$("#help").style.display = "none";
+				search = { matches: [], active: 0, before: { found, tx, ty, scale } };
+				const input = $("#search input");
+				input.value = "";
+				$("#search").style.display = "flex";
+				input.focus();
+				showSearchMatches("");
+			}
+			function showSearchMatches(query) {
+				search.matches = query === "" ? [] : boxesMatching(query);
+				const list = $("#search ul");
+				list.innerHTML = "";
+				search.matches.forEach(({ name, path }, i) => {
+					const li = document.createElement("li");
+					li.textContent = name;
+					if (path !== name) {
+						const where = document.createElement("span");
+						where.className = "where";
+						where.textContent = path;
+						li.appendChild(where);
+					}
+					li.dataset.index = i;
+					list.appendChild(li);
+				});
+				if (query !== "" && search.matches.length === 0) {
+					const li = document.createElement("li");
+					li.className = "none";
+					li.textContent = "no journey or branch matches";
+					list.appendChild(li);
+				}
+				showSearchMatch(0);
+			}
+			function showSearchMatch(index) {
+				search.active = index;
+				const items = $("#search ul").querySelectorAll("li[data-index]");
+				items.forEach((li, i) => li.classList.toggle("active", i === index));
+				items[index]?.scrollIntoView({ block: "nearest" });
+				const match = search.matches[index];
+				found = match ?? search.before.found;
+				render();
+				if (match === undefined) {
+					animateTo(search.before.tx, search.before.ty, search.before.scale);
+				} else {
+					const node = $(`#world .node[data-path="${cssEscape(match.path)}"]`);
+					if (node) { focusOn(node); }
+				}
+			}
+			function closeSearch(cancel) {
+				if (cancel) {
+					search.matches = [];
+					showSearchMatch(0);
+				}
+				search = null;
+				$("#search").style.display = "none";
+			}
+			$("#search input").addEventListener("input", (e) => { showSearchMatches(e.target.value); });
+			// Every key typed here stays here, so none reaches the graph's shortcuts.
+			$("#search input").addEventListener("keydown", (e) => {
+				e.stopPropagation();
+				const count = search.matches.length;
+				if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+					e.preventDefault();
+					if (count > 0) { showSearchMatch((search.active + (e.key === "ArrowDown" ? 1 : -1) + count) % count); }
+				}
+				else if (e.key === "Enter") { closeSearch(false); }
+				else if (e.key === "Escape") { closeSearch(true); }
+			});
+			$("#search input").addEventListener("blur", () => { if (search) { closeSearch(false); } });
+			// Pressing on a match would otherwise move the focus out of the box before the click lands.
+			$("#search ul").addEventListener("mousedown", (e) => { e.preventDefault(); });
+			$("#search ul").addEventListener("click", (e) => {
+				const li = e.target.closest("li[data-index]");
+				if (li) {
+					showSearchMatch(Number(li.dataset.index));
+					closeSearch(false);
+				}
+			});
+
 			// ---------- overlays ----------
 			// `step` is null for a file that is not one, an extraneous screenshot, which ← / → cannot step from.
 			function openLightbox(container, file, step) {
@@ -2076,7 +2294,14 @@
 					["[ / ]", "previous / next device"],
 					["f", "fit the whole tree to the window"],
 					["u", "reload the screenshots from disk"],
-					["Esc", "close overlay, cancel a pending chord"],
+					["Esc", "close overlay, cancel a pending chord; with none open, let go of what / found"],
+				]],
+				["Find a journey or branch", [
+					["/", "find a journey or branch by name, or the capitals of its words"],
+					["↑ / ↓", "previous / next match, shown in the graph as you go"],
+					["Enter", "keep the match"],
+					["Esc", "go back to where the graph was"],
+					["← / →", "open the found journey at its last / first step, or the found branch at its own"],
 				]],
 				["Failures", [
 					["j / ↓", "next failure"],
@@ -2116,8 +2341,9 @@
 						const tr = document.createElement("tr");
 						const td1 = document.createElement("td");
 						td1.className = "k";
-						for (const part of k.split(" ")) {
-							if (part === "/" || part === "then" || part === "…") {
+						const parts = k.split(" ");
+						for (const part of parts) {
+							if ((part === "/" && parts.length > 1) || part === "then" || part === "…") {
 								td1.appendChild(document.createTextNode(" " + part + " "));
 							} else {
 								const kbd = document.createElement("kbd");
@@ -2169,6 +2395,12 @@
 				if (e.metaKey || e.ctrlKey || e.altKey) { return; }
 				const k = e.key;
 				if (k === "Escape") {
+					// What was found outlasts the views opened on it, and goes only once they are closed.
+					const covered = zoomed || $("#lightbox").style.display === "flex" || $("#help").style.display === "flex";
+					if (!covered && found !== null) {
+						found = null;
+						render();
+					}
 					chord = null;
 					$("#help").style.display = "none";
 					closeLightbox();
@@ -2178,6 +2410,7 @@
 				}
 				if (chord === "r") { e.preventDefault(); resolveChord(k.toLowerCase()); return; }
 				if (chord === "R") { e.preventDefault(); resolveAllChord(k); return; }
+				if (k === "/") { e.preventDefault(); openSearch(); return; }
 				if (k === "?") { e.preventDefault(); const h = $("#help"); h.style.display = h.style.display === "flex" ? "none" : "flex"; return; }
 				if (k >= "1" && k <= "9") {
 					const cfg = M.configs[Number(k) - 1];
