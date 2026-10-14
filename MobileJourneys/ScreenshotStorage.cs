@@ -111,6 +111,36 @@ public abstract class ScreenshotStorage
 	}
 
 	/// <summary>
+	/// Makes each step's new capture its baseline wherever the step has no baseline yet, and
+	/// deletes the failure artifacts of every journey that captured it. Where several journeys
+	/// captured the same step, the capture of the journey first in ordinal name order becomes
+	/// the baseline. Captures of steps no journey runs are left alone.
+	/// </summary>
+	/// <param name="config">Platform fixture whose new captures to accept.</param>
+	/// <param name="expected">The steps the journeys run.</param>
+	internal void AcceptCapturesWithoutBaselines(PlatformConfig config, ExpectedScreenshots expected)
+	{
+		var stepsWithoutBaselines = ListFiles(config)
+			.Select(file => (file.Container, Artifact: ArtifactNaming.ParseFailureArtifact(file.FileName)))
+			.Where(file =>
+				file.Artifact is { Kind: "new" } artifact
+				&& expected.IsExpectedStep(file.Container, artifact.StepName, artifact.JourneyName)
+			)
+			.Select(file => new TestStep(config, file.Container, file.Artifact!.StepName, file.Artifact.JourneyName))
+			.Where(step => !BaselineExists(step))
+			.GroupBy(step => (step.Container, step.StepName));
+		foreach (var captures in stepsWithoutBaselines)
+		{
+			var accepted = captures.MinBy(step => step.JourneyName, StringComparer.Ordinal)!;
+			WriteBaseline(accepted, ReadNewScreenshot(accepted)!);
+			foreach (var step in captures)
+			{
+				DeleteFailureArtifactsForStep(step);
+			}
+		}
+	}
+
+	/// <summary>
 	/// Locates every failure artifact attributed to the journey, so a reader can open the evidence.
 	/// </summary>
 	/// <param name="config">Platform fixture the journey ran on.</param>

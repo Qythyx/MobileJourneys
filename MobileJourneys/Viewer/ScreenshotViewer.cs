@@ -374,6 +374,21 @@ public static class ScreenshotViewer
 				_ = config.FindExtraneous(deleteExtraneous: true);
 				TryRespond(context, 200, "text/plain", Encoding.UTF8.GetBytes("ok"));
 				return;
+			case "accept-all-new":
+			{
+				var platform = config.FindPlatform(
+					JsonSerializer.Deserialize<PlatformRequest>(body, RequestOptions)?.Config
+				);
+				if (platform is null)
+				{
+					TryRespond(context, 400, "text/plain", Encoding.UTF8.GetBytes("bad request"));
+					return;
+				}
+
+				storage.AcceptCapturesWithoutBaselines(platform, expected);
+				TryRespond(context, 200, "text/plain", Encoding.UTF8.GetBytes("ok"));
+				return;
+			}
 			case "rerun":
 				StartRerun(context, config, storage, JsonSerializer.Deserialize<RerunRequest>(body, RequestOptions));
 				return;
@@ -629,6 +644,8 @@ public static class ScreenshotViewer
 	private sealed record StepRequest(string Config, string Container, string Step, IReadOnlyList<string> Journeys);
 
 	private sealed record FileRequest(string Config, string Container, string File);
+
+	private sealed record PlatformRequest(string Config);
 
 	private sealed record RerunRequest(string Config, string Journey, string Scope);
 

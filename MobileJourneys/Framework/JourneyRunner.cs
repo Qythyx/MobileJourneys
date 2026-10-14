@@ -86,10 +86,13 @@ internal static class JourneyRunner
 			try
 			{
 				var stepResult = driver.DoActionAndCompareWithBaseline(execute, testStep, maskElements, prefetchMasks);
-				stepPassed = stepResult.Passed;
-				if (!stepResult.Passed)
+				stepPassed = stepResult.Outcome == ScreenshotOutcome.Matched;
+				if (!stepPassed)
 				{
-					detail = $"screenshots differ {stepResult.PixelDiffPercentage:F2}%";
+					detail =
+						stepResult.Outcome == ScreenshotOutcome.NoBaseline
+							? "no baseline yet — accept the new capture in the viewer"
+							: $"screenshots differ {stepResult.PixelDiffPercentage:F2}%";
 					var message =
 						$"step {number}/{totalSteps}: {name} — {detail}\n" + $"  {stepResult.ReportPath ?? ""}";
 					failures.Add(new JourneyFailureException(message, journey, journeyStep, number, totalSteps, name));

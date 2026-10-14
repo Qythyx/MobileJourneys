@@ -4,7 +4,8 @@ using NUnit.Framework;
 namespace MobileJourneys.Tests;
 
 /// <summary>
-/// Tests <see cref="ScreenshotStorage.FindExtraneous"/> against an
+/// Tests <see cref="ScreenshotStorage.FindExtraneous"/> and
+/// <see cref="ScreenshotStorage.AcceptCapturesWithoutBaselines"/> against an
 /// <see cref="InMemoryScreenshotStorage"/>.
 /// </summary>
 [TestFixture]
@@ -164,4 +165,91 @@ public sealed class ScreenshotStorageTests
 
 	[Test]
 	public void ReturnsEmptyWhenPlatformContainerMissing() => _ = FindExtraneous(delete: false).Should().BeEmpty();
+
+	private void AcceptCapturesWithoutBaselines(FrameworkConfig config) =>
+		_storage.AcceptCapturesWithoutBaselines(_platform, new ExpectedScreenshots(config.Journeys));
+
+	/// <summary>Two journeys branching off a root whose initial step both of them run.</summary>
+	private (FrameworkConfig Config, TestStep Alpha, TestStep Beta) SharedStep()
+	{
+		var tree = new JourneyTree(
+			new TestJourneyEnvironment(),
+			[new TestExpectation("Initial")],
+			[],
+			[
+				new Branch("Beta", [new JourneyStep(new Actions.None(), [new TestExpectation("BetaStep")])], []),
+				new Branch("Alpha", [new JourneyStep(new Actions.None(), [new TestExpectation("AlphaStep")])], []),
+			],
+			null,
+			"Root"
+		);
+		var config = new FrameworkConfig("Tests", [_platform], [.. tree.Flatten()]);
+		var (container, stepName) = config.Journeys[0].ExpectedStepLocations().First();
+		return (config, new(_platform, container, stepName, "Alpha"), new(_platform, container, stepName, "Beta"));
+	}
+
+	[Test]
+	public void AcceptMakesTheNewCaptureTheBaselineOfAStepWithoutOne()
+	{
+		_storage.WriteNewScreenshot(K(_journey.Name, InitialStep), [7]);
+
+		AcceptCapturesWithoutBaselines(_config);
+
+		_ = _storage.ReadBaseline(K(_journey.Name, InitialStep)).Should().Equal(7);
+	}
+
+	[Test]
+	public void AcceptDeletesTheCaptureItAccepted()
+	{
+		_storage.WriteNewScreenshot(K(_journey.Name, InitialStep), [7]);
+
+		AcceptCapturesWithoutBaselines(_config);
+
+		_ = _storage.NewScreenshotExists(K(_journey.Name, InitialStep)).Should().BeFalse();
+	}
+
+	[Test]
+	public void AcceptKeepsTheBaselineOfAStepWhoseCaptureDifferedFromIt()
+	{
+		_storage.WriteBaseline(K(_journey.Name, InitialStep), [1]);
+		_storage.WriteNewScreenshot(K(_journey.Name, InitialStep), [2]);
+
+		AcceptCapturesWithoutBaselines(_config);
+
+		_ = _storage.ReadBaseline(K(_journey.Name, InitialStep)).Should().Equal(1);
+	}
+
+	[Test]
+	public void AcceptLeavesACaptureOfAStepNoJourneyRuns()
+	{
+		_storage.WriteNewScreenshot(K(_journey.Name, "99 RemovedStep"), [7]);
+
+		AcceptCapturesWithoutBaselines(_config);
+
+		_ = _storage.BaselineExists(K(_journey.Name, "99 RemovedStep")).Should().BeFalse();
+	}
+
+	[Test]
+	public void AcceptTakesTheSharedStepsBaselineFromTheJourneyFirstByName()
+	{
+		var (config, alpha, beta) = SharedStep();
+		_storage.WriteNewScreenshot(beta, [2]);
+		_storage.WriteNewScreenshot(alpha, [1]);
+
+		AcceptCapturesWithoutBaselines(config);
+
+		_ = _storage.ReadBaseline(alpha).Should().Equal(1);
+	}
+
+	[Test]
+	public void AcceptDeletesTheSharedStepsCaptureOfEveryJourney()
+	{
+		var (config, alpha, beta) = SharedStep();
+		_storage.WriteNewScreenshot(beta, [2]);
+		_storage.WriteNewScreenshot(alpha, [1]);
+
+		AcceptCapturesWithoutBaselines(config);
+
+		_ = _storage.NewScreenshotExists(beta).Should().BeFalse();
+	}
 }

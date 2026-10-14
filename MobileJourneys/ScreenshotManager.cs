@@ -61,11 +61,12 @@ public sealed class ScreenshotManager(ScreenshotStorage storage)
 
 	/// <summary>
 	/// Compares an image against a baseline at full resolution and disposes it, replacing whatever
-	/// failure artifacts the step's last run left. Mask regions are in the image's pixel
-	/// coordinates. Every PNG written from the capture — a first baseline or
-	/// a <c>.new</c> artifact — carries the mask regions in its metadata, so a <c>.new</c> the
-	/// viewer promotes to baseline keeps them; on later comparisons they are unioned with the live
-	/// regions so content that shifts size between runs stays masked in both images.
+	/// failure artifacts the step's last run left. A step with no baseline gets none written: its
+	/// capture is kept as a <c>.new</c> artifact for someone to accept, like any other mismatch.
+	/// Mask regions are in the image's pixel coordinates. The <c>.new</c> artifact carries them in
+	/// its metadata, so a capture the viewer promotes to baseline keeps them; on later comparisons
+	/// they are unioned with the live regions so content that shifts size between runs stays
+	/// masked in both images.
 	/// </summary>
 	/// <param name="actual">The screenshot image at full device resolution.</param>
 	/// <param name="testStep">Identifies the step whose baseline the image is compared against.</param>
@@ -83,8 +84,8 @@ public sealed class ScreenshotManager(ScreenshotStorage storage)
 
 			if (!storage.BaselineExists(testStep))
 			{
-				storage.WriteBaseline(testStep, ToPngBytes(actual));
-				return new(true, 0, null);
+				storage.WriteNewScreenshot(testStep, ToPngBytes(actual));
+				return new(ScreenshotOutcome.NoBaseline, 0, storage.GetReportPath(testStep));
 			}
 
 			using var baseline = Image.Load(storage.ReadBaseline(testStep));
@@ -93,7 +94,7 @@ public sealed class ScreenshotManager(ScreenshotStorage storage)
 			{
 				storage.WriteNewScreenshot(testStep, ToPngBytes(actual));
 				storage.WriteFailScreenshot(testStep, SizeMismatchFailSuffix, []);
-				return new(false, 100, storage.GetReportPath(testStep));
+				return new(ScreenshotOutcome.Differed, 100, storage.GetReportPath(testStep));
 			}
 
 			var effectiveMasks = EffectiveMasks(baseline, maskRegions);
@@ -118,7 +119,9 @@ public sealed class ScreenshotManager(ScreenshotStorage storage)
 				);
 			}
 
-			return new(passed, diff.PixelErrorPercentage, passed ? null : storage.GetReportPath(testStep));
+			return passed
+				? new(ScreenshotOutcome.Matched, diff.PixelErrorPercentage, null)
+				: new(ScreenshotOutcome.Differed, diff.PixelErrorPercentage, storage.GetReportPath(testStep));
 		}
 	}
 

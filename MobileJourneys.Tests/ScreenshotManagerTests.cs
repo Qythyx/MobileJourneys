@@ -160,21 +160,46 @@ public sealed class ScreenshotManagerTests
 	private static IosPlatformConfig BuildConfig() =>
 		new("26.2", "iPhone", IsLightTheme: true, "com.example.app", "/unused", 100, 210, 3 * 2, 0.005);
 
+	/// <summary>Stores an image as the step's baseline, carrying the mask regions a run stores in its captures.</summary>
+	private static void SeedBaseline(
+		InMemoryScreenshotStorage storage,
+		TestStep key,
+		Image<Rgb24> image,
+		Rectangle[] maskRegions
+	)
+	{
+		using (image)
+		{
+			ImageHelpers.SetMaskMetadata(image, maskRegions);
+			using var stream = new MemoryStream();
+			image.SaveAsPng(stream);
+			storage.WriteBaseline(key, stream.ToArray());
+		}
+	}
+
 	[Test]
-	public void CompareWithBaselineAndDisposeWritesBaselineWhenAbsent()
+	public void CompareWithBaselineAndDisposeReportsNoBaselineWhenAbsent()
+	{
+		var storage = new InMemoryScreenshotStorage();
+		var manager = new ScreenshotManager(storage);
+		var key = new TestStep(BuildConfig(), "Journey", "01 Step", "Journey");
+
+		var result = manager.CompareWithBaselineAndDispose(new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0)), key, []);
+
+		_ = result.Outcome.Should().Be(ScreenshotOutcome.NoBaseline);
+	}
+
+	[Test]
+	public void CompareWithBaselineAndDisposeKeepsANewCaptureInsteadOfABaselineWhenAbsent()
 	{
 		var storage = new InMemoryScreenshotStorage();
 		var manager = new ScreenshotManager(storage);
 		var config = BuildConfig();
 		var key = new TestStep(config, "Journey", "01 Step", "Journey");
-		var actual = new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0));
 
-		var result = manager.CompareWithBaselineAndDispose(actual, key, []);
+		_ = manager.CompareWithBaselineAndDispose(new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0)), key, []);
 
-		_ = result.Passed.Should().BeTrue();
-		_ = result.PixelDiffPercentage.Should().Be(0);
-		_ = result.ReportPath.Should().BeNull();
-		_ = storage.BaselineExists(key).Should().BeTrue();
+		_ = storage.ListAllFiles(config, "Journey").Should().Equal("01 Step [Journey].new.png");
 	}
 
 	[Test]
@@ -184,13 +209,11 @@ public sealed class ScreenshotManagerTests
 		var manager = new ScreenshotManager(storage);
 		var config = BuildConfig();
 		var key = new TestStep(config, "Journey", "01 Step", "Journey");
-
-		// Seed an existing baseline by running once with no baseline present.
-		_ = manager.CompareWithBaselineAndDispose(new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0)), key, []);
+		SeedBaseline(storage, key, new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0)), []);
 
 		var result = manager.CompareWithBaselineAndDispose(new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0)), key, []);
 
-		_ = result.Passed.Should().BeTrue();
+		_ = result.Outcome.Should().Be(ScreenshotOutcome.Matched);
 		_ = result.ReportPath.Should().BeNull();
 		_ = storage.ListAllFiles(config, "Journey").Should().ContainSingle().Which.Should().Be("01 Step.png");
 	}
@@ -203,13 +226,12 @@ public sealed class ScreenshotManagerTests
 		var config = BuildConfig();
 		var key = new TestStep(config, "Journey", "01 Step", "Journey");
 
-		// Seed a green baseline.
-		_ = manager.CompareWithBaselineAndDispose(new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0)), key, []);
+		SeedBaseline(storage, key, new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0)), []);
 
 		// Compare a red image against the green baseline.
 		var result = manager.CompareWithBaselineAndDispose(new Image<Rgb24>(100, 100, new Rgb24(255, 0, 0)), key, []);
 
-		_ = result.Passed.Should().BeFalse();
+		_ = result.Outcome.Should().Be(ScreenshotOutcome.Differed);
 		_ = result.ReportPath.Should().NotBeNull();
 		_ = storage.BaselineExists(key).Should().BeTrue();
 		_ = storage.NewScreenshotExists(key).Should().BeTrue();
@@ -224,11 +246,11 @@ public sealed class ScreenshotManagerTests
 		var config = BuildConfig();
 		var key = new TestStep(config, "Journey", "01 Step", "Journey");
 
-		_ = manager.CompareWithBaselineAndDispose(new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0)), key, []);
+		SeedBaseline(storage, key, new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0)), []);
 
 		var result = manager.CompareWithBaselineAndDispose(new Image<Rgb24>(80, 100, new Rgb24(0, 128, 0)), key, []);
 
-		_ = result.Passed.Should().BeFalse();
+		_ = result.Outcome.Should().Be(ScreenshotOutcome.Differed);
 		_ = result.PixelDiffPercentage.Should().Be(100);
 		_ = storage.NewScreenshotExists(key).Should().BeTrue();
 		_ = storage.FailScreenshotExists(key).Should().BeTrue();
@@ -251,7 +273,7 @@ public sealed class ScreenshotManagerTests
 		// band x∈[10,40) — simulating a run where the dynamic element's content was wide.
 		var baseline = new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0));
 		PaintColumns(baseline, fromX: 20, toX: 40, new Rgb24(255, 0, 0));
-		_ = manager.CompareWithBaselineAndDispose(baseline, key, [new Rectangle(10, 0, 30, 100)]);
+		SeedBaseline(storage, key, baseline, [new Rectangle(10, 0, 30, 100)]);
 
 		// A later run: plain green, so it differs from the baseline only at x∈[20,40) — outside
 		// the narrower live mask x∈[10,20) but inside the baseline's stored mask. The union keeps
@@ -259,7 +281,7 @@ public sealed class ScreenshotManagerTests
 		var actual = new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0));
 		var result = manager.CompareWithBaselineAndDispose(actual, key, [new Rectangle(10, 0, 10, 100)]);
 
-		_ = result.Passed.Should().BeTrue();
+		_ = result.Outcome.Should().Be(ScreenshotOutcome.Matched);
 	}
 
 	[Test]
@@ -271,7 +293,7 @@ public sealed class ScreenshotManagerTests
 		var key = new TestStep(config, "Journey", "01 Step", "Journey");
 		Rectangle[] liveMasks = [new Rectangle(10, 0, 30, 100)];
 
-		_ = manager.CompareWithBaselineAndDispose(new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0)), key, []);
+		SeedBaseline(storage, key, new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0)), []);
 		_ = manager.CompareWithBaselineAndDispose(new Image<Rgb24>(100, 100, new Rgb24(255, 0, 0)), key, liveMasks);
 
 		using var newCapture = Image.Load(storage.ReadNewScreenshot(key));
@@ -291,12 +313,12 @@ public sealed class ScreenshotManagerTests
 		// baseline's wider content, so the difference is detected — documents the fallback.
 		var baseline = new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0));
 		PaintColumns(baseline, fromX: 20, toX: 40, new Rgb24(255, 0, 0));
-		_ = manager.CompareWithBaselineAndDispose(baseline, key, []);
+		SeedBaseline(storage, key, baseline, []);
 
 		var actual = new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0));
 		var result = manager.CompareWithBaselineAndDispose(actual, key, [new Rectangle(10, 0, 10, 100)]);
 
-		_ = result.Passed.Should().BeFalse();
+		_ = result.Outcome.Should().Be(ScreenshotOutcome.Differed);
 	}
 
 	[Test]

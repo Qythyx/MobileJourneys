@@ -343,8 +343,10 @@ Baselines live under
 `<consumer-project>/Screenshots/<PlatformConfig.DisplayName>/<container>/<NN> <StepLabel>.png`,
 where the container is the journey's own folder for flat `JourneyDefinition`s, or the tree node's
 nested folder path (e.g. `Home/Menu/About/`) for tree-defined journeys — shared steps are stored
-once. The first run for a new step produces the baseline; subsequent runs compare (on shared steps,
-whichever journey runs first writes the baseline and the rest compare mask-aware). Failure artifacts
+once. A step with no baseline yet fails, and its capture is kept as the same `.new` artifact a
+mismatch leaves; it becomes the baseline only once it is accepted in the viewer, so no screenshot is
+compared against until someone has looked at it. Later runs compare against it (on shared steps,
+mask-aware, so every journey through the step is held to the one baseline). Failure artifacts
 (the actual capture for a mismatch, the diff visualization, FAIL screenshots from exceptions, and
 crash logs) land alongside the baseline, stamped with the producing journey's name so runs through a
 shared node can't clobber each other's evidence, and are auto-cleaned when the step next passes.
@@ -398,16 +400,17 @@ journey forest, drawn as **nested boxes**: a branch box contains its children, e
 lighter than its parent, so the picture is the trie rather than a diagram of it. Thumbnails sit in
 the box that owns them, journey chips mark the nodes where a journey ends (only when the node isn't
 already named after it), a red outline marks a box with a failing step of its own — deeper failures
-show as "N ✕ below" — orange marks extraneous files, and a blue ring is the current selection.
+show as "N ✕ below" — violet marks new screenshots (steps with no baseline yet, shown by their
+capture), orange marks extraneous files, and a blue ring is the current selection.
 
 Run with `--review` to serve the same page from a local HTTP port (it prints the URL to open in a
 browser); the manifest is rebuilt on every load and triage is enabled **inline in the tree**:
 `j`/`k` walk the failures, expanding the selected one in place into a panel with the
 baseline/new/diff panes and its actions, and `z` blows it up to fill the window with zoom and pan on
-each image. Actions are Accept (promote its `.new` capture to the baseline; note the promoted PNG
-carries no embedded mask metadata until the next run regenerates it), Discard (delete that journey's
-artifacts for the step, leaving the baseline alone), deleting extraneous files individually or all
-at once, and rerunning a journey — on the current fixture, all fixtures, or only the fixtures where
+each image. Actions are Accept (promote its `.new` capture to the baseline), Discard (delete that
+journey's artifacts for the step, leaving the baseline alone), accepting every new screenshot on the
+current fixture at once, deleting extraneous files individually or all at once, and rerunning a
+journey — on the current fixture, all fixtures, or only the fixtures where
 it currently fails. A rerun covers the selected journey only — the scopes differ in which fixtures
 it runs on, not in how many journeys run. It shells out to `dotnet run … -- --run --journey <name>`,
 narrowed by `--filter` for the current fixture or by `--rerun` for the fixtures that currently fail,

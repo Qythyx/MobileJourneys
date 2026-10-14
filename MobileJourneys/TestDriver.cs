@@ -480,8 +480,8 @@ public sealed class TestDriver(
 		// not many. Only a step that never matches spends all of it.
 		const int MinMsBetweenScreenshots = 300;
 
-		// With nothing to match against, two identical captures are the only signal there is, and the
-		// first run records whichever one settles as the baseline every later run is held to.
+		// With nothing to match against, two identical captures are the only signal there is, and
+		// whichever one settles is what gets offered for acceptance as the baseline.
 		using var baseline = screenshotManager.TryLoadBaseline(testStep);
 		var stopwatch = Stopwatch.StartNew();
 

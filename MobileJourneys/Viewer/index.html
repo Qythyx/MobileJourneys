@@ -16,6 +16,7 @@
 			--fail: #ff5c5c;
 			--fail2: #d64545;
 			--extra: #ffab40;
+			--new: #c38bff;
 			--pending: #ffd54a;
 			--ok: #58c877;
 			--border: #333947;
@@ -167,6 +168,11 @@
 		.seg .badge.extra {
 			background: var(--extra);
 			color: #402800;
+		}
+
+		.seg .badge.new {
+			background: var(--new);
+			color: #2a0f45;
 		}
 
 		/* Failure badge splits into journeys | steps, joined like the device segments: two red
@@ -335,6 +341,10 @@
 			outline: calc(2px * var(--inv)) solid var(--fail);
 		}
 
+		.node.has-new {
+			outline: calc(2px * var(--inv)) solid var(--new);
+		}
+
 		.node.has-extra {
 			outline: calc(2px * var(--inv)) solid var(--extra);
 		}
@@ -462,6 +472,11 @@
 			outline-offset: calc(-1px * var(--inv));
 		}
 
+		.shot.new img {
+			outline: calc(2px * var(--inv)) solid var(--new);
+			outline-offset: calc(-1px * var(--inv));
+		}
+
 		.shot.extra img {
 			outline: calc(2px * var(--inv)) dashed var(--extra);
 			outline-offset: calc(-1px * var(--inv));
@@ -490,6 +505,10 @@
 
 		.shot.extra .cap {
 			color: var(--extra);
+		}
+
+		.shot.new .cap {
+			color: var(--new);
 		}
 
 		.shot .cap .pct {
@@ -551,11 +570,10 @@
 			font-weight: 600;
 		}
 
-		.triage .explain {
-			color: var(--muted);
-			margin-bottom: 6px;
-			font-size: 11px;
-			max-width: 420px;
+		#zoomview .explain {
+			margin: 0 16px 10px;
+			color: var(--new);
+			font-size: 12px;
 		}
 
 		.failtext {
@@ -1025,6 +1043,7 @@
 					<button data-failed="false" data-embed="true" data-device="true">This device + rebuild app<span class="keyhint">R D</span></button>
 				</div>
 			</span>
+			<button class="btn accept" id="accept-new" style="display:none">Accept all new</button>
 			<button class="btn delete" id="del-extra" style="display:none">Delete all extraneous</button>
 			<button id="help-btn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
 		</div>
@@ -1097,6 +1116,9 @@
 			};
 			const filesFor = (cfg) => M.files[cfg] || { baselines: [], failures: [], extraneous: [] };
 			const baselineSet = (cfg) => new Set(filesFor(cfg).baselines);
+			const hasBaseline = (baselines, f) => baselines.has(f.container + "/" + f.step + ".png");
+			// A capture of a step with no baseline: nothing was compared, and accepting it makes it the baseline.
+			const isNewScreenshot = (baselines, f) => !!f.kinds.new && !hasBaseline(baselines, f);
 			const failureKey = (f) => f.container + "|" + f.step + "|" + f.journey;
 			const nodeNameOf = (container) => container.slice(container.lastIndexOf("/") + 1);
 
@@ -1198,6 +1220,9 @@
 				b.addEventListener("click", () => setConfig(cfg));
 				configSeg.appendChild(b);
 			});
+			$("#accept-new").addEventListener("click", async () => {
+				if (await api("accept-all-new", { config })) { refresh("Accepted every new screenshot on " + config); }
+			});
 			$("#del-extra").addEventListener("click", async () => {
 				if (await api("delete-all-extraneous", {})) { refresh("Deleted all extraneous files"); }
 			});
@@ -1276,9 +1301,11 @@
 				el.dataset.path = n.path;
 				if (n.orphan) { el.classList.add("orphan"); }
 				const nodeFails = byContainer.get(n.path) || [];
+				const baselines = baselineSet(config);
 				// Red means a step in *this* box failed — a failure deeper down is shown by that box's own
 				// red outline, so this box stays neutral rather than advertising the count.
-				if (nodeFails.length > 0) { el.classList.add("has-fail"); }
+				if (nodeFails.some((f) => !isNewScreenshot(baselines, f))) { el.classList.add("has-fail"); }
+				else if (nodeFails.length > 0) { el.classList.add("has-new"); }
 				else if (n.extraFiles.length > 0) { el.classList.add("has-extra"); }
 				const sel = selectedFailure();
 				const resolvedHere = resolved && resolved.container === n.path;
@@ -1304,7 +1331,6 @@
 				}
 				el.appendChild(head);
 
-				const baselines = baselineSet(config);
 				const shots = document.createElement("div");
 				shots.className = "shots";
 				for (const step of n.steps) {
@@ -1345,8 +1371,10 @@
 			}
 
 			function shotFigure(container, file, label, present, stepFails, isExtra) {
+				const newCapture = present ? null : stepFails.find((f) => f.kinds.new)?.kinds.new;
+				const isNew = !!newCapture && stepFails.every((f) => f.kinds.new);
 				const fig = document.createElement("div");
-				fig.className = "shot" + (stepFails.length > 0 ? " fail" : "") + (isExtra ? " extra" : "");
+				fig.className = "shot" + (isNew ? " new" : stepFails.length > 0 ? " fail" : "") + (isExtra ? " extra" : "");
 				if (!isExtra) {
 					// Tag the screenshot with its identity so the live-rerun overlay can recolor it, and
 					// paint its current pending/pass/fail state now (re-renders must not lose it).
@@ -1354,11 +1382,12 @@
 					fig.dataset.step = label;
 					applyShotProgress(fig);
 				}
-				if (present) {
+				if (present || newCapture) {
 					const img = document.createElement("img");
 					img.loading = "lazy";
 					img.draggable = false;
-					img.src = shotUrl(container, file);
+					img.src = shotUrl(container, present ? file : newCapture);
+					if (newCapture) { onArtifactError(img); }
 					img.addEventListener("click", () => {
 						if (stepFails.length > 0) { triageFailure(stepFails[0]); }
 						else { openLightbox(container, file, isExtra ? null : label); }
@@ -1383,7 +1412,7 @@
 				}
 				const cap = document.createElement("div");
 				cap.className = "cap";
-				cap.textContent = label + (isExtra ? " (extraneous)" : "");
+				cap.textContent = label + (isExtra ? " (extraneous)" : isNew ? " (new)" : "");
 				// The red outline already marks a failing step; the diff percent and details live in the
 				// triage panel when it's selected, so the caption stays just the step name.
 				fig.appendChild(cap);
@@ -1393,7 +1422,7 @@
 			// ---------- triage ----------
 			function paneKinds(f) {
 				const kinds = [];
-				if (baselineSet(config).has(f.container + "/" + f.step + ".png")) { kinds.push("baseline"); }
+				if (hasBaseline(baselineSet(config), f)) { kinds.push("baseline"); }
 				if (f.kinds.new) { kinds.push("new"); }
 				if (f.kinds.diff) { kinds.push("diff"); }
 				if (f.kinds.fail) { kinds.push("fail"); }
@@ -1401,15 +1430,21 @@
 			}
 			const kindLabel = { baseline: "baseline", new: "new capture", diff: "diff (white = changed)", fail: "failure screenshot" };
 			const kindFile = (f, kind) => (kind === "baseline" ? f.step + ".png" : f.kinds[kind]);
-			// A new capture needs the accept/discard explanation; any other failure is better served by
-			// the error that actually caused it. A diff with no new capture is neither: the comparison
-			// ran, so saying it never got that far would be wrong, but there is nothing to accept.
+			// A changed screenshot needs no explanation: the header gives the diff and the panes show it.
+			// A new screenshot says what accepting it does. Any other failure is best served by the error
+			// that caused it. A diff with no new capture is neither: the comparison ran, so saying it
+			// never got that far would be wrong, but there is nothing to accept.
 			function explainBlock(f) {
-				const el = document.createElement(f.kinds.new ? "div" : "pre");
-				el.className = f.kinds.new ? "explain" : "failtext";
-				el.textContent = f.kinds.new
-					? "Screenshot changed. Accept replaces the baseline with the new capture; Discard deletes this run's artifacts and keeps the baseline."
-					: f.failureText || (f.kinds.diff
+				if (f.kinds.new) {
+					if (!isNewScreenshot(baselineSet(config), f)) { return null; }
+					const el = document.createElement("div");
+					el.className = "explain";
+					el.textContent = "New screenshot: this step has no baseline yet. Accept makes this capture its baseline; Discard deletes it.";
+					return el;
+				}
+				const el = document.createElement("pre");
+				el.className = "failtext";
+				el.textContent = f.failureText || (f.kinds.diff
 						? "The capture differed from the baseline, but no new capture was kept, so there is nothing to accept. The baseline is usually missing under this step's current name \u2014 check whether the step was renamed."
 						: "No failure details were recorded for this step.");
 				return el;
@@ -1570,7 +1605,8 @@
 				pos.textContent = `failure ${selected + 1} / ${currentFailures().length}`;
 				head.appendChild(pos);
 				zoomCloseButton(head);
-				if (!f.kinds.new) { view.appendChild(explainBlock(f)); }
+				const explanation = explainBlock(f);
+				if (explanation) { view.appendChild(explanation); }
 
 				const body = document.createElement("div");
 				body.className = "zbody";
@@ -2581,11 +2617,21 @@
 					// The red badge means one thing at every moment — what is failing right now — so it stays
 					// up during a run too. Mid-run that is a mix: steps this run has redone, and steps still
 					// carrying the artifacts of the last one. It settles as the run reaches them.
-					const cfgFails = failureGroups(b.dataset.config);
+					const baselines = baselineSet(b.dataset.config);
+					const groups = failureGroups(b.dataset.config);
+					const cfgFails = groups.filter((f) => !isNewScreenshot(baselines, f));
 					const journeys = new Set(cfgFails.flatMap((f) => f.journeys)).size;
 					if (cfgFails.length > 0) {
 						box.appendChild(splitBadge("", journeys, cfgFails.length,
 							`failing: ${plural(journeys, "journey")} · ${plural(cfgFails.length, "step")}`));
+					}
+					const fresh = groups.length - cfgFails.length;
+					if (fresh > 0) {
+						const s = document.createElement("span");
+						s.className = "badge new";
+						s.textContent = fresh;
+						s.title = plural(fresh, "new screenshot") + " to accept";
+						box.appendChild(s);
 					}
 					const extra = filesFor(b.dataset.config).extraneous.length;
 					if (extra > 0) {
@@ -2639,6 +2685,12 @@
 			function render() {
 				renderConfigBadges();
 				renderClock();
+				const baselines = baselineSet(config);
+				const newCount = currentFailures().filter((f) => isNewScreenshot(baselines, f)).length;
+				const accept = $("#accept-new");
+				accept.style.display = newCount > 0 && serverMode ? "" : "none";
+				accept.textContent = `Accept all new (${newCount})`;
+				accept.title = `Make every new screenshot on ${config} its step's baseline`;
 				const extraCount = filesFor(config).extraneous.length;
 				const del = $("#del-extra");
 				del.style.display = extraCount > 0 && serverMode ? "" : "none";
