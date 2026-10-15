@@ -111,9 +111,9 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 
 	/// <summary>
 	/// Shows a worker as setting a journey up: its device's theme and font size, its backend's data,
-	/// and the app relaunched onto the journey's first screen. None of that produces a step, so
-	/// without it the row would hold the step it last finished — or nothing at all, on the first
-	/// journey — for as long as the preparation takes.
+	/// and the app relaunched onto the journey's first screen. That is part of the first step, which
+	/// reports nothing until it finishes, so without this the row would hold the step it last
+	/// finished — or nothing at all, on the first journey — for as long as the preparation takes.
 	/// </summary>
 	/// <param name="config">The fixture the worker belongs to.</param>
 	/// <param name="worker">The worker's 1-based index.</param>

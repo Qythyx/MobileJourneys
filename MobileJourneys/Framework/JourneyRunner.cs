@@ -15,19 +15,13 @@ internal static class JourneyRunner
 	{
 		var journey = testCase.Journey;
 		var config = testCase.Config;
-		var deviceId = driver.GetDeviceId();
 		var stopwatch = Stopwatch.StartNew();
 		reporter.JourneyStarting(config, worker, journey.Name);
-		config.SetSystemFontSize(deviceId, SystemFontSize.Large);
-		config.SetSystemTheme(deviceId, config.IsLightTheme);
 
 		var totalSteps = journey.Steps.Length + 1;
 
-		var environment = journey.Scenario.ForFixture(config);
-		driver.CurrentJourneyEnv = driver.Backend?.PrepareFor(environment) ?? environment;
-		driver.ClearAppLogs();
-		driver.RelaunchApp(driver.CurrentJourneyEnv);
-
+		// Starting the journey is the first step's action, so a journey that cannot start fails on that
+		// step and leaves its failure artifacts, which are all the viewer and --rerun see.
 		var steps = new List<(
 			int Number,
 			string Name,
@@ -40,7 +34,17 @@ internal static class JourneyRunner
 			(
 				1,
 				journey.InitialName,
-				() => ProcessExpectations(driver, journey.InitialExpect),
+				() =>
+				{
+					var deviceId = driver.GetDeviceId();
+					config.SetSystemFontSize(deviceId, SystemFontSize.Large);
+					config.SetSystemTheme(deviceId, config.IsLightTheme);
+					var environment = journey.Scenario.ForFixture(config);
+					driver.CurrentJourneyEnv = driver.Backend?.PrepareFor(environment) ?? environment;
+					driver.ClearAppLogs();
+					driver.RelaunchApp(driver.CurrentJourneyEnv);
+					ProcessExpectations(driver, journey.InitialExpect);
+				},
 				journey.InitialMaskElements ?? [],
 				false,
 				null
