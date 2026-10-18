@@ -404,19 +404,20 @@ show as "N ✕ below" — violet marks new screenshots (steps with no baseline y
 capture), orange marks extraneous files, and a blue ring is the current selection.
 
 Run with `--review` to serve the same page from a local HTTP port (it prints the URL to open in a
-browser); the manifest is rebuilt on every load and triage is enabled **inline in the tree**:
-`j`/`k` walk the failures, expanding the selected one in place into a panel with the
-baseline/new/diff panes and its actions, and `z` blows it up to fill the window with zoom and pan on
-each image. Actions are Accept (promote its `.new` capture to the baseline), Discard (delete that
-journey's artifacts for the step, leaving the baseline alone), accepting every new screenshot on the
-current fixture at once, deleting extraneous files individually or all at once, and rerunning a
-journey — on the current fixture, all fixtures, or only the fixtures where
-it currently fails. A rerun covers the selected journey only — the scopes differ in which fixtures
-it runs on, not in how many journeys run. It shells out to `dotnet run … -- --run --journey <name>`,
+browser); the manifest is rebuilt on every load and triage is enabled: `j`/`k` walk the failures,
+and clicking a screenshot, or `z` for the selected failure, opens the zoom view, which fills the
+window with zoom and pan on each image — the baseline/new/diff panes for a failure, the baseline
+alone for a step that passed. Actions are Accept (promote its `.new` capture to the baseline),
+Discard (delete that journey's artifacts for the step, leaving the baseline alone), accepting every
+new screenshot on the current fixture at once, deleting extraneous files individually or all at
+once, and rerunning the journey the zoom view shows — on the current fixture, all fixtures, or only
+the fixtures where it currently fails, each with or without rebuilding the app first. A step several
+journeys share asks which of them to rerun, or all. The scopes differ in which fixtures the rerun
+runs on, not in how many journeys run. It shells out to `dotnet run … -- --run --journey <names>`,
 narrowed by `--filter` for the current fixture or by `--rerun` for the fixtures that currently fail,
-and reloads the view when it finishes. Only one rerun runs at a time, since concurrent runs would
-fight over the simulators. Press `u` to reload from disk by hand if a run's completion is ever
-missed.
+with `-p:EmbedAssemblies=true` to rebuild, and reloads the view as each step lands. Only one rerun
+runs at a time, since concurrent runs would fight over the simulators. Press `u` to reload from disk
+by hand if a run's completion is ever missed.
 
 ### How a rerun reports back
 
@@ -449,11 +450,13 @@ you move on with `j`/`k`, which clears the green state. The log box persists as 
 run and is dismissed with `Esc` or its ✕.
 
 Press `?` in the page for the keymap. Highlights: `1`–`4` and `[`/`]` switch fixture, `j`/`k` step
-through failures (centering each), `z` zooms the selected one, `←`/`→` step through the journey,
-`space` rotates the leading image pane through baseline/new/diff, `d` blinks the differing pixels
-red on every pane, `D` zooms 300% on the first of them (and back out), `f` fits the tree, `u`
-reloads from disk, `a` accepts, `x` discards, and rerun is a two-key chord (`r` then `r`/`a`/`f`) so
-an expensive run can't fire on a single keypress.
+through failures (centering each), `/` finds a journey or branch by name, `z` zooms the selected
+failure or what `/` found, `←`/`→` step through the journey (keeping to the journey the first press
+started from), `space` rotates the leading image pane through baseline/new/diff, `d` blinks the
+differing pixels red on every pane, `D` zooms 300% on the first of them (and back out), scrolling
+and dragging zoom and pan every pane together and `0` resets them, `f` fits the tree, `u` reloads
+from disk, `a` accepts, `x` discards, and rerun is a two-key chord (`r` then `r`/`a`/`f`, or
+`R`/`A`/`F` to rebuild the app first) so an expensive run can't fire on a single keypress.
 
 Anything that has to stay legible while zoomed — emphasis outlines, the selection ring, node titles
 — is sized in units divided by the zoom scale (`--inv`), so outlines keep a constant on-screen

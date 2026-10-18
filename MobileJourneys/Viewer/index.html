@@ -239,12 +239,12 @@
 			background: var(--bg);
 		}
 
-		/* --- rerun-all dropdown --- */
-		#rerun-all-group {
+		/* --- rerun dropdowns: the whole suite in the header, the journeys shown in the zoom view --- */
+		.rerun-group {
 			position: relative;
 		}
 
-		#rerun-menu {
+		.rerun-menu {
 			position: absolute;
 			top: calc(100% + 4px);
 			right: 0;
@@ -259,11 +259,19 @@
 			z-index: 30;
 		}
 
-		#rerun-menu.open {
+		.rerun-menu.open {
 			display: flex;
 		}
 
-		#rerun-menu button {
+		/* The zoom view's actions sit at the bottom of the window. */
+		.zactions .rerun-menu {
+			top: auto;
+			bottom: calc(100% + 4px);
+			right: auto;
+			left: 0;
+		}
+
+		.rerun-menu button {
 			display: flex;
 			align-items: center;
 			justify-content: space-between;
@@ -278,7 +286,7 @@
 			white-space: nowrap;
 		}
 
-		#rerun-menu button:hover {
+		.rerun-menu button:hover {
 			background: var(--accent);
 			color: #fff;
 		}
@@ -524,6 +532,7 @@
 			border-radius: 5px;
 			color: var(--muted);
 			font-size: 10px;
+			cursor: pointer;
 		}
 
 		.shot .del {
@@ -629,19 +638,6 @@
 			border-radius: 5px;
 			background: #000;
 			cursor: pointer;
-		}
-
-		.tactions {
-			display: flex;
-			gap: 6px;
-			margin-top: 8px;
-			flex-wrap: wrap;
-			max-width: 420px;
-		}
-
-		.tactions .btn {
-			font-size: 11px;
-			padding: 4px 10px;
 		}
 
 		.btn {
@@ -800,39 +796,15 @@
 		}
 
 		/* --- overlays --- */
-		#lightbox {
-			position: fixed;
-			inset: 0;
-			background: rgba(0, 0, 0, 0.85);
-			display: none;
-			align-items: center;
-			justify-content: center;
-			z-index: 50;
-			cursor: zoom-out;
-			flex-direction: column;
-		}
-
-		#lightbox img {
-			max-width: 92vw;
-			max-height: 88vh;
-			border: 1px solid var(--border);
-			border-radius: 6px;
-		}
-
-		#lightbox .cap {
-			color: var(--muted);
-			margin-top: 8px;
-			font-size: 12px;
-		}
-
-		#search {
+		/* Finding a journey or branch over the graph, or choosing journeys to rerun over the zoom view. */
+		#picker {
 			position: fixed;
 			top: 56px;
 			left: 50%;
 			transform: translateX(-50%);
 			min-width: 360px;
 			max-width: calc(100vw - 32px);
-			z-index: 35;
+			z-index: 45;
 			display: none;
 			flex-direction: column;
 			background: var(--panel);
@@ -842,7 +814,7 @@
 			box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 		}
 
-		#search input {
+		#picker input {
 			font: inherit;
 			font-size: 14px;
 			padding: 8px 12px;
@@ -852,7 +824,7 @@
 			outline: none;
 		}
 
-		#search ul {
+		#picker ul {
 			list-style: none;
 			margin: 0;
 			padding: 4px;
@@ -860,11 +832,11 @@
 			overflow: auto;
 		}
 
-		#search ul:empty {
+		#picker ul:empty {
 			display: none;
 		}
 
-		#search li {
+		#picker li {
 			padding: 4px 8px;
 			border-radius: 5px;
 			cursor: pointer;
@@ -873,23 +845,23 @@
 			text-overflow: ellipsis;
 		}
 
-		#search li.active {
+		#picker li.active {
 			background: var(--accent);
 			color: #fff;
 		}
 
-		#search li .where {
+		#picker li .where {
 			margin-left: 8px;
 			color: var(--muted);
 			font-size: 11px;
 		}
 
-		#search li.active .where {
+		#picker li.active .where {
 			color: inherit;
 			opacity: 0.75;
 		}
 
-		#search li.none {
+		#picker li.none {
 			color: var(--muted);
 			cursor: default;
 		}
@@ -1032,9 +1004,9 @@
 		<div class="seg" id="config-seg"></div>
 		<span id="run-clock"></span>
 		<div id="actions">
-			<span id="rerun-all-group" style="display:none">
+			<span id="rerun-all-group" class="rerun-group" style="display:none">
 				<button class="btn" id="rerun-all-btn" title="Rerun the whole suite (Shift+R)">Rerun all ▾</button>
-				<div id="rerun-menu">
+				<div id="rerun-menu" class="rerun-menu">
 					<button data-failed="false" data-embed="false">Rerun all<span class="keyhint">R r</span></button>
 					<button data-failed="false" data-embed="true">Rerun all + rebuild app<span class="keyhint">R R</span></button>
 					<button data-failed="true" data-embed="false">Failures only<span class="keyhint">R f</span></button>
@@ -1052,12 +1024,9 @@
 		<div id="world"></div>
 	</div>
 	<div id="zoomview"></div>
-	<div id="search">
-		<input type="text" placeholder="Find a journey or branch" aria-label="Find a journey or branch" autocomplete="off" spellcheck="false" />
+	<div id="picker">
+		<input type="text" autocomplete="off" spellcheck="false" />
 		<ul></ul>
-	</div>
-	<div id="lightbox"><img alt="" />
-		<div class="cap"></div>
 	</div>
 	<div id="help">
 		<div class="sheet"></div>
@@ -1080,14 +1049,13 @@
 			let resolved = null;     // a failure just cleared (rerun passed / accepted / discarded), shown in place
 			let zoomed = false;      // the z view is open
 			let stepNav = null;      // { container, step, journeys } ← / → last moved to, and the journeys it keeps to
-			let lightboxStep = null; // { container, step, journeys } the full-size image shows, when it is a step
 			let found = null;        // { name, path } of the journey or branch last found with /, which ← / → open from the graph
-			let search = null;       // while the / box is open: { matches, active, before: what to go back to }
+			let picker = null;       // while the picker is open: what openPicker was given, its entries, and the active one
 			let chord = null, chordTimer = null, runEvents = null, clockTimer = null;
 			// The rerun being watched, built from the events its process reports. `steps` maps a fixture
-			// to that fixture's "container/step" results; absent entries render as pending (yellow).
-			// `overlay` is set only by a rerun-all — a single-journey rerun would wrongly paint the whole
-			// tree pending.
+			// to that fixture's "container/step" results; `scope` maps each device the run covers to the
+			// "container/step" keys it runs there, or null for all of them, which render as pending
+			// (yellow) until they report.
 			let run = null;
 			const NO_STEPS = new Map();
 			const paneKind = new Map();   // failure key -> artifact shown in the rotating pane
@@ -1240,7 +1208,9 @@
 				$("#rerun-menu").classList.remove("open");
 				rerunAll(b.dataset.failed === "true", b.dataset.embed === "true", b.dataset.device === "true");
 			});
-			document.addEventListener("click", () => $("#rerun-menu").classList.remove("open"));
+			document.addEventListener("click", () => {
+				for (const menu of document.querySelectorAll(".rerun-menu.open")) { menu.classList.remove("open"); }
+			});
 
 			function setConfig(next) {
 				// Capture the selected failure before switching, so it can stay selected on the new device.
@@ -1382,23 +1352,24 @@
 					fig.dataset.step = label;
 					applyShotProgress(fig);
 				}
+				let shown;
 				if (present || newCapture) {
-					const img = document.createElement("img");
-					img.loading = "lazy";
-					img.draggable = false;
-					img.src = shotUrl(container, present ? file : newCapture);
-					if (newCapture) { onArtifactError(img); }
-					img.addEventListener("click", () => {
-						if (stepFails.length > 0) { triageFailure(stepFails[0]); }
-						else { openLightbox(container, file, isExtra ? null : label); }
-					});
-					fig.appendChild(img);
+					shown = document.createElement("img");
+					shown.loading = "lazy";
+					shown.draggable = false;
+					shown.src = shotUrl(container, present ? file : newCapture);
+					if (newCapture) { onArtifactError(shown); }
 				} else {
-					const miss = document.createElement("div");
-					miss.className = "missing";
-					miss.textContent = "no baseline yet";
-					fig.appendChild(miss);
+					shown = document.createElement("div");
+					shown.className = "missing";
+					shown.textContent = "no baseline yet";
 				}
+				shown.addEventListener("click", () => {
+					if (stepFails.length > 0) { triageFailure(stepFails[0]); }
+					else if (isExtra) { openFileZoom(container, file); }
+					else { openStepZoom({ container, step: label, journeys: journeysThrough(container) }); }
+				});
+				fig.appendChild(shown);
 				if (isExtra && serverMode) {
 					const del = document.createElement("button");
 					del.className = "del";
@@ -1471,9 +1442,9 @@
 				});
 			}
 
-			function triageActions(f, big) {
+			function triageActions(f) {
 				const actions = document.createElement("div");
-				actions.className = big ? "zactions" : "tactions";
+				actions.className = "zactions";
 				const add = (label, cls, key, onClick, enabled) => {
 					const b = document.createElement("button");
 					b.className = "btn " + cls;
@@ -1485,13 +1456,60 @@
 				};
 				if (f.kinds.new) { add("Accept new baseline", "accept", "a", () => act("accept", f)); }
 				add(f.kinds.new ? "Discard result" : "Discard failure artifacts", "reject", "x", () => act("reject", f));
-				// Every scope reruns this one journey; they differ only in which fixtures it runs on.
-				add(`Rerun ${f.journey} here`, "", "r r", () => rerun(f.journey, "this"));
-				add("on all devices", "", "r a", () => rerun(f.journey, "all"));
-				add("on failed devices", "", "r f", () => rerun(f.journey, "failed"));
+				actions.appendChild(rerunMenu(f.journeys));
 				if (paneKinds(f).length > 1) { add("Cycle image", "", "space", () => rotatePane(), true); }
-				add(big ? "Close zoom" : "Zoom", "", "z", () => (big ? closeZoom() : openZoom()), true);
+				add("Close zoom", "", "z", () => closeZoom(), true);
 				return actions;
+			}
+
+			// Which devices a rerun of the journeys the zoom view shows runs on, and the key that picks it in
+			// the r chord. The same key with Shift rebuilds the app first.
+			const rerunScopes = [
+				{ key: "r", scope: "this", devices: "this device" },
+				{ key: "a", scope: "all", devices: "all devices" },
+				{ key: "f", scope: "failed", devices: "failed devices" },
+			];
+			const failsOn = (cfg, journey) => filesFor(cfg).failures.some((f) => f.journey === journey);
+			const failingAnywhere = (journeys) => journeys.filter((j) => M.configs.some((cfg) => failsOn(cfg, j)));
+			function rerunMenu(journeys) {
+				const group = document.createElement("span");
+				group.className = "rerun-group";
+				const button = document.createElement("button");
+				button.className = "btn";
+				button.textContent = `Rerun ${journeyLabel({ journeys })} ▾`;
+				button.disabled = !serverMode;
+				const menu = document.createElement("div");
+				menu.className = "rerun-menu";
+				button.addEventListener("click", (e) => { e.stopPropagation(); menu.classList.toggle("open"); });
+				for (const s of rerunScopes) {
+					if (s.scope === "failed" && failingAnywhere(journeys).length === 0) { continue; }
+					for (const embed of [false, true]) {
+						const b = document.createElement("button");
+						b.innerHTML = `On ${s.devices}${embed ? " + rebuild app" : ""}<span class="keyhint">r ${embed ? s.key.toUpperCase() : s.key}</span>`;
+						b.addEventListener("click", () => rerunJourneys(journeys, s, embed));
+						menu.appendChild(b);
+					}
+				}
+				group.append(button, menu);
+				return group;
+			}
+			// Reruns `shown` on the devices `s` names, first asking which of them when there are several. Only
+			// the ones failing somewhere can rerun on the failed devices.
+			function rerunJourneys(shown, s, embed) {
+				const journeys = s.scope === "failed" ? failingAnywhere(shown) : shown;
+				if (journeys.length === 0) { toast(`no device has a failure on ${journeyLabel({ journeys: shown })}`); return; }
+				if (journeys.length === 1) { rerun(journeys, s.scope, embed); return; }
+				const all = { name: `All ${journeys.length} journeys`, journeys };
+				const each = journeys.map((j) => ({ name: j, journeys: [j] }));
+				openPicker({
+					placeholder: `Rerun on ${s.devices}${embed ? " + rebuild app" : ""}: which journey?`,
+					noMatch: "no journey matches",
+					matches: (query) => (query === "" ? [all, ...each] : namesMatching(each, query)),
+					show: () => {},
+					pick: (match) => { if (match) { rerun(match.journeys, s.scope, embed); } },
+					cancel: () => toast("rerun cancelled"),
+					leave: () => {},
+				});
 			}
 
 			async function act(action, f) {
@@ -1528,7 +1546,7 @@
 				const head = document.createElement("div");
 				head.className = "zhead";
 				const b = document.createElement("b");
-				b.textContent = at.step + " — " + journeyLabel(at);
+				b.textContent = at.journeys.length > 0 ? at.step + " — " + journeyLabel(at) : at.step;
 				b.title = at.journeys.join("\n");
 				const where = document.createElement("span");
 				where.style.color = "var(--muted)";
@@ -1537,7 +1555,11 @@
 				view.appendChild(head);
 				return { view, head };
 			}
-			function zoomCloseButton(head) {
+			function endZoomHead(head, text) {
+				const note = document.createElement("span");
+				note.style.cssText = "margin-left:auto;color:var(--muted)";
+				note.textContent = text;
+				head.appendChild(note);
 				const close = document.createElement("span");
 				close.className = "close";
 				close.style.marginLeft = "0";
@@ -1599,12 +1621,7 @@
 						+ (f.pixels != null ? ` (${f.pixels.toLocaleString()} px)` : "");
 					head.appendChild(p);
 				}
-				// The header's per-device failure position lives here now (removed from the top toolbar).
-				const pos = document.createElement("span");
-				pos.style.cssText = "margin-left:auto;color:var(--muted)";
-				pos.textContent = `failure ${selected + 1} / ${currentFailures().length}`;
-				head.appendChild(pos);
-				zoomCloseButton(head);
+				endZoomHead(head, `failure ${selected + 1} / ${currentFailures().length}`);
 				const explanation = explainBlock(f);
 				if (explanation) { view.appendChild(explanation); }
 
@@ -1620,7 +1637,7 @@
 				});
 				view.appendChild(body);
 				if (f.kinds.diff) { markDiff(f); }
-				view.appendChild(triageActions(f, true));
+				view.appendChild(triageActions(f));
 				if (f.kinds.crash) {
 					const a = document.createElement("a");
 					a.href = shotUrl(f.container, f.kinds.crash);
@@ -1631,19 +1648,33 @@
 				}
 			}
 
-			// A step with no failure on this device, reached with ← / →: its baseline alone, nothing to triage.
+			// A step with no failure on this device: its baseline alone, nothing to triage.
 			function openPassedZoom(at) {
 				const { view, head } = zoomFrame(at);
-				const passed = document.createElement("span");
-				passed.style.cssText = "margin-left:auto;color:var(--muted)";
-				passed.textContent = "no failure";
-				head.appendChild(passed);
-				zoomCloseButton(head);
+				endZoomHead(head, "no failure");
 				const body = document.createElement("div");
 				body.className = "zbody";
 				const file = at.step + ".png";
 				const present = baselineSet(config).has(at.container + "/" + file);
 				body.appendChild(zoomFigure(kindLabel.baseline, present ? shotUrl(at.container, file) : null, false, false));
+				view.appendChild(body);
+				const actions = document.createElement("div");
+				actions.className = "zactions";
+				actions.appendChild(rerunMenu(at.journeys));
+				view.appendChild(actions);
+			}
+
+			// An extraneous file is on no journey, so there is nothing to step to or rerun.
+			function openFileZoom(container, file) {
+				stepNav = null;
+				resolved = null;
+				setSelected(-1);
+				render();
+				const { view, head } = zoomFrame({ container, step: file, journeys: [] });
+				endZoomHead(head, "extraneous");
+				const body = document.createElement("div");
+				body.className = "zbody";
+				body.appendChild(zoomFigure("extraneous file", shotUrl(container, file), false, false));
 				view.appendChild(body);
 			}
 
@@ -1675,18 +1706,9 @@
 			// From the graph, they open what / found at its first (→) or last (←) step: a journey's from end to
 			// end, a branch's only those in its own box.
 			function stepThroughJourney(delta) {
-				const inLightbox = $("#lightbox").style.display === "flex";
-				const at = inLightbox ? lightboxStep : zoomStep;
+				const at = zoomStep;
 				if (!at) {
-					if (found !== null) {
-						const isJourney = M.journeys[found.name] !== undefined && journeyEnd(found.name) === found.path;
-						const steps = isJourney
-							? journeyPath(found.name)
-							: stepsOf(found.path).map((step) => ({ container: found.path, step }));
-						if (steps.length > 0) {
-							openStepZoom({ ...steps[delta > 0 ? 0 : steps.length - 1], journeys: isJourney ? [found.name] : journeysThrough(found.path) });
-						}
-					}
+					if (found !== null) { openFound(delta); }
 					return;
 				}
 				const journeys = stepNav && stepNav.container === at.container && stepNav.step === at.step
@@ -1694,17 +1716,22 @@
 					: at.journeys;
 				const next = stepAlong(journeys, at, delta);
 				if (!next) { return; }
-				if (inLightbox) {
-					stepNav = { ...next, journeys };
-					openLightbox(next.container, next.step + ".png", next.step);
-					return;
-				}
 				openStepZoom({ ...next, journeys });
 			}
+			function openFound(delta) {
+				const isJourney = M.journeys[found.name] !== undefined && journeyEnd(found.name) === found.path;
+				const steps = isJourney
+					? journeyPath(found.name)
+					: stepsOf(found.path).map((step) => ({ container: found.path, step }));
+				if (steps.length > 0) {
+					openStepZoom({ ...steps[delta > 0 ? 0 : steps.length - 1], journeys: isJourney ? [found.name] : journeysThrough(found.path) });
+				}
+			}
+			const stepFailureIndex = (at) => currentFailures().findIndex((f) => f.container === at.container
+				&& f.step === at.step && f.journeys.some((j) => at.journeys.includes(j)));
 			function openStepZoom(at) {
 				stepNav = at;
-				const i = currentFailures().findIndex((f) => f.container === at.container && f.step === at.step
-					&& f.journeys.some((j) => at.journeys.includes(j)));
+				const i = stepFailureIndex(at);
 				resolved = null;
 				setSelected(i);
 				render();
@@ -1906,7 +1933,7 @@
 			// at the zoom the move ends at. The next frame sets --inv back before anything is painted.
 			function focusOn(el) {
 				const r = wrap.getBoundingClientRect();
-				const top = search ? $("#search").getBoundingClientRect().bottom - r.top : 0;
+				const top = picker ? $("#picker").getBoundingClientRect().bottom - r.top : 0;
 				const measure = () => {
 					const wr = world.getBoundingClientRect(), er = el.getBoundingClientRect();
 					const w = er.width / scale, h = er.height / scale;
@@ -1988,18 +2015,16 @@
 			}
 
 			// ---------- live rerun progress ----------
-			// Per-screenshot state from a running rerun-all: absent key = pending (yellow), "pass" =
+			// Per-screenshot state from a running rerun: absent key = pending (yellow), "pass" =
 			// normal grey, "fail" = red at once (before the manifest re-scan writes the artifact).
 			function progressState(container, step) {
-				if (!run || !run.overlay) { return null; }
+				if (!run || run.finished) { return null; }
 				const key = container + "/" + step;
 				const r = (run.steps.get(config) || NO_STEPS).get(key);
 				if (r === "fail") { return "fail"; }
 				if (r === "pass") { return "pass"; }
-				// Not yet reported → pending if in scope. The scope holds each device in the run: null for
-				// all of its steps, or the set of its was-failing steps ("failures").
-				if (!run.overlay.scope.has(config)) { return null; }
-				const set = run.overlay.scope.get(config);
+				if (!run.scope.has(config)) { return null; }
+				const set = run.scope.get(config);
 				return !set || set.has(key) ? "pending" : null;
 			}
 			function applyShotProgress(fig) {
@@ -2014,7 +2039,7 @@
 			}
 
 			// ---------- rerun ----------
-			async function startRerun(endpoint, body, live) {
+			async function startRerun(endpoint, body, scope) {
 				if (!serverMode) { toast("start with --review to enable rerunning"); return; }
 				const res = await fetch("api/" + endpoint, {
 					method: "POST",
@@ -2024,32 +2049,33 @@
 				if (!res.ok) { toast("rerun failed: " + (await res.text())); return; }
 				const job = await res.json();
 				closeRunnerPanel();
-				run = { description: job.description, endpoint, body, live, overlay: null, startedAt: Date.now(), endedAt: null, ...emptyRunProgress() };
-				// Only rerun-all (live) drives the overlay; a single-journey rerun would wrongly paint the
-				// whole tree. "failures" reruns just the failing journeys, so pre-mark only each device's
-				// currently-failing steps pending — snapshot them per device now, before the run starts
-				// clearing artifacts. Otherwise every step of each device in the run is pending. render()
-				// paints it.
-				if (live) {
-					run.overlay = {
-						scope: new Map(runConfigs().map((cfg) => [
-							cfg,
-							body.failed ? new Set(failureGroups(cfg).map((f) => f.container + "/" + f.step)) : null,
-						])),
-					};
-				}
+				run = { description: job.description, endpoint, body, scope, startedAt: Date.now(), endedAt: null, ...emptyRunProgress() };
 				startClock();
 				render();
 				watchRun(job.id);
 			}
-			// One journey finishes fast enough that a single refresh at the end suffices.
-			const rerun = (journey, scope) => startRerun("rerun", { config, journey, scope }, false);
-			// The whole suite runs for many minutes, so tick the graph forward as journeys finish
-			// (live = true). failed = only currently-failing journeys; embed = rebuild the app first.
-			// The two combine.
+			// embed = rebuild the app first.
+			const rerun = (journeys, scope, embed) => {
+				const stepsOn = (cfg) => new Set((scope === "failed" ? journeys.filter((j) => failsOn(cfg, j)) : journeys)
+					.flatMap(journeyPath)
+					.map((s) => s.container + "/" + s.step));
+				startRerun(
+					"rerun",
+					{ config, journeys, scope, embed },
+					new Map((scope === "this" ? [config] : M.configs).map((cfg) => [cfg, stepsOn(cfg)]).filter(([, steps]) => steps.size > 0))
+				);
+			};
+			// failed = only currently-failing journeys, whose steps are noted per device now, before the run
+			// starts clearing artifacts; embed = rebuild the app first. The two combine.
 			// thisDevice = only on the device being viewed, instead of on all of them.
-			const rerunAll = (failed, embed, thisDevice) =>
-				startRerun("rerun-all", { failed, embed, config: thisDevice ? config : null }, true);
+			const rerunAll = (failed, embed, thisDevice) => startRerun(
+				"rerun-all",
+				{ failed, embed, config: thisDevice ? config : null },
+				new Map((thisDevice ? [config] : M.configs).map((cfg) => [
+					cfg,
+					failed ? new Set(failureGroups(cfg).map((f) => f.container + "/" + f.step)) : null,
+				]))
+			);
 			$("#runner .close").addEventListener("click", () => { closeRunnerPanel(); });
 
 			// Everything the event stream fills in. A dropped connection replays the run from its first
@@ -2121,13 +2147,13 @@
 						if (!p.firstStepAt) { p.firstStepAt = Date.now(); }
 						const stepKey = ev.container + "/" + ev.step + "/" + ev.journey;
 						if (!p.seen.has(stepKey)) { p.seen.add(stepKey); p.stepsDone++; }
-						if (run.overlay) { applyProgress(); }
+						applyProgress();
+						// The step's screenshot is on disk by the time it reports.
+						rescan();
 						break;
 					}
 					case "journey-completed":
 						fixtureProgress(ev.config).journeysDone++;
-						// A finished journey is what puts new artifacts on disk.
-						if (run.overlay) { softRefresh(); }
 						break;
 					case "process-exited":
 						finishRun(ev);
@@ -2146,18 +2172,14 @@
 					&& (run.stale || (ev.output || []).some((l) => l.includes("Rebuild with -p:EmbedAssemblies=true")));
 				// Hand coloring back to the manifest — refresh() re-renders with the real failure state,
 				// and the badges go back to reporting what is on disk.
-				run.overlay = null;
 				run.finished = true;
 				run.endedAt = Date.now();
 				stopClock();
 				renderConfigBadges();
 				if (stale && !run.body.embed) {
 					toast("Stale app on device — rebuilding with EmbedAssemblies and rerunning");
-					// Corrective rebuild forces an embedded build. A single-journey rerun can't embed, so
-					// escalate it to a rebuild of every currently-failing journey. The escalated run carries
-					// embed:true, so it can't re-escalate — no loop.
-					if (run.endpoint === "rerun-all") { startRerun("rerun-all", { ...run.body, embed: true }, run.live); }
-					else { startRerun("rerun-all", { failed: true, embed: true }, true); }
+					// The rebuilt run carries embed:true, so it can't escalate again — no loop.
+					startRerun(run.endpoint, { ...run.body, embed: true }, run.scope);
 					return;
 				}
 				// A run that failed because journeys failed is already accounted for by the badges and the
@@ -2196,124 +2218,134 @@
 				runner.querySelector("pre").textContent = "";
 			}
 
-			// ---------- find a journey or branch (/) ----------
-			// Boxes and journeys whose name, or the capitals its words start with, contain `query`, ignoring
-			// case. A journey is its own entry only where its box is named otherwise, as its chip is.
-			function boxesMatching(query) {
+			// ---------- picker: a box to type into over a list to choose from ----------
+			// `options.matches(query)` lists the { name, where } entries for what is typed. `show` follows the
+			// highlighted entry, or undefined when there is none; Enter or a click passes it to `pick`, Esc to
+			// `cancel`, and leaving the box any other way to `leave`.
+			function openPicker(options) {
+				picker = { ...options, entries: [], active: 0 };
+				const input = $("#picker input");
+				input.value = "";
+				input.placeholder = options.placeholder;
+				input.setAttribute("aria-label", options.placeholder);
+				$("#picker").style.display = "flex";
+				input.focus();
+				showPickerEntries("");
+			}
+			function showPickerEntries(query) {
+				picker.entries = picker.matches(query);
+				const list = $("#picker ul");
+				list.innerHTML = "";
+				picker.entries.forEach(({ name, where }, i) => {
+					const li = document.createElement("li");
+					li.textContent = name;
+					if (where) {
+						const span = document.createElement("span");
+						span.className = "where";
+						span.textContent = where;
+						li.appendChild(span);
+					}
+					li.dataset.index = i;
+					list.appendChild(li);
+				});
+				if (query !== "" && picker.entries.length === 0) {
+					const li = document.createElement("li");
+					li.className = "none";
+					li.textContent = picker.noMatch;
+					list.appendChild(li);
+				}
+				showPickerEntry(0);
+			}
+			function showPickerEntry(index) {
+				picker.active = index;
+				const items = $("#picker ul").querySelectorAll("li[data-index]");
+				items.forEach((li, i) => li.classList.toggle("active", i === index));
+				items[index]?.scrollIntoView({ block: "nearest" });
+				picker.show(picker.entries[index]);
+			}
+			// `how` names the option that takes the highlighted entry: "pick", "cancel" or "leave".
+			function closePicker(how) {
+				const closing = picker;
+				picker = null;
+				$("#picker").style.display = "none";
+				closing[how](closing.entries[closing.active]);
+			}
+			$("#picker input").addEventListener("input", (e) => { showPickerEntries(e.target.value); });
+			// Every key typed here stays here, so none reaches the page's shortcuts.
+			$("#picker input").addEventListener("keydown", (e) => {
+				e.stopPropagation();
+				const count = picker.entries.length;
+				if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+					e.preventDefault();
+					if (count > 0) { showPickerEntry((picker.active + (e.key === "ArrowDown" ? 1 : -1) + count) % count); }
+				}
+				else if (e.key === "Enter") { closePicker("pick"); }
+				else if (e.key === "Escape") { closePicker("cancel"); }
+			});
+			$("#picker input").addEventListener("blur", () => { if (picker) { closePicker("leave"); } });
+			// Pressing on an entry would otherwise move the focus out of the box before the click lands.
+			$("#picker ul").addEventListener("mousedown", (e) => { e.preventDefault(); });
+			$("#picker ul").addEventListener("click", (e) => {
+				const li = e.target.closest("li[data-index]");
+				if (li) {
+					showPickerEntry(Number(li.dataset.index));
+					closePicker("pick");
+				}
+			});
+			// The `entries` whose name, or the capitals its words start with, contain `query`, ignoring case,
+			// best match first. Entries that match equally well keep their order.
+			function namesMatching(entries, query) {
 				const q = query.toLowerCase();
 				const rank = (name) => {
 					const lower = name.toLowerCase(), capitals = name.replace(/[^A-Z]/g, "").toLowerCase();
 					return [lower.startsWith(q), capitals.startsWith(q), lower.includes(q), capitals.includes(q)].indexOf(true);
 				};
-				return M.nodes
-					.flatMap((n) => [n.name, ...chipsFor(n.path)].map((name) => ({ name, path: n.path, rank: rank(name) })))
+				return entries
+					.map((entry) => ({ entry, rank: rank(entry.name) }))
 					.filter((m) => m.rank >= 0)
-					.sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name) || a.path.localeCompare(b.path))
-					.map(({ name, path }) => ({ name, path }));
+					.sort((a, b) => a.rank - b.rank || a.entry.name.localeCompare(b.entry.name))
+					.map((m) => m.entry);
 			}
+
+			// ---------- find a journey or branch (/) ----------
 			function openSearch() {
 				closeZoom();
-				closeLightbox();
 				$("#help").style.display = "none";
-				search = { matches: [], active: 0, before: { found, tx, ty, scale } };
-				const input = $("#search input");
-				input.value = "";
-				$("#search").style.display = "flex";
-				input.focus();
-				showSearchMatches("");
-			}
-			function showSearchMatches(query) {
-				search.matches = query === "" ? [] : boxesMatching(query);
-				const list = $("#search ul");
-				list.innerHTML = "";
-				search.matches.forEach(({ name, path }, i) => {
-					const li = document.createElement("li");
-					li.textContent = name;
-					if (path !== name) {
-						const where = document.createElement("span");
-						where.className = "where";
-						where.textContent = path;
-						li.appendChild(where);
+				const before = { found, tx, ty, scale };
+				const show = (match) => {
+					found = match ?? before.found;
+					render();
+					if (match === undefined) {
+						animateTo(before.tx, before.ty, before.scale);
+					} else {
+						const node = $(`#world .node[data-path="${cssEscape(match.path)}"]`);
+						if (node) { focusOn(node); }
 					}
-					li.dataset.index = i;
-					list.appendChild(li);
+				};
+				openPicker({
+					placeholder: "Find a journey or branch",
+					noMatch: "no journey or branch matches",
+					// Every box, and every journey whose box is named otherwise, as its chip is.
+					matches: (query) => (query === "" ? [] : namesMatching(
+						M.nodes
+							.flatMap((n) => [n.name, ...chipsFor(n.path)].map((name) => ({ name, path: n.path, where: name === n.path ? null : n.path })))
+							.sort((a, b) => a.path.localeCompare(b.path)),
+						query
+					)),
+					show,
+					// What was found takes over from the selected failure as what z opens.
+					pick: (match) => {
+						if (match) {
+							setSelected(-1);
+							render();
+						}
+					},
+					cancel: () => show(undefined),
+					leave: () => {},
 				});
-				if (query !== "" && search.matches.length === 0) {
-					const li = document.createElement("li");
-					li.className = "none";
-					li.textContent = "no journey or branch matches";
-					list.appendChild(li);
-				}
-				showSearchMatch(0);
 			}
-			function showSearchMatch(index) {
-				search.active = index;
-				const items = $("#search ul").querySelectorAll("li[data-index]");
-				items.forEach((li, i) => li.classList.toggle("active", i === index));
-				items[index]?.scrollIntoView({ block: "nearest" });
-				const match = search.matches[index];
-				found = match ?? search.before.found;
-				render();
-				if (match === undefined) {
-					animateTo(search.before.tx, search.before.ty, search.before.scale);
-				} else {
-					const node = $(`#world .node[data-path="${cssEscape(match.path)}"]`);
-					if (node) { focusOn(node); }
-				}
-			}
-			function closeSearch(cancel) {
-				if (cancel) {
-					search.matches = [];
-					showSearchMatch(0);
-				}
-				search = null;
-				$("#search").style.display = "none";
-			}
-			$("#search input").addEventListener("input", (e) => { showSearchMatches(e.target.value); });
-			// Every key typed here stays here, so none reaches the graph's shortcuts.
-			$("#search input").addEventListener("keydown", (e) => {
-				e.stopPropagation();
-				const count = search.matches.length;
-				if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-					e.preventDefault();
-					if (count > 0) { showSearchMatch((search.active + (e.key === "ArrowDown" ? 1 : -1) + count) % count); }
-				}
-				else if (e.key === "Enter") { closeSearch(false); }
-				else if (e.key === "Escape") { closeSearch(true); }
-			});
-			$("#search input").addEventListener("blur", () => { if (search) { closeSearch(false); } });
-			// Pressing on a match would otherwise move the focus out of the box before the click lands.
-			$("#search ul").addEventListener("mousedown", (e) => { e.preventDefault(); });
-			$("#search ul").addEventListener("click", (e) => {
-				const li = e.target.closest("li[data-index]");
-				if (li) {
-					showSearchMatch(Number(li.dataset.index));
-					closeSearch(false);
-				}
-			});
 
 			// ---------- overlays ----------
-			// `step` is null for a file that is not one, an extraneous screenshot, which ← / → cannot step from.
-			function openLightbox(container, file, step) {
-				lightboxStep = step === null ? null : { container, step, journeys: journeysThrough(container) };
-				const present = step === null || baselineSet(config).has(container + "/" + file);
-				const failed = lightboxStep && stepNav && currentFailures().some((f) => f.container === container
-					&& f.step === step && f.journeys.some((j) => stepNav.journeys.includes(j)));
-				const lb = $("#lightbox");
-				const img = lb.querySelector("img");
-				img.style.display = present ? "" : "none";
-				if (present) { img.src = shotUrl(container, file); }
-				lb.querySelector(".cap").textContent = container + "/" + file
-					+ (present ? "" : " — no baseline yet") + (failed ? " — failed on this device" : "");
-				lb.style.display = "flex";
-			}
-			function closeLightbox() {
-				$("#lightbox").style.display = "none";
-				lightboxStep = null;
-				stepNav = null;
-			}
-			$("#lightbox").addEventListener("click", closeLightbox);
-
 			function toast(text, isChord) {
 				const t = $("#toast");
 				t.textContent = text;
@@ -2335,19 +2367,19 @@
 				["Find a journey or branch", [
 					["/", "find a journey or branch by name, or the capitals of its words"],
 					["↑ / ↓", "previous / next match, shown in the graph as you go"],
-					["Enter", "keep the match"],
+					["Enter", "keep the match, which z then opens"],
 					["Esc", "go back to where the graph was"],
 					["← / →", "open the found journey at its last / first step, or the found branch at its own"],
 				]],
 				["Failures", [
 					["j / ↓", "next failure"],
 					["k / ↑", "previous failure"],
-					["z", "open the selected failure in the zoom view, or close it"],
+					["z", "open the selected failure in the zoom view, or what / found at its first step; or close it"],
 					["a", "accept the selected failure's new baseline"],
 					["x", "discard the selected failure's result"],
 				]],
 				["Only in the zoom view", [
-					["← / →", "previous / next step of the journey (also in the full-size image)"],
+					["← / →", "previous / next step of the journey"],
 					["d", "blink the differing pixels red on every pane"],
 					["D", "zoom 300% on the first differing pixel, or back out"],
 					["space", "cycle the rotating pane"],
@@ -2355,6 +2387,12 @@
 					["r then r", "rerun the journey shown, on this device"],
 					["r then a", "rerun the journey shown, on all devices"],
 					["r then f", "rerun the journey shown, on the devices where it is failing"],
+					["r then R / A / F", "the same, rebuilding the app first"],
+				]],
+				["Choosing which journeys to rerun, when the step is on several", [
+					["↑ / ↓", "previous / next journey, or all of them"],
+					["Enter", "rerun the journeys highlighted"],
+					["Esc", "rerun nothing"],
 				]],
 				["Rerun many journeys", [
 					["R then r", "rerun every journey on every device (updates live)"],
@@ -2403,16 +2441,16 @@
 				chord = prefix;
 				toast(prefix === "R"
 					? "rerun all:  r = as-is   R = + rebuild app   f = failures only   F = failures + rebuild   d = this device   D = this device + rebuild   (Esc cancels)"
-					: `rerun ${zoomStep.journeys[0]}:  r = this device   a = all devices   f = failed devices   (Esc cancels)`, true);
+					: `rerun ${journeyLabel(zoomStep)}:  ${rerunScopes.map((s) => `${s.key} = ${s.devices}`).join("   ")}   Shift = + rebuild app   (Esc cancels)`, true);
 				clearTimeout(chordTimer);
 				chordTimer = setTimeout(() => { chord = null; }, 4000);
 			}
 			function resolveChord(key) {
 				clearTimeout(chordTimer);
 				chord = null;
-				const scope = key === "r" ? "this" : key === "a" ? "all" : key === "f" ? "failed" : null;
-				if (!scope || !zoomed) { toast("rerun cancelled"); return; }
-				rerun(zoomStep.journeys[0], scope);
+				const s = rerunScopes.find((x) => x.key === key.toLowerCase());
+				if (!s || !zoomed) { toast("rerun cancelled"); return; }
+				rerunJourneys(zoomStep.journeys, s, key !== s.key);
 			}
 			function resolveAllChord(key) {
 				clearTimeout(chordTimer);
@@ -2428,23 +2466,23 @@
 			}
 
 			document.addEventListener("keydown", (e) => {
-				if (e.metaKey || e.ctrlKey || e.altKey) { return; }
+				// Shift goes down on its own before the key it capitalises, which would end a pending chord.
+				if (e.metaKey || e.ctrlKey || e.altKey || e.key === "Shift") { return; }
 				const k = e.key;
 				if (k === "Escape") {
 					// What was found outlasts the views opened on it, and goes only once they are closed.
-					const covered = zoomed || $("#lightbox").style.display === "flex" || $("#help").style.display === "flex";
+					const covered = zoomed || $("#help").style.display === "flex";
 					if (!covered && found !== null) {
 						found = null;
 						render();
 					}
 					chord = null;
 					$("#help").style.display = "none";
-					closeLightbox();
 					closeRunnerPanel();
 					closeZoom();
 					return;
 				}
-				if (chord === "r") { e.preventDefault(); resolveChord(k.toLowerCase()); return; }
+				if (chord === "r") { e.preventDefault(); resolveChord(k); return; }
 				if (chord === "R") { e.preventDefault(); resolveAllChord(k); return; }
 				if (k === "/") { e.preventDefault(); openSearch(); return; }
 				if (k === "?") { e.preventDefault(); const h = $("#help"); h.style.display = h.style.display === "flex" ? "none" : "flex"; return; }
@@ -2463,15 +2501,21 @@
 				if (k === "ArrowLeft" || k === "ArrowRight") { e.preventDefault(); stepThroughJourney(k === "ArrowRight" ? 1 : -1); return; }
 				if (k === "f") { fitView(); return; }
 				if (k === "u") { refresh("Reloaded from disk"); return; }
-				if (k === "z") { zoomed ? closeZoom() : openZoom(); return; }
+				if (k === "z") {
+					if (zoomed) { closeZoom(); }
+					else if (selectedFailure() || found === null) { openZoom(); }
+					else { openFound(1); }
+					return;
+				}
 				if (k === "d") { toggleBlinking(); return; }
 				if (k === "D") { zoomToFirstDiff(); return; }
 				if (k === " ") { e.preventDefault(); rotatePane(); return; }
 				if (k === "0") { resetZoom(); return; }
 				if (k === "r") {
 					e.preventDefault();
-					if (zoomed) { startChord("r"); }
-					else { toast("open a failure with z first"); }
+					if (!zoomed) { toast("open a screenshot first"); }
+					else if (zoomStep.journeys.length === 0) { toast("an extraneous file is on no journey"); }
+					else { startChord("r"); }
 					return;
 				}
 				if (k === "R") { e.preventDefault(); startChord("R"); return; }
@@ -2505,7 +2549,21 @@
 			// `resolvedLabel` (e.g. "passed on rerun") marks a refresh that cleared the current failure. When
 			// set and the failure is indeed gone, the view stays on that node with a green ✓ instead of
 			// snapping to whatever failure now occupies its old index — the user advances with j when ready.
-			async function refresh(message, resolvedLabel) {
+			// Refreshes apply one at a time in the order asked for, so an older manifest never lands last.
+			let refreshes = Promise.resolve();
+			function refresh(message, resolvedLabel) {
+				refreshes = refreshes.then(() => applyRefresh(message, resolvedLabel));
+			}
+			// Steps a running rerun reports while a re-scan waits share that re-scan.
+			let rescanQueued = false;
+			function rescan() {
+				if (!rescanQueued) {
+					rescanQueued = true;
+					refresh(null, "passed on rerun");
+				}
+			}
+			async function applyRefresh(message, resolvedLabel) {
+				rescanQueued = false;
 				const wasOn = selectedFailure();
 				try {
 					const res = await fetch("manifest.js", { cache: "no-store" });
@@ -2522,34 +2580,21 @@
 				if (clearedCurrent) {
 					resolved = { container: wasOn.container, step: wasOn.step, journey: wasOn.journey, label: resolvedLabel };
 					setSelected(-1);
+					// The zoom view stays on the step, which now has no failure.
+					if (zoomed) { stepNav = zoomStep; }
 				} else {
 					resolveSelection();
 				}
+				const onStep = zoomed && stepNav && zoomStep && stepNav.container === zoomStep.container && stepNav.step === zoomStep.step;
+				// A step the zoom view showed with no failure may have failed on a rerun.
+				if (onStep && selected < 0) { setSelected(stepFailureIndex(stepNav)); }
 				render();
 				if (zoomed) {
 					if (selectedFailure()) { openZoom(); }
-					else if (stepNav && zoomStep && stepNav.container === zoomStep.container && stepNav.step === zoomStep.step) {
-						openPassedZoom(stepNav);
-					}
+					else if (onStep) { openPassedZoom(stepNav); }
 					else { closeZoom(); }
 				}
 				if (message) { toast(message); }
-			}
-
-			// A quiet re-scan for live monitoring: pull the manifest again and re-render in place, without
-			// changing the selection, snapping the view, or toasting — so a running "rerun all" ticks the
-			// graph forward as journeys finish without yanking the user around. `refresh` stays the one that
-			// reacts to a completed action.
-			async function softRefresh() {
-				try {
-					const res = await fetch("manifest.js", { cache: "no-store" });
-					if (!res.ok) { return; }
-					new Function(await res.text())();
-					Object.assign(M, window.MANIFEST);
-				} catch { return; }
-				resolveSelection();
-				render();
-				if (zoomed && selectedFailure()) { openZoom(); }
 			}
 
 			// ---------- render ----------
@@ -2596,11 +2641,11 @@
 				return badge;
 			}
 
-			// Which devices this run covers. Known exactly once run-started arrives; before that, a run
-			// that names a device means that one and any other means all of them.
+			// Which devices this run covers. Known exactly once run-started arrives; before that, the
+			// devices the run was asked for.
 			function runConfigs() {
 				if (run.fixtures) { return run.fixtures.map((f) => f.config); }
-				return run.body.config ? [run.body.config] : M.configs;
+				return [...run.scope.keys()];
 			}
 
 			function renderConfigBadges() {

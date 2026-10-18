@@ -402,14 +402,16 @@ public static class ScreenshotViewer
 	}
 
 	/// <summary>
-	/// Reruns one journey on the requested platforms. Every scope reruns the same journey; they
-	/// differ only in which fixtures it runs on — every platform ("all"), only the ones that
-	/// currently have failures ("failed"), or the single originating one.
+	/// Reruns the requested journeys on the requested platforms. Every scope reruns the same journeys;
+	/// they differ only in which fixtures they run on — every platform ("all"), only the ones where
+	/// one of them currently has failures ("failed"), or the single originating one.
+	/// <see cref="RerunRequest.Embed"/> passes <c>-p:EmbedAssemblies=true</c> to rebuild and re-embed
+	/// the app first.
 	/// </summary>
 	/// <param name="context">The request to respond to.</param>
 	/// <param name="config">Framework configuration providing the journeys and platforms.</param>
 	/// <param name="storage">Storage consulted to find which platforms currently have failures.</param>
-	/// <param name="request">The journey, scope, and originating platform.</param>
+	/// <param name="request">The journeys, scope, originating platform, and whether to rebuild the app.</param>
 	private static void StartRerun(
 		HttpListenerContext context,
 		FrameworkConfig config,
@@ -417,8 +419,8 @@ public static class ScreenshotViewer
 		RerunRequest? request
 	)
 	{
-		var journey = config.Journeys.FirstOrDefault(j => j.Name == request?.Journey);
-		if (request is null || journey is null)
+		var journeys = config.Journeys.Where(j => request?.Journeys?.Contains(j.Name) == true).ToList();
+		if (request?.Journeys is not { Count: > 0 } || journeys.Count != request.Journeys.Count)
 		{
 			TryRespond(context, 400, "text/plain", Encoding.UTF8.GetBytes("unknown journey"));
 			return;
@@ -427,7 +429,10 @@ public static class ScreenshotViewer
 		List<PlatformConfig> platforms = request.Scope switch
 		{
 			"all" => [.. config.PlatformConfigs],
-			"failed" => [.. config.PlatformConfigs.Where(p => storage.HasFailureArtifacts(p, journey))],
+			"failed" =>
+			[
+				.. config.PlatformConfigs.Where(p => journeys.Any(journey => storage.HasFailureArtifacts(p, journey))),
+			],
 			_ => config.FindPlatform(request.Config) is { } single ? [single] : [],
 		};
 
@@ -447,9 +452,10 @@ public static class ScreenshotViewer
 		LaunchRerun(
 			context,
 			config,
-			$"{journey.Name} on {string.Join(", ", platforms.Select(p => p.DisplayName))}",
-			[],
-			["--journey", journey.Name, .. scopeArgs]
+			$"{string.Join(", ", journeys.Select(j => j.Name))} on {string.Join(", ", platforms.Select(p => p.DisplayName))}"
+				+ (request.Embed ? " (rebuilding app)" : string.Empty),
+			request.Embed ? ["-p:EmbedAssemblies=true"] : [],
+			["--journey", .. journeys.Select(j => j.Name), .. scopeArgs]
 		);
 	}
 
@@ -647,7 +653,7 @@ public static class ScreenshotViewer
 
 	private sealed record PlatformRequest(string Config);
 
-	private sealed record RerunRequest(string Config, string Journey, string Scope);
+	private sealed record RerunRequest(string Config, IReadOnlyList<string> Journeys, string Scope, bool Embed);
 
 	private sealed record RerunAllRequest(bool Failed, bool Embed, string? Config);
 
