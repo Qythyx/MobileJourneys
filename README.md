@@ -127,7 +127,10 @@ public static class MyAppPlatforms
             IsLightTheme: true,
             AppIdentifier: AppId,
             AppBinaryPath: Path.Combine(TestAssembly.RepoRoot, "src/MyApp.app"),
-            MaxScreenshotHeight: 2000),
+            NotificationBannerTop: 176,
+            NotificationBannerBottom: 412,
+            ColorTolerance: 9,
+            MaxDiffPixelPercentage: 0),
         new AndroidPlatformConfig(
             PlatformVersion: "15",
             DeviceName: "Pixel 8",
@@ -136,10 +139,19 @@ public static class MyAppPlatforms
             AppIdentifier: AppId,
             AppBinaryPath: Path.Combine(TestAssembly.RepoRoot, "src/MyApp-Signed.apk"),
             MainActivity: null,
-            MaxScreenshotHeight: 2000),
+            NotificationBannerTop: 153,
+            NotificationBannerBottom: 385,
+            ColorTolerance: 180,
+            MaxDiffPixelPercentage: 0.005),
     ];
 }
 ```
+
+A step passes when no more than `MaxDiffPixelPercentage` percent of its pixels differ from the
+baseline by more than `ColorTolerance`, the sum of the red, green and blue differences. Masked
+regions are left out of the comparison. A percentage of 0 fails on any pixel past the tolerance;
+Android decodes images slightly differently from one run to the next, so its fixtures usually need a
+larger tolerance and a small percentage.
 
 A fixture runs its journeys on one device unless told otherwise. Set `Instances` to run it on
 several at once, with the journeys shared between them longest-first:
@@ -177,6 +189,14 @@ calls instead of a wall of `new`. `MobileJourneys.Dsl` supplies a thin factory f
 action, expectation, and tree type (`Tap`, `Found`, `Step`, `Branch`, `Tree`, …); because each
 returns the concrete type, nested calls compose without bracketing. `Step`'s expectations are
 `params`, so a step with no mask elements needs no `[ ]` around them.
+
+`Step` has four shapes: `Step(action)`; `Step(action, expect…)`;
+`Step(action, [expect], [maskIds])`, whose mask elements — the AutomationIds of elements left out of
+the screenshot comparison — put the expectations back in brackets, since they are no longer the last
+argument; and the same with a trailing `prefetchMasks` bool, which looks the mask elements up before
+the action runs, for an action that hides them (an alert covering them, say).
+`Tree(environment, [initialExpect], [steps], [children])` builds a tree's root, with an optional
+`[initialMaskElements]` after the children for its initial screenshot.
 
 ```csharp
 using static MobileJourneys.Dsl;
@@ -335,7 +355,26 @@ dotnet run --project test/MyApp.UITests -- --delete-extraneous
 
 # Serve the screenshot viewer with review actions enabled
 dotnet run --project test/MyApp.UITests -- --review
+
+# The flags, from the runner itself
+dotnet run --project test/MyApp.UITests -- --help
 ```
+
+`--run` is what starts a run: a bare `--journey`, `--filter` or `--rerun` is rejected rather than
+taken as one, so a long run is never started by accident. `--journey`, `--filter` and `--rerun` then
+narrow it independently. Each of `--journey` and `--filter` takes several values at once
+(`--filter A B`) with the same meaning as repeating the flag. Name a single journey with
+`--journey`: a filter is a substring, so `--filter Loading` also selects `LoadingNoConnectivity`.
+
+With no arguments at all the runner offers a menu: run every journey, pick journeys to run (with
+optional filters after), rerun the journeys that have failure artifacts, review screenshots in the
+browser, list or delete the screenshots no journey references, or quit. With no terminal to show it
+in, no arguments is a bad command line.
+
+At a terminal the runner draws a live table, one row per fixture, and offers each failure for
+inspection when the run is over. When stdout is redirected, or `NO_COLOR` is set, it writes one
+plain line per step instead and prints the failures in full. That plain output is what CI captures
+and what the viewer shows for a failed rerun, so it carries no ANSI escapes and no hard wrapping.
 
 ## Screenshots
 
