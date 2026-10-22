@@ -7,13 +7,14 @@ namespace MobileJourneys.Framework;
 /// Renders a run as sequential lines — one per finished step, one per finished journey. Used
 /// when the command is not run interactively.
 /// </summary>
-internal sealed class ConsoleReporter : RunReporter
+/// <param name="log">The run's log.</param>
+internal sealed class ConsoleReporter(RunLog log) : RunReporter(log)
 {
 	/// <summary>Width the fixture tag is padded to, so journey names line up across fixtures.</summary>
 	private const int TagWidth = 20;
 
 	/// <inheritdoc/>
-	public override void StepCompleted(
+	protected override void ReportStepCompleted(
 		TestStep step,
 		int worker,
 		int stepNumber,
@@ -48,7 +49,7 @@ internal sealed class ConsoleReporter : RunReporter
 	}
 
 	/// <inheritdoc/>
-	public override void FixtureRetrying(PlatformConfig config, int worker, string reason)
+	protected override void ReportFixtureRetrying(PlatformConfig config, int worker, string reason)
 	{
 		lock (Gate)
 		{
@@ -57,7 +58,16 @@ internal sealed class ConsoleReporter : RunReporter
 	}
 
 	/// <inheritdoc/>
-	public override void WorkerLost(PlatformConfig config, int worker, string reason)
+	protected override void ReportFixtureStartRetrying(PlatformConfig config, string reason)
+	{
+		lock (Gate)
+		{
+			AnsiConsole.MarkupLine($"[yellow]RETRY[/] {Markup.Escape($"{config} — {reason}")}");
+		}
+	}
+
+	/// <inheritdoc/>
+	protected override void ReportWorkerLost(PlatformConfig config, int worker, string reason)
 	{
 		lock (Gate)
 		{

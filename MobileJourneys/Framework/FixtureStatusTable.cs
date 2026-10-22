@@ -121,6 +121,23 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 	public void Preparing(PlatformConfig config, int worker, string journeyName) =>
 		SetCurrent(config, worker, $"{journeyName} — launching the app…");
 
+	/// <summary>Shows every worker of a fixture as waiting on a device that is being started again.</summary>
+	/// <param name="config">The fixture.</param>
+	/// <param name="reason">Why the device is started again.</param>
+	public void StartRetrying(PlatformConfig config, string reason)
+	{
+		lock (gate)
+		{
+			if (rows.TryGetValue(config, out var row))
+			{
+				foreach (var worker in row.Current.Keys.ToList())
+				{
+					row.Current[worker] = $"retrying — {reason}";
+				}
+			}
+		}
+	}
+
 	/// <summary>Shows a worker as trying its session again.</summary>
 	/// <param name="config">The fixture the worker belongs to.</param>
 	/// <param name="worker">The worker's 1-based index.</param>

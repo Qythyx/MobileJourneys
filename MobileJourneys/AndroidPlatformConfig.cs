@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using MobileJourneys.Framework;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Appium;
 using OpenQA.Selenium.Appium.Android;
@@ -454,13 +455,29 @@ public sealed record AndroidPlatformConfig(
 	/// background priority, where its virtual CPUs share the few efficiency cores, and the app then
 	/// takes longer to start than a journey waits. An instance found running with a window is stopped
 	/// for the same reason.
+	/// <para/>
+	/// An instance started here that exits before every instance has attached is replaced once by
+	/// another, and the retry is reported; if the replacement exits too, starting fails.
 	/// </remarks>
-	internal override IReadOnlyList<string> StartDevices(TimeSpan timeout, CancellationToken cancellationToken)
+	internal override IReadOnlyList<string> StartDevices(
+		TimeSpan timeout,
+		Action<string> reportRetry,
+		RunLog log,
+		CancellationToken cancellationToken
+	)
 	{
 		var deadline = DateTime.UtcNow + timeout;
 		var running = RunningInstances();
-		if (running.Any(MustRestart))
+		var restartReasons = running
+			.Select(instance => ReasonToRestart(instance) is { } reason ? $"pid {PidOf(instance)}: {reason}" : null)
+			.OfType<string>()
+			.ToList();
+		if (restartReasons.Count > 0)
 		{
+			log.Write(
+				this,
+				$"stopping all {running.Count} running instances of {AvdName}: {string.Join("; ", restartReasons)}"
+			);
 			foreach (var instance in running)
 			{
 				Kill(PidOf(instance));
@@ -480,10 +497,19 @@ public sealed record AndroidPlatformConfig(
 
 			running = [];
 		}
-
-		for (var instance = running.Count; instance < Instances; instance++)
+		else if (running.Count > 0)
 		{
-			ProcessRunner.Start(EmulatorPath, EmulatorArguments(Instances > 1));
+			log.Write(
+				this,
+				$"keeping the running instances of {AvdName}: pids {string.Join(", ", running.Select(PidOf))}"
+			);
+		}
+
+		StartedInstance StartAnother() => StartInstance(EmulatorArguments(RunsReadOnly), log);
+		List<StartedInstance> started = [];
+		while (running.Count + started.Count < Instances)
+		{
+			started.Add(StartAnother());
 		}
 
 		while (true)
@@ -496,11 +522,16 @@ public sealed record AndroidPlatformConfig(
 
 			if (DateTime.UtcNow >= deadline)
 			{
+				log.Write(
+					this,
+					$"attached when the time ran out: {(serials.Count == 0 ? "none" : string.Join(", ", serials))}"
+				);
 				throw new InvalidOperationException(
 					$"only {serials.Count} of {Instances} instances of {AvdName} appeared within {timeout.TotalSeconds}s."
 				);
 			}
 
+			ReplaceExitedInstances(started, pid => UptimeOf(pid) is null, StartAnother, reportRetry, log);
 			KickOfflineDevices();
 			cancellationToken.Sleep(BootPollInterval);
 		}
@@ -514,17 +545,19 @@ public sealed record AndroidPlatformConfig(
 	private static readonly TimeSpan MaxInstanceAge = TimeSpan.FromHours(1);
 
 	/// <summary>
-	/// Whether a running instance cannot be kept for this run: it has been up long enough to have
-	/// slowed, or its age cannot be told, or it runs writable where the fixture wants read-only
-	/// instances, or it runs with a window.
+	/// Says why a running instance cannot be kept for this run: it runs writable where the fixture
+	/// wants read-only instances, or it runs with a window, or its age cannot be told, or it has been
+	/// up longer than <see cref="MaxInstanceAge"/>.
 	/// </summary>
 	/// <param name="instance">The instance, as <see cref="RunningInstances"/> lists it.</param>
-	/// <returns>Whether it has to be restarted.</returns>
-	private bool MustRestart(string instance) =>
-		(Instances > 1 && !instance.Contains(ReadOnlyFlag, StringComparison.Ordinal))
-		|| !instance.Contains(NoWindowFlag, StringComparison.Ordinal)
-		|| UptimeOf(PidOf(instance)) is not { } uptime
-		|| uptime > MaxInstanceAge;
+	/// <returns>Why it has to be restarted, or <c>null</c> when it can be kept.</returns>
+	private string? ReasonToRestart(string instance) =>
+		RunsReadOnly && !instance.Contains(ReadOnlyFlag, StringComparison.Ordinal) ? "it runs writable"
+		: !instance.Contains(NoWindowFlag, StringComparison.Ordinal) ? "it runs with a window"
+		: UptimeOf(PidOf(instance)) is not { } uptime ? "its age cannot be told"
+		: uptime > MaxInstanceAge
+			? $"it has been up for {uptime.TotalHours.ToString("F1", CultureInfo.InvariantCulture)} hours"
+		: null;
 
 	/// <summary>How long a process has been running.</summary>
 	/// <param name="pid">The process.</param>
@@ -563,8 +596,85 @@ public sealed record AndroidPlatformConfig(
 
 	private const string NoWindowFlag = "-no-window";
 
+	/// <summary>
+	/// Whether this fixture's instances run read-only: the emulator lets several instances share an
+	/// AVD only when every one of them does.
+	/// </summary>
+	private bool RunsReadOnly => Instances > 1;
+
+	/// <summary>Builds the arguments that start an instance of this AVD without a window.</summary>
+	/// <param name="readOnly">Whether the instance runs read-only.</param>
+	/// <returns>The emulator's arguments.</returns>
 	private string[] EmulatorArguments(bool readOnly) =>
 		readOnly ? ["-avd", AvdName, NoWindowFlag, ReadOnlyFlag] : ["-avd", AvdName, NoWindowFlag];
+
+	/// <summary>An emulator instance that was started, known by its process and its output file.</summary>
+	/// <param name="Pid">
+	/// The instance's process id. The program at <see cref="EmulatorPath"/> replaces itself with the
+	/// instance rather than starting it as a child, so the process started is the instance.
+	/// </param>
+	/// <param name="OutputPath">The file the instance writes its output to.</param>
+	/// <param name="IsReplacement">Whether it was started in place of an instance that exited.</param>
+	internal sealed record StartedInstance(int Pid, string OutputPath, bool IsReplacement);
+
+	/// <summary>
+	/// Starts an emulator instance whose output goes to a new file under the system's temporary
+	/// directory, and logs its process id, arguments and output file.
+	/// </summary>
+	/// <param name="arguments">The arguments the emulator is started with.</param>
+	/// <param name="log">The run's log.</param>
+	/// <returns>The instance started.</returns>
+	/// <exception cref="InvalidOperationException">
+	/// The instance could not be started in the background, as when its output file's directory
+	/// cannot be created.
+	/// </exception>
+	private StartedInstance StartInstance(IReadOnlyList<string> arguments, RunLog log)
+	{
+		var outputPath = Path.Combine(
+			TempFolders.Emulators,
+			$"{AvdName}-{TempFolders.Stamp(DateTime.Now)}-{Guid.NewGuid():N}.log"
+		);
+		var pid = ProcessRunner.Start(EmulatorPath, arguments, outputPath);
+		log.Write(this, $"started pid {pid}: emulator {string.Join(' ', arguments)}\noutput: {outputPath}");
+		return new StartedInstance(pid, outputPath, false);
+	}
+
+	/// <summary>
+	/// Starts an instance in place of each started one that has exited, and fails when the one that
+	/// exited was itself started in place of another.
+	/// </summary>
+	/// <param name="started">The instances started; an exited one is replaced in the list.</param>
+	/// <param name="hasExited">Whether the process with a given id has exited.</param>
+	/// <param name="startInstance">Starts one more instance.</param>
+	/// <param name="reportRetry">Told, ready to print, why each replacement is started.</param>
+	/// <param name="log">The run's log, told each instance that exited and where its output is.</param>
+	/// <exception cref="InvalidOperationException">An instance started in place of another has exited too.</exception>
+	internal void ReplaceExitedInstances(
+		List<StartedInstance> started,
+		Func<int, bool> hasExited,
+		Func<StartedInstance> startInstance,
+		Action<string> reportRetry,
+		RunLog log
+	)
+	{
+		for (var index = 0; index < started.Count; index++)
+		{
+			var instance = started[index];
+			if (hasExited(instance.Pid))
+			{
+				log.Write(this, $"pid {instance.Pid} exited while booting\noutput: {instance.OutputPath}");
+				if (instance.IsReplacement)
+				{
+					throw new InvalidOperationException(
+						$"an instance of {AvdName} exited while booting, and so did the one started in its place."
+					);
+				}
+
+				reportRetry($"an instance of {AvdName} exited while booting, so another is started in its place");
+				started[index] = startInstance() with { IsReplacement = true };
+			}
+		}
+	}
 
 	internal override bool CanRestartDevice => true;
 
@@ -576,7 +686,7 @@ public sealed record AndroidPlatformConfig(
 	/// on that same port so the serial holds. It comes back read-only exactly when it ran read-only,
 	/// since the emulator refuses to mix the two among one AVD's instances.
 	/// </remarks>
-	internal override bool RestartDevice(string deviceId, TimeSpan timeout)
+	internal override bool RestartDevice(string deviceId, TimeSpan timeout, RunLog log)
 	{
 		var deadline = DateTime.UtcNow + timeout;
 		var consolePort = deviceId[EmulatorSerialPrefix.Length..];
@@ -586,24 +696,38 @@ public sealed record AndroidPlatformConfig(
 			is not { Status: ProcessRunner.ShellResultStatus.Completed } listener
 		)
 		{
+			log.Write(this, $"not restarting {deviceId}: lsof could not say which process listens on its port");
 			return false;
 		}
 
-		var readOnly = Instances > 1;
+		var readOnly = RunsReadOnly;
 		var pid = listener.Output.Trim();
-		if (pid.Length > 0)
+		if (pid.Length == 0)
+		{
+			log.Write(this, $"restarting {deviceId}: nothing listens on its port, so only starting it");
+		}
+		else
 		{
 			if (InstanceListeningOn(pid, RunningInstances()) is not { } instance)
 			{
+				log.Write(
+					this,
+					$"not restarting {deviceId}: its port is held by {(pid.Contains('\n', StringComparison.Ordinal) ? "pids" : "pid")} {pid.ReplaceLineEndings(", ")}, which is not one instance of {AvdName}"
+				);
 				return false;
 			}
 
+			log.Write(this, $"restarting {deviceId}: killing pid {PidOf(instance)}");
 			readOnly = instance.Contains(ReadOnlyFlag, StringComparison.Ordinal);
 			Kill(PidOf(instance));
 			while (InstanceListeningOn(pid, RunningInstances()) is not null)
 			{
 				if (DateTime.UtcNow >= deadline)
 				{
+					log.Write(
+						this,
+						$"killed {deviceId} (pid {PidOf(instance)}), but it did not stop within {timeout.TotalSeconds}s"
+					);
 					return false;
 				}
 
@@ -613,8 +737,16 @@ public sealed record AndroidPlatformConfig(
 			}
 		}
 
-		ProcessRunner.Start(EmulatorPath, [.. EmulatorArguments(readOnly), "-port", consolePort]);
-		return true;
+		try
+		{
+			_ = StartInstance([.. EmulatorArguments(readOnly), "-port", consolePort], log);
+			return true;
+		}
+		catch (InvalidOperationException ex)
+		{
+			log.Write(this, $"could not start {deviceId} again: {ex.Message}");
+			return false;
+		}
 	}
 
 	/// <summary>

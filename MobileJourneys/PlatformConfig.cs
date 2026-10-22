@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using MobileJourneys.Framework;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Appium;
 using SixLabors.ImageSharp;
@@ -176,11 +177,18 @@ public abstract record PlatformConfig(
 	/// never starts one of its own.
 	/// </summary>
 	/// <param name="timeout">How long to wait for a started device to become addressable.</param>
+	/// <param name="reportRetry">Told why one of the devices is being started again, ready to print.</param>
+	/// <param name="log">The run's log, told how each device was brought up.</param>
 	/// <param name="cancellationToken">Cancelled when the reader interrupts the run.</param>
 	/// <returns>One device id per instance, in worker order.</returns>
 	/// <exception cref="InvalidOperationException">A device could not be found, created, or started.</exception>
 	/// <exception cref="OperationCanceledException">The run was interrupted.</exception>
-	internal abstract IReadOnlyList<string> StartDevices(TimeSpan timeout, CancellationToken cancellationToken);
+	internal abstract IReadOnlyList<string> StartDevices(
+		TimeSpan timeout,
+		Action<string> reportRetry,
+		RunLog log,
+		CancellationToken cancellationToken
+	);
 
 	/// <summary>
 	/// Blocks until a device is far enough through boot that a session can be started against it,
@@ -213,16 +221,18 @@ public abstract record PlatformConfig(
 
 	/// <summary>
 	/// Replaces a running device with a fresh boot of the same one, under the same device id. The
-	/// device may be mid-boot on return; <see cref="WaitUntilDeviceIsReady"/> waits it out. Once the
-	/// old device is gone the new one is always started, so a restart never leaves a device dead.
+	/// device may be mid-boot on return; <see cref="WaitUntilDeviceIsReady"/> waits it out.
 	/// </summary>
 	/// <param name="deviceId">The device to restart.</param>
 	/// <param name="timeout">How long to wait for the old device to go.</param>
+	/// <param name="log">The run's log, told what the restart did, or why it was not done.</param>
 	/// <returns>
-	/// Whether a fresh boot was started. <c>false</c> where the platform cannot restart a device, or
-	/// could not tell which running device to stop.
+	/// Whether a fresh boot was started: <c>false</c> when the platform cannot restart a device, when
+	/// it could not tell which running device to stop, when the old device did not go within
+	/// <paramref name="timeout"/>, or when the fresh boot could not be launched, in which case the old
+	/// device is already gone.
 	/// </returns>
-	internal virtual bool RestartDevice(string deviceId, TimeSpan timeout) => false;
+	internal virtual bool RestartDevice(string deviceId, TimeSpan timeout, RunLog log) => false;
 
 	/// <summary>
 	/// Whether <see cref="RestartDevice"/> does anything on this platform. Announcing a restart that

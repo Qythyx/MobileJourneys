@@ -8,15 +8,16 @@ namespace MobileJourneys.Framework;
 /// Collects what a run produced and renders it. Subclasses differ only in where progress goes —
 /// <see cref="ConsoleReporter"/> writes a line per step, <see cref="LiveStatusReporter"/> redraws a
 /// per-fixture table in place, and <see cref="WebReporter"/> POSTs it to the process that launched
-/// the run. The tally, the failure recording, and the end-of-run verdict are the same either way
-/// and live here.
+/// the run. The tally, the failure recording, the end-of-run verdict and the writing of each event
+/// to the <see cref="RunLog"/> are the same either way and live here.
 /// </summary>
 /// <remarks>
 /// The platform fixtures run concurrently and report from different threads, so every write takes
 /// <see cref="Gate"/> — a line assembled from several coloured parts would otherwise interleave
 /// with another fixture's.
 /// </remarks>
-internal abstract class RunReporter
+/// <param name="log">The run's log, which each reported event is also written to.</param>
+internal abstract class RunReporter(RunLog log)
 {
 	/// <summary>Serializes console writes and the shared tally across the fixture threads.</summary>
 	protected static readonly Lock Gate = new();
@@ -52,17 +53,27 @@ internal abstract class RunReporter
 
 	private bool interrupted;
 
-	/// <summary>Prints the header naming the suite and how much of it is about to run.</summary>
+	/// <summary>Whether a fault no journey produced cut the run short.</summary>
+	private bool faulted;
+
+	/// <summary>The run's log, for the details no event carries.</summary>
+	public RunLog Log { get; } = log;
+
+	/// <summary>
+	/// Prints the header naming the suite, how much of it is about to run, and where the run log is.
+	/// </summary>
 	/// <param name="displayName">The suite's display name.</param>
 	/// <param name="selected">How many journeys were selected.</param>
 	/// <param name="total">How many journeys exist across all fixtures.</param>
-	public static void Header(string displayName, int selected, int total)
+	/// <param name="runLogPath">The run log's file.</param>
+	public static void Header(string displayName, int selected, int total, string runLogPath)
 	{
 		var scope = selected == total ? $"{total} journeys" : $"{selected} of {total} journeys";
 		AnsiConsole.WriteLine();
 		AnsiConsole.MarkupLine(
 			$"{Markup.Escape(displayName)} — {scope} [dim](MobileJourneys {Markup.Escape(TestAssembly.FrameworkVersion)})[/]"
 		);
+		AnsiConsole.MarkupLine($"[dim]Run log: {Markup.Escape(runLogPath)}[/]");
 		AnsiConsole.WriteLine();
 	}
 
@@ -76,13 +87,20 @@ internal abstract class RunReporter
 		}
 	}
 
-	/// <summary>Prints a fault that no journey produced, and which the run's verdict has to account for.</summary>
-	/// <param name="text">What went wrong, ready to print.</param>
-	public static void Fault(string text)
+	/// <summary>
+	/// Reports an exception no journey produced, which cut the run short: <see cref="Summarize"/> then
+	/// fails the run whatever the finished journeys found, unless the reader interrupted it.
+	/// </summary>
+	/// <param name="fault">The exception.</param>
+	public void Fault(Exception fault)
 	{
+		Log.Write($"the run was cut short:\n{fault}");
 		lock (Gate)
 		{
-			AnsiConsole.MarkupLine($"[red]FAULT[/] {Markup.Escape(text)}");
+			faulted = true;
+			AnsiConsole.MarkupLine(
+				$"[red]FAULT[/] {Markup.Escape($"The run was cut short by {fault.GetType().Name}: {fault.Message}")}"
+			);
 		}
 	}
 
@@ -107,7 +125,36 @@ internal abstract class RunReporter
 	/// <param name="stepName">The step's bare name, without the number <see cref="TestStep.StepName"/> carries.</param>
 	/// <param name="passed">Whether the step's screenshot matched its baseline.</param>
 	/// <param name="detail">What went wrong, or <c>null</c> when the step passed.</param>
-	public abstract void StepCompleted(
+	/// <param name="error">What the step threw, or <c>null</c> when it threw nothing.</param>
+	public void StepCompleted(
+		TestStep step,
+		int worker,
+		int stepNumber,
+		int totalSteps,
+		string stepName,
+		bool passed,
+		string? detail,
+		Exception? error
+	)
+	{
+		Log.Write(
+			step.Config,
+			worker,
+			$"{step.JourneyName} step {stepNumber}/{totalSteps} {stepName}: {(passed ? "passed" : $"failed — {detail}")}"
+				+ (error is null ? string.Empty : $"\n{error}")
+		);
+		ReportStepCompleted(step, worker, stepNumber, totalSteps, stepName, passed, detail);
+	}
+
+	/// <summary>Renders a step that has finished.</summary>
+	/// <param name="step">Which screenshot the step produced.</param>
+	/// <param name="worker">Which of the fixture's workers ran it, 1-based.</param>
+	/// <param name="stepNumber">The step's 1-based position.</param>
+	/// <param name="totalSteps">How many steps the journey has.</param>
+	/// <param name="stepName">The step's bare name.</param>
+	/// <param name="passed">Whether the step's screenshot matched its baseline.</param>
+	/// <param name="detail">What went wrong, or <c>null</c> when the step passed.</param>
+	protected abstract void ReportStepCompleted(
 		TestStep step,
 		int worker,
 		int stepNumber,
@@ -121,6 +168,11 @@ internal abstract class RunReporter
 	/// <param name="result">The journey's outcome.</param>
 	public void JourneyCompleted(JourneyResult result)
 	{
+		var seconds = result.Duration.TotalSeconds.ToString("F1", CultureInfo.InvariantCulture);
+		Log.Write(
+			result.TestCase.Config,
+			$"{result.TestCase.Journey.Name} {(result.Passed ? "passed" : "failed")} in {seconds}s"
+		);
 		if (!result.Passed)
 		{
 			FailureSummary.RecordFailure(result.TestCase);
@@ -148,6 +200,7 @@ internal abstract class RunReporter
 	/// <param name="reason">Why it could not run, ready to print.</param>
 	public void FixtureSkipped(PlatformConfig config, int journeyCount, string reason)
 	{
+		Log.Write(config, $"skipped {journeyCount} journeys: {reason}");
 		lock (Gate)
 		{
 			skippedFixtures++;
@@ -169,7 +222,16 @@ internal abstract class RunReporter
 	/// </summary>
 	/// <param name="config">The fixture the worker belongs to.</param>
 	/// <param name="worker">The worker whose device came up, 1-based.</param>
-	public virtual void FixtureReady(PlatformConfig config, int worker) { }
+	public void FixtureReady(PlatformConfig config, int worker)
+	{
+		Log.Write(config, worker, "ready to run journeys");
+		ReportFixtureReady(config, worker);
+	}
+
+	/// <summary>Renders a worker whose device is up.</summary>
+	/// <param name="config">The fixture the worker belongs to.</param>
+	/// <param name="worker">The worker whose device came up, 1-based.</param>
+	protected virtual void ReportFixtureReady(PlatformConfig config, int worker) { }
 
 	/// <summary>
 	/// Notes that a worker's session start failed and is being tried again. A retry waits out the
@@ -178,7 +240,34 @@ internal abstract class RunReporter
 	/// <param name="config">The fixture the worker belongs to.</param>
 	/// <param name="worker">The worker being retried, 1-based.</param>
 	/// <param name="reason">Why the attempt failed, ready to print.</param>
-	public virtual void FixtureRetrying(PlatformConfig config, int worker, string reason) { }
+	public void FixtureRetrying(PlatformConfig config, int worker, string reason)
+	{
+		Log.Write(config, worker, $"retrying: {reason}");
+		ReportFixtureRetrying(config, worker, reason);
+	}
+
+	/// <summary>
+	/// Notes that one of a fixture's devices is being started again while the fixture is still
+	/// bringing its devices up, before any worker has been given one.
+	/// </summary>
+	/// <param name="config">The fixture.</param>
+	/// <param name="reason">Why the device is started again, ready to print.</param>
+	public void FixtureStartRetrying(PlatformConfig config, string reason)
+	{
+		Log.Write(config, $"retrying: {reason}");
+		ReportFixtureStartRetrying(config, reason);
+	}
+
+	/// <summary>Renders a fixture starting one of its devices again.</summary>
+	/// <param name="config">The fixture.</param>
+	/// <param name="reason">Why the device is started again, ready to print.</param>
+	protected virtual void ReportFixtureStartRetrying(PlatformConfig config, string reason) { }
+
+	/// <summary>Renders a worker being retried.</summary>
+	/// <param name="config">The fixture the worker belongs to.</param>
+	/// <param name="worker">The worker being retried, 1-based.</param>
+	/// <param name="reason">Why the attempt failed, ready to print.</param>
+	protected virtual void ReportFixtureRetrying(PlatformConfig config, int worker, string reason) { }
 
 	/// <summary>
 	/// Notes that a worker has taken a journey and is setting its device and the app up for it.
@@ -189,7 +278,17 @@ internal abstract class RunReporter
 	/// <param name="config">The fixture the worker belongs to.</param>
 	/// <param name="worker">The worker that took the journey, 1-based.</param>
 	/// <param name="journeyName">The journey being prepared.</param>
-	public virtual void JourneyStarting(PlatformConfig config, int worker, string journeyName) { }
+	public void JourneyStarting(PlatformConfig config, int worker, string journeyName)
+	{
+		Log.Write(config, worker, $"{journeyName} starting");
+		ReportJourneyStarting(config, worker, journeyName);
+	}
+
+	/// <summary>Renders a worker setting a journey up.</summary>
+	/// <param name="config">The fixture the worker belongs to.</param>
+	/// <param name="worker">The worker that took the journey, 1-based.</param>
+	/// <param name="journeyName">The journey being prepared.</param>
+	protected virtual void ReportJourneyStarting(PlatformConfig config, int worker, string journeyName) { }
 
 	/// <summary>
 	/// Notes that one of a fixture's workers is gone for the rest of the run — its device would not
@@ -199,7 +298,17 @@ internal abstract class RunReporter
 	/// <param name="config">The fixture the worker belonged to.</param>
 	/// <param name="worker">The worker's 1-based index.</param>
 	/// <param name="reason">Why it is gone, ready to print.</param>
-	public virtual void WorkerLost(PlatformConfig config, int worker, string reason) { }
+	public void WorkerLost(PlatformConfig config, int worker, string reason)
+	{
+		Log.Write(config, worker, $"lost: {reason}");
+		ReportWorkerLost(config, worker, reason);
+	}
+
+	/// <summary>Renders a worker that is gone for the rest of the run.</summary>
+	/// <param name="config">The fixture the worker belonged to.</param>
+	/// <param name="worker">The worker's 1-based index.</param>
+	/// <param name="reason">Why it is gone, ready to print.</param>
+	protected virtual void ReportWorkerLost(PlatformConfig config, int worker, string reason) { }
 
 	/// <summary>
 	/// Takes a fixture's timing record once its last worker has finished, for the end-of-run report.
@@ -221,6 +330,7 @@ internal abstract class RunReporter
 	/// </summary>
 	public void Interrupted()
 	{
+		Log.Write("interrupted by the reader");
 		lock (Gate)
 		{
 			interrupted = true;
@@ -243,12 +353,13 @@ internal abstract class RunReporter
 
 	/// <summary>
 	/// Prints the end-of-run summary: each failure's explanation, then the banner indexing the
-	/// failed journeys by fixture, then how long each fixture spent waiting on its devices, then the
-	/// verdict as the last line.
+	/// failed journeys by fixture, then how long each fixture spent waiting on its devices, then where
+	/// the run log is, then the verdict as the last line.
 	/// </summary>
 	/// <returns>
-	/// The process exit code — 0 when everything passed, <see cref="InterruptedExitCode"/> when the
-	/// reader interrupted the run.
+	/// The process exit code — <see cref="InterruptedExitCode"/> when the reader interrupted the run,
+	/// else 0 when everything passed, and 1 when a journey failed, a fixture was abandoned or a fault
+	/// cut the run short.
 	/// </returns>
 	public int Summarize()
 	{
@@ -262,14 +373,21 @@ internal abstract class RunReporter
 			: skippedFixtures == 1 ? " 1 fixture was abandoned."
 			: $" {skippedFixtures} fixtures were abandoned.";
 		AnsiConsole.MarkupLine(
+			$"[dim]Run log: {Markup.Escape(Log.FilePath)}[/]"
+				+ (Log.Failure is { } failure ? $" [yellow]({Markup.Escape(failure)})[/]" : string.Empty)
+		);
+		AnsiConsole.MarkupLine(
 			interrupted ? $"[yellow]Interrupted after {results.Count} {journeys}, {failed.Count} of them failed.[/]"
+			: faulted
+				? $"[red]The run was cut short after {results.Count} {journeys}, {failed.Count} of them failed.[/]"
 			: failed.Count == 0 && skippedFixtures == 0 ? $"[green]All {results.Count} {journeys} passed.[/]"
 			: $"[red]{failed.Count} of {results.Count} {journeys} failed.{abandoned}[/]"
 		);
 		var exitCode =
 			interrupted ? InterruptedExitCode
-			: failed.Count == 0 && skippedFixtures == 0 ? 0
+			: !faulted && failed.Count == 0 && skippedFixtures == 0 ? 0
 			: 1;
+		Log.Write($"finished with exit code {exitCode}");
 		ReportRunFinished(exitCode);
 		return exitCode;
 	}
@@ -365,9 +483,7 @@ internal abstract class RunReporter
 
 		AnsiConsole.WriteLine();
 		AnsiConsole.Write(table);
-		AnsiConsole.MarkupLine(
-			$"[dim]Run time {Duration(runStopwatch.Elapsed)}.[/]"
-		);
+		AnsiConsole.MarkupLine($"[dim]Run time {Duration(runStopwatch.Elapsed)}.[/]");
 		AnsiConsole.WriteLine();
 	}
 

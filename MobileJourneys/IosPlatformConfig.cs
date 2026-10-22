@@ -1,4 +1,5 @@
 using System.Text.Json;
+using MobileJourneys.Framework;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Appium;
 using OpenQA.Selenium.Appium.iOS;
@@ -284,7 +285,12 @@ public sealed record IosPlatformConfig(
 	/// Booting is left to the automation server, which boots a shutdown simulator it is given the
 	/// UDID of. Only the simulators' existence is ensured here.
 	/// </remarks>
-	internal override IReadOnlyList<string> StartDevices(TimeSpan timeout, CancellationToken cancellationToken)
+	internal override IReadOnlyList<string> StartDevices(
+		TimeSpan timeout,
+		Action<string> reportRetry,
+		RunLog log,
+		CancellationToken cancellationToken
+	)
 	{
 		var listing = ProcessRunner.RunWithResult("xcrun", ["simctl", "list", "devices", "available", "-j"]);
 		if (listing is not { ExitCode: 0 })
@@ -304,11 +310,16 @@ public sealed record IosPlatformConfig(
 		for (var worker = 2; worker <= Instances; worker++)
 		{
 			var name = WorkerSimulatorName(DeviceName, worker);
-			udids.Add(
-				runtime.ByName.TryGetValue(name, out var existing)
-					? existing.Udid
-					: CreateSimulator(name, baseDevice.DeviceTypeId, runtime.Id)
-			);
+			if (runtime.ByName.TryGetValue(name, out var existing))
+			{
+				udids.Add(existing.Udid);
+			}
+			else
+			{
+				var created = CreateSimulator(name, baseDevice.DeviceTypeId, runtime.Id);
+				log.Write(this, $"created simulator '{name}': {created}");
+				udids.Add(created);
+			}
 		}
 
 		return udids;

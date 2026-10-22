@@ -5,7 +5,8 @@ namespace MobileJourneys.Framework;
 /// command is run interactively.
 /// </summary>
 /// <param name="selected">Every journey this run intends to execute, which sets the per-fixture totals.</param>
-internal sealed class LiveStatusReporter(IReadOnlyList<TestCase> selected) : RunReporter
+/// <param name="log">The run's log.</param>
+internal sealed class LiveStatusReporter(IReadOnlyList<TestCase> selected, RunLog log) : RunReporter(log)
 {
 	private readonly FixtureStatusTable table = new(
 		selected.GroupBy(testCase => testCase.Config).Select(group => (group.Key, group.Count()))
@@ -15,7 +16,7 @@ internal sealed class LiveStatusReporter(IReadOnlyList<TestCase> selected) : Run
 	public override Task RunAsync(Func<Task> body) => table.RunAsync(body);
 
 	/// <inheritdoc/>
-	public override void StepCompleted(
+	protected override void ReportStepCompleted(
 		TestStep step,
 		int worker,
 		int stepNumber,
@@ -30,18 +31,22 @@ internal sealed class LiveStatusReporter(IReadOnlyList<TestCase> selected) : Run
 		table.JourneyDone(result.TestCase.Config, result.Passed);
 
 	/// <inheritdoc/>
-	public override void FixtureReady(PlatformConfig config, int worker) => table.Ready(config, worker);
+	protected override void ReportFixtureReady(PlatformConfig config, int worker) => table.Ready(config, worker);
 
 	/// <inheritdoc/>
-	public override void FixtureRetrying(PlatformConfig config, int worker, string reason) =>
+	protected override void ReportFixtureRetrying(PlatformConfig config, int worker, string reason) =>
 		table.Retrying(config, worker, reason);
 
 	/// <inheritdoc/>
-	public override void JourneyStarting(PlatformConfig config, int worker, string journeyName) =>
+	protected override void ReportFixtureStartRetrying(PlatformConfig config, string reason) =>
+		table.StartRetrying(config, reason);
+
+	/// <inheritdoc/>
+	protected override void ReportJourneyStarting(PlatformConfig config, int worker, string journeyName) =>
 		table.Preparing(config, worker, journeyName);
 
 	/// <inheritdoc/>
-	public override void WorkerLost(PlatformConfig config, int worker, string reason) =>
+	protected override void ReportWorkerLost(PlatformConfig config, int worker, string reason) =>
 		table.Lost(config, worker, reason);
 
 	/// <inheritdoc/>

@@ -14,11 +14,46 @@ public sealed class RunReporterTests
 	[Test]
 	public void InterruptedRunExitsWithTheInterruptedCode()
 	{
-		var reporter = new ConsoleReporter();
+		using var log = new TestRunLog();
+		var reporter = new ConsoleReporter(log.Log);
 
 		reporter.Interrupted();
 
 		_ = reporter.Summarize().Should().Be(RunReporter.InterruptedExitCode);
+	}
+
+	[Test]
+	public void RunCutShortByAFaultFailsWithNoJourneyFailed()
+	{
+		using var log = new TestRunLog();
+		var reporter = new ConsoleReporter(log.Log);
+
+		reporter.Fault(new InvalidOperationException("the server went away"));
+
+		_ = reporter.Summarize().Should().Be(1);
+	}
+
+	[Test]
+	public void RunInterruptedAfterAFaultExitsWithTheInterruptedCode()
+	{
+		using var log = new TestRunLog();
+		var reporter = new ConsoleReporter(log.Log);
+		reporter.Fault(new InvalidOperationException("the server went away"));
+
+		reporter.Interrupted();
+
+		_ = reporter.Summarize().Should().Be(RunReporter.InterruptedExitCode);
+	}
+
+	[Test]
+	public void AnEventIsWrittenToTheRunLog()
+	{
+		using var log = new TestRunLog();
+		var reporter = new ConsoleReporter(log.Log);
+
+		reporter.FixtureRetrying(TestFixtures.Android, 1, "its device stopped responding");
+
+		_ = log.Text.Should().Contain("retrying: its device stopped responding");
 	}
 
 	[Test]

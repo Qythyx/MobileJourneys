@@ -15,7 +15,8 @@ namespace MobileJourneys.Framework;
 /// </remarks>
 /// <param name="url">Where to POST each event.</param>
 /// <param name="selected">Every journey this run intends to execute, which sets the per-fixture totals.</param>
-internal sealed class WebReporter(string url, IReadOnlyList<TestCase> selected) : RunReporter
+/// <param name="log">The run's log.</param>
+internal sealed class WebReporter(string url, IReadOnlyList<TestCase> selected, RunLog log) : RunReporter(log)
 {
 	private const int PostTimeoutSeconds = 10;
 
@@ -32,6 +33,7 @@ internal sealed class WebReporter(string url, IReadOnlyList<TestCase> selected) 
 			new
 			{
 				type = "run-started",
+				log = Log.FilePath,
 				fixtures = selected
 					.GroupBy(testCase => testCase.Config)
 					.Select(group => new
@@ -46,7 +48,7 @@ internal sealed class WebReporter(string url, IReadOnlyList<TestCase> selected) 
 	}
 
 	/// <inheritdoc/>
-	public override void FixtureReady(PlatformConfig config, int worker) =>
+	protected override void ReportFixtureReady(PlatformConfig config, int worker) =>
 		Post(
 			new
 			{
@@ -57,7 +59,7 @@ internal sealed class WebReporter(string url, IReadOnlyList<TestCase> selected) 
 		);
 
 	/// <inheritdoc/>
-	public override void FixtureRetrying(PlatformConfig config, int worker, string reason) =>
+	protected override void ReportFixtureRetrying(PlatformConfig config, int worker, string reason) =>
 		Post(
 			new
 			{
@@ -69,7 +71,18 @@ internal sealed class WebReporter(string url, IReadOnlyList<TestCase> selected) 
 		);
 
 	/// <inheritdoc/>
-	public override void JourneyStarting(PlatformConfig config, int worker, string journeyName) =>
+	protected override void ReportFixtureStartRetrying(PlatformConfig config, string reason) =>
+		Post(
+			new
+			{
+				type = "fixture-start-retrying",
+				config = config.DisplayName,
+				reason,
+			}
+		);
+
+	/// <inheritdoc/>
+	protected override void ReportJourneyStarting(PlatformConfig config, int worker, string journeyName) =>
 		Post(
 			new
 			{
@@ -81,7 +94,7 @@ internal sealed class WebReporter(string url, IReadOnlyList<TestCase> selected) 
 		);
 
 	/// <inheritdoc/>
-	public override void WorkerLost(PlatformConfig config, int worker, string reason) =>
+	protected override void ReportWorkerLost(PlatformConfig config, int worker, string reason) =>
 		Post(
 			new
 			{
@@ -105,7 +118,7 @@ internal sealed class WebReporter(string url, IReadOnlyList<TestCase> selected) 
 		);
 
 	/// <inheritdoc/>
-	public override void StepCompleted(
+	protected override void ReportStepCompleted(
 		TestStep step,
 		int worker,
 		int stepNumber,

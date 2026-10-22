@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 
 namespace MobileJourneys;
 
@@ -56,7 +57,8 @@ internal static class ProcessRunner
 	}
 
 	/// <summary>
-	/// Starts a process expected to outlive this call, and returns as soon as it is running.
+	/// Starts a program in the background, where it may outlive this call, and returns without waiting
+	/// for it to do anything.
 	/// </summary>
 	/// <remarks>
 	/// The child is put in a process group of its own, through a shell with job control on, so
@@ -65,26 +67,50 @@ internal static class ProcessRunner
 	/// it. Ignoring the signals instead does not hold, because the emulator installs handlers of
 	/// its own. The shell is bash because zsh cannot turn job control on without a terminal.
 	/// <para/>
-	/// Its output goes to <c>/dev/null</c> rather than to a pipe, because a pipe would have to be
-	/// drained for as long as the child lives — and once this process stopped reading, the child
-	/// would take a SIGPIPE on its next write. Inheriting the console instead is no good either:
-	/// the caller's display owns it.
+	/// Its output goes to a file rather than to a pipe, because a pipe would have to be drained for
+	/// as long as the child lives — and once this process stopped reading, the child would take a
+	/// SIGPIPE on its next write. Inheriting the console instead is no good either: the caller's
+	/// display owns it.
 	/// </remarks>
 	/// <param name="fileName">The program to run.</param>
 	/// <param name="arguments">Its arguments, passed through without shell interpretation.</param>
-	public static void Start(string fileName, IReadOnlyList<string> arguments)
+	/// <param name="outputPath">
+	/// The file its standard output and error are written to, replaced if it exists. Its directory is
+	/// created when missing.
+	/// </param>
+	/// <returns>
+	/// The program's process id. The process may already have exited, as when the program does not
+	/// exist; the reason is then in the output file, unless the file itself could not be opened.
+	/// </returns>
+	/// <exception cref="InvalidOperationException">
+	/// The program could not be started in the background, as when the output file's directory cannot
+	/// be created.
+	/// </exception>
+	public static int Start(string fileName, IReadOnlyList<string> arguments, string outputPath)
 	{
-		var psi = new ProcessStartInfo { FileName = "/bin/bash", UseShellExecute = false };
-		psi.ArgumentList.Add("-c");
-		psi.ArgumentList.Add("set -m; \"$0\" \"$@\" </dev/null >/dev/null 2>&1 &");
-		psi.ArgumentList.Add(fileName);
-		foreach (var arg in arguments)
-		{
-			psi.ArgumentList.Add(arg);
-		}
-
-		using var process = new Process { StartInfo = psi };
-		_ = process.Start();
+		var result = RunWithResult(
+			"/bin/bash",
+			[
+				"-c",
+				"set -m; output=$1; shift; mkdir -p \"$(dirname \"$output\")\" || exit; \"$@\" </dev/null >\"$output\" 2>&1 & echo $!",
+				"bash",
+				outputPath,
+				fileName,
+				.. arguments,
+			]
+		);
+		return
+			result is { ExitCode: 0 }
+			&& int.TryParse(result.Output.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var pid)
+			? pid
+			: throw new InvalidOperationException(
+				$"'{Describe(fileName, arguments)}' could not be started in the background with its output in {outputPath}: "
+					+ (
+						result?.Error.Trim() is { Length: > 0 } error
+							? error
+							: $"the shell printed '{result?.Output.Trim()}'"
+					)
+			);
 	}
 
 	/// <summary>

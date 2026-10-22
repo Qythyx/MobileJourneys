@@ -10,19 +10,13 @@ namespace MobileJourneys.Tests;
 [TestFixture]
 public sealed class AndroidPlatformConfigTests
 {
-	private static readonly AndroidPlatformConfig Config = new(
-		"15",
-		"Pixel",
-		"avd",
-		IsLightTheme: true,
-		"com.example.app",
-		"/path/app.apk",
-		null,
-		200,
-		550,
-		3 * 10,
-		0.005
-	);
+	private static readonly AndroidPlatformConfig.StartedInstance FirstInstance = new(101, "/logs/first.log", false);
+
+	private static readonly AndroidPlatformConfig.StartedInstance SecondInstance = new(102, "/logs/second.log", false);
+
+	private static readonly AndroidPlatformConfig.StartedInstance ThirdInstance = new(104, "/logs/third.log", false);
+
+	private static readonly AndroidPlatformConfig.StartedInstance Replacement = new(103, "/logs/replacement.log", true);
 
 	[TestCase(SystemFontSize.ExtraSmall, 0.85)]
 	[TestCase(SystemFontSize.Small, 0.85)]
@@ -56,7 +50,7 @@ public sealed class AndroidPlatformConfigTests
 		Environment.SetEnvironmentVariable("ANDROID_HOME", tempHome);
 		try
 		{
-			Action act = Config.VerifyDependencies;
+			Action act = TestFixtures.Android.VerifyDependencies;
 
 			var ex = act.Should().Throw<InvalidOperationException>().Which;
 			_ = ex.Message.Should().Contain("adb not found at");
@@ -90,17 +84,18 @@ public sealed class AndroidPlatformConfigTests
 		_ = AndroidPlatformConfig.ParseAttachedDevices(output).Should().BeEmpty();
 
 	[Test]
-	public void GetAlertButtonLocatorSimpleLabelProducesValidXPath() => _ = Compile(Config.GetAlertButtonLocator("OK"));
+	public void GetAlertButtonLocatorSimpleLabelProducesValidXPath() =>
+		_ = Compile(TestFixtures.Android.GetAlertButtonLocator("OK"));
 
 	[Test]
 	public void GetAlertButtonLocatorApostropheLabelProducesValidXPath() =>
 		// "Don't" hits the double-quoted-literal branch.
-		_ = Compile(Config.GetAlertButtonLocator("Don't"));
+		_ = Compile(TestFixtures.Android.GetAlertButtonLocator("Don't"));
 
 	[Test]
 	public void GetAlertButtonLocatorBothQuoteLabelProducesValidXPath() =>
 		// Pathological label with both ' and " forces the concat() branch.
-		_ = Compile(Config.GetAlertButtonLocator("a'b\"c"));
+		_ = Compile(TestFixtures.Android.GetAlertButtonLocator("a'b\"c"));
 
 	[TestCase(3, TestName = "Before Android added a colour-space word")]
 	[TestCase(4, TestName = "With the colour-space word")]
@@ -172,6 +167,95 @@ public sealed class AndroidPlatformConfigTests
 		started.WaitForExit();
 
 		_ = FluentActions.Invoking(() => AndroidPlatformConfig.Kill(started.Id)).Should().NotThrow();
+	}
+
+	[Test]
+	public void ReplaceExitedInstancesLeavesARunningReplacementAlone()
+	{
+		using var log = new TestRunLog();
+		List<AndroidPlatformConfig.StartedInstance> started = [Replacement];
+
+		TestFixtures.Android.ReplaceExitedInstances(started, _ => false, () => SecondInstance, _ => { }, log.Log);
+
+		_ = started.Should().Equal(Replacement);
+	}
+
+	[Test]
+	public void ReplaceExitedInstancesStartsAnotherInPlaceOfOneThatExited()
+	{
+		using var log = new TestRunLog();
+		List<AndroidPlatformConfig.StartedInstance> started = [FirstInstance];
+
+		TestFixtures.Android.ReplaceExitedInstances(
+			started,
+			pid => pid == FirstInstance.Pid,
+			() => SecondInstance,
+			_ => { },
+			log.Log
+		);
+
+		_ = started.Should().Equal(SecondInstance with { IsReplacement = true });
+	}
+
+	[Test]
+	public void ReplaceExitedInstancesReportsEachReplacement()
+	{
+		using var log = new TestRunLog();
+		List<AndroidPlatformConfig.StartedInstance> started = [SecondInstance, FirstInstance];
+		var reported = new List<string>();
+
+		TestFixtures.Android.ReplaceExitedInstances(started, _ => true, () => ThirdInstance, reported.Add, log.Log);
+
+		_ = reported.Should().HaveCount(2);
+	}
+
+	[Test]
+	public void ReplaceExitedInstancesLogsTheOutputOfTheInstanceThatExited()
+	{
+		using var log = new TestRunLog();
+		List<AndroidPlatformConfig.StartedInstance> started = [FirstInstance];
+
+		TestFixtures.Android.ReplaceExitedInstances(
+			started,
+			pid => pid == FirstInstance.Pid,
+			() => SecondInstance,
+			_ => { },
+			log.Log
+		);
+
+		_ = log.Text.Should().Contain(FirstInstance.OutputPath);
+	}
+
+	[Test]
+	public void ReplaceExitedInstancesStartsAnotherOnlyInPlaceOfTheOneThatExited()
+	{
+		using var log = new TestRunLog();
+		List<AndroidPlatformConfig.StartedInstance> started = [FirstInstance, SecondInstance];
+
+		TestFixtures.Android.ReplaceExitedInstances(
+			started,
+			pid => pid == FirstInstance.Pid,
+			() => ThirdInstance,
+			_ => { },
+			log.Log
+		);
+
+		_ = started[1].Should().Be(SecondInstance);
+	}
+
+	[Test]
+	public void ReplaceExitedInstancesFailsWhenAReplacementExitsToo()
+	{
+		using var log = new TestRunLog();
+		List<AndroidPlatformConfig.StartedInstance> started = [Replacement];
+
+		_ = FluentActions
+			.Invoking(() =>
+				TestFixtures.Android.ReplaceExitedInstances(started, _ => true, () => SecondInstance, _ => { }, log.Log)
+			)
+			.Should()
+			.Throw<InvalidOperationException>()
+			.WithMessage("*exited while booting, and so did the one started in its place*");
 	}
 
 	/// <summary>Builds what <c>screencap</c> writes for a 2x1 screen.</summary>

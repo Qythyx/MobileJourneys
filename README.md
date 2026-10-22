@@ -178,9 +178,17 @@ a window. macOS drops an emulator whose window is covered to background priority
 CPUs share the Mac's few efficiency cores, and the app then takes longer to start than a journey
 waits — while the Mac as a whole looks far from busy.
 
-A device that cannot be brought up, or whose session dies past its retry budget, drops out and the
-fixture's other devices take its journeys; the fixture is abandoned only when none of its devices
-can host the app.
+An emulator the run starts that exits before all of a fixture's instances are up is replaced once,
+and the run reports the retry; if the replacement exits too, the fixture is abandoned. Each emulator
+the run starts writes its output to a file of its own in `MobileJourneys/emulators/` under the
+system's temporary directory, not in the run's folder; the [run log](#the-run-log) names each one's
+file.
+
+A device that comes up but cannot host the app drops out, and the fixture's other devices take its
+journeys. A device cannot host the app when no session opens on it, when the app crashes on startup
+twice, or when its backend fails to start; one also drops out when its session dies, or the app
+stops responding on it, more often than its retry budget allows. Once its devices are up, the
+fixture is abandoned only when none of them can host the app.
 
 ### 4. Write journeys
 
@@ -375,6 +383,19 @@ At a terminal the runner draws a live table, one row per fixture, and offers eac
 inspection when the run is over. When stdout is redirected, or `NO_COLOR` is set, it writes one
 plain line per step instead and prints the failures in full. That plain output is what CI captures
 and what the viewer shows for a failed rerun, so it carries no ANSI escapes and no hard wrapping.
+
+### The run log
+
+Start with the run log when a run needs explaining. Every run writes `run.log` to a folder of its
+own, `MobileJourneys/runs/<date>-<time>-<process id>/` under the system's temporary directory, and
+the runner prints its path at the start and again above the verdict. It holds the run's whole
+timeline, each entry stamped with the time and the run, fixture or worker it concerns: what was
+selected; each app binary and when it was last written; every emulator kept or stopped, and every
+one started with the file its output goes to; each device id and Appium session; every step and
+journey outcome; and every retry, lost worker and abandoned fixture, with the whole exception or
+crash log the console leaves out. A step's screenshots and crash log are written beside its
+baseline. The Appium server's own log is `appium.log` beside the run log. macOS's nightly cleanup
+deletes files in the temporary directory after three days.
 
 ## Screenshots
 

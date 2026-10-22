@@ -63,6 +63,19 @@ public sealed class FixtureStatusTableTests
 	}
 
 	[Test]
+	public void ADeviceStartedAgainShowsOnEveryWorker()
+	{
+		var table = new FixtureStatusTable([(Paired, 3)]);
+
+		table.StartRetrying(Paired, "an instance exited while booting");
+
+		_ = table
+			.CurrentCell(Paired)
+			.Should()
+			.Be("1: retrying — an instance exited while booting\n2: retrying — an instance exited while booting");
+	}
+
+	[Test]
 	public void LostWorkerLineStaysWhileOthersAdvance()
 	{
 		var table = new FixtureStatusTable([(Paired, 3)]);

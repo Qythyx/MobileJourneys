@@ -2081,7 +2081,7 @@
 			// Everything the event stream fills in. A dropped connection replays the run from its first
 			// event, so this is reset on every (re)connect and rebuilt rather than added to.
 			function emptyRunProgress() {
-				return { fixtures: null, steps: new Map(), progress: new Map(), skipped: [], stale: false, finished: false };
+				return { fixtures: null, log: null, steps: new Map(), progress: new Map(), skipped: [], stale: false, finished: false };
 			}
 			// One fixture's counts, keyed by device. `steps` above is keyed by container/step because it
 			// paints thumbnails, which collapses a step several journeys share into one entry — so it can
@@ -2117,6 +2117,7 @@
 				switch (ev.type) {
 					case "run-started":
 						run.fixtures = ev.fixtures;
+						run.log = ev.log;
 						for (const f of ev.fixtures) {
 							Object.assign(fixtureProgress(f.config), { journeysTotal: f.journeys, stepsTotal: f.steps });
 						}
@@ -2125,6 +2126,7 @@
 						fixtureProgress(ev.config).ready = true;
 						break;
 					case "fixture-retrying":
+					case "fixture-start-retrying":
 						fixtureProgress(ev.config).retryReason = ev.reason;
 						break;
 					case "fixture-skipped":
@@ -2198,11 +2200,13 @@
 			}
 
 			// Everything about the run that needs reading rather than glancing at: fixtures that dropped
-			// out, and the output of a runner that died without reporting a step. Stays up until dismissed.
+			// out, the output of a runner that died without reporting a step, and where the run log is.
+			// Stays up until dismissed.
 			function showRunProblems() {
 				const parts = run.skipped.map((s) =>
 					`${s.config} — ${plural(s.journeys, "journey")} skipped\n  ${s.reason}`);
 				if (run.output) { parts.push(`-- process output (exit code ${run.exitCode}) --\n${run.output.join("\n")}`); }
+				if (run.log) { parts.push(`Run log: ${run.log}`); }
 				const heading = run.skipped.length > 0
 					? `${run.description} — ${plural(run.skipped.length, "fixture")} skipped`
 					: `${run.description} — exit code ${run.exitCode}`;

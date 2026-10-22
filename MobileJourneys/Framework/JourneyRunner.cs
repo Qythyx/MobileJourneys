@@ -85,7 +85,7 @@ internal static class JourneyRunner
 				journey.Name
 			);
 			var stepPassed = true;
-			var stepThrew = false;
+			Exception? error = null;
 			string? detail = null;
 			try
 			{
@@ -109,7 +109,7 @@ internal static class JourneyRunner
 			catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
 			{
 				stepPassed = false;
-				stepThrew = true;
+				error = ex;
 				detail = ex.Message;
 				manager.DeleteFailureArtifactsForStep(testStep);
 				HandleStepFailure(driver, manager, ex, testStep);
@@ -118,8 +118,8 @@ internal static class JourneyRunner
 			}
 
 			stepsRun = number;
-			reporter.StepCompleted(testStep, worker, number, totalSteps, name, stepPassed, detail);
-			if (stepThrew)
+			reporter.StepCompleted(testStep, worker, number, totalSteps, name, stepPassed, detail, error);
+			if (error is not null)
 			{
 				break;
 			}
