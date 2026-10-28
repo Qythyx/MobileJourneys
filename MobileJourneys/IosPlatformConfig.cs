@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using MobileJourneys.Framework;
 using OpenQA.Selenium;
@@ -13,8 +14,9 @@ namespace MobileJourneys;
 /// iOS simulator fixture (XCUITest).
 /// </summary>
 /// <param name="PlatformVersion">The iOS version, e.g., "26.2".</param>
-/// <param name="DeviceName">The simulator's display name visible to xcrun (e.g., "iPhone 16 Pro").</param>
+/// <param name="DeviceName">The simulator's name as xcrun lists it (e.g., "iPhone 16 Pro"); unique within the suite.</param>
 /// <param name="IsLightTheme">When <c>true</c>, the system theme is forced to light before each journey.</param>
+/// <param name="AppLocale">The locale the framework launches the app in on this fixture, such as ja-JP.</param>
 /// <param name="AppIdentifier">Bundle ID (e.g., "jp.beercats.beerbox").</param>
 /// <param name="AppBinaryPath">Absolute path to the .app bundle.</param>
 /// <param name="NotificationBannerTop">Where a notification banner's top edge sits on this device, in screenshot pixels.</param>
@@ -25,13 +27,14 @@ public sealed record IosPlatformConfig(
 	string PlatformVersion,
 	string DeviceName,
 	bool IsLightTheme,
+	CultureInfo AppLocale,
 	string AppIdentifier,
 	string AppBinaryPath,
 	int NotificationBannerTop,
 	int NotificationBannerBottom,
 	int ColorTolerance,
 	double MaxDiffPixelPercentage
-) : PlatformConfig(PlatformVersion, DeviceName, IsLightTheme, AppIdentifier, AppBinaryPath)
+) : PlatformConfig(PlatformVersion, DeviceName, IsLightTheme, AppLocale, AppIdentifier, AppBinaryPath)
 {
 	/// <inheritdoc/>
 	public override TestPlatform Platform => TestPlatform.iOS;
@@ -56,6 +59,10 @@ public sealed record IosPlatformConfig(
 		options.AddAdditionalAppiumOption("appium:maxTypingFrequency", 10);
 	}
 
+	/// <summary>The launch arguments that start the app in <see cref="PlatformConfig.AppLocale"/>; they last for one process.</summary>
+	internal string[] LaunchArguments =>
+		["-AppleLanguages", $"({AppLocale.Name})", "-AppleLocale", AppLocale.Name.Replace('-', '_')];
+
 	internal override AppiumDriver CreateDriver(AppiumOptions options) => new IOSDriver(options);
 
 	internal override void LaunchApp(AppiumDriver driver, IJourneyEnvironment environment, string backendUrlVariable) =>
@@ -64,6 +71,7 @@ public sealed record IosPlatformConfig(
 			new Dictionary<string, object>
 			{
 				["bundleId"] = AppIdentifier,
+				["arguments"] = LaunchArguments,
 				["environment"] = new Dictionary<string, string> { [backendUrlVariable] = environment.BackendUrl },
 			}
 		);

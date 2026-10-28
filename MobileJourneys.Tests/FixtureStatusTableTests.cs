@@ -7,49 +7,41 @@ namespace MobileJourneys.Tests;
 [TestFixture]
 public sealed class FixtureStatusTableTests
 {
-	private static readonly IosPlatformConfig Single = new(
-		"26.2",
-		"iPhone 17 Pro",
-		IsLightTheme: true,
-		"com.example.app",
-		"/path/to/app.app",
-		100,
-		210,
-		3 * 2,
-		0.005
-	);
-
-	private static readonly IosPlatformConfig Paired = Single with { DeviceName = "iPhone 16e", Instances = 2 };
+	private static readonly IosPlatformConfig Paired = TestFixtures.Ios with
+	{
+		DeviceName = "iPhone 16e",
+		Instances = 2,
+	};
 
 	[Test]
 	public void SingleInstanceCellIsTheBareText()
 	{
-		var table = new FixtureStatusTable([(Single, 3)]);
+		var table = new FixtureStatusTable([(TestFixtures.Ios, 3)]);
 
-		table.Step(Single, 1, "Login", 2, 5, "tap sign in");
+		table.Step(TestFixtures.Ios, 1, "Login", 2, 5, "tap sign in");
 
-		_ = table.CurrentCell(Single).Should().Be("Login 2/5 tap sign in");
+		_ = table.CurrentCell(TestFixtures.Ios).Should().Be("Login 2/5 tap sign in");
 	}
 
 	[Test]
 	public void AReadyWorkerSaysWhatItIsDoingRatherThanNothing()
 	{
-		var table = new FixtureStatusTable([(Single, 3)]);
+		var table = new FixtureStatusTable([(TestFixtures.Ios, 3)]);
 
-		table.Ready(Single, 1);
+		table.Ready(TestFixtures.Ios, 1);
 
-		_ = table.CurrentCell(Single).Should().Be("device up — preparing it…");
+		_ = table.CurrentCell(TestFixtures.Ios).Should().Be("device up — preparing it…");
 	}
 
 	[Test]
 	public void APreparingWorkerNamesTheJourneyItIsSettingUp()
 	{
-		var table = new FixtureStatusTable([(Single, 3)]);
+		var table = new FixtureStatusTable([(TestFixtures.Ios, 3)]);
 
-		table.Step(Single, 1, "Login", 5, 5, "tap sign in");
-		table.Preparing(Single, 1, "Checkout");
+		table.Step(TestFixtures.Ios, 1, "Login", 5, 5, "tap sign in");
+		table.Preparing(TestFixtures.Ios, 1, "Checkout");
 
-		_ = table.CurrentCell(Single).Should().Be("Checkout — launching the app…");
+		_ = table.CurrentCell(TestFixtures.Ios).Should().Be("Checkout — launching the app…");
 	}
 
 	[Test]

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using MobileJourneys.Framework;
@@ -11,17 +12,26 @@ namespace MobileJourneys;
 /// <summary>
 /// A simulator/emulator fixture the test suite runs against. Concrete subclasses are
 /// <see cref="IosPlatformConfig"/> and <see cref="AndroidPlatformConfig"/>; consumers
-/// build the four/N instances they need (typically one per platform × theme).
+/// build the instances they need, each on its own device, with the system theme and app locale it runs in.
 /// </summary>
 /// <param name="PlatformVersion">The OS version, e.g., "26.2" for iOS, "15" for Android.</param>
-/// <param name="DeviceName">The simulator/emulator name visible to xcrun/avd.</param>
+/// <param name="DeviceName">
+/// Names the fixture: unique within the suite, and the name of its screenshot folder. On iOS it is also the
+/// simulator's name.
+/// </param>
 /// <param name="IsLightTheme">When <c>true</c>, the system theme is forced to light before each journey.</param>
+/// <param name="AppLocale">
+/// The locale the framework launches the app in on this fixture: its language and region, such as ja-JP. The
+/// device's own locale is left alone. A culture with no region is rejected, because the date and number formats
+/// would then be left to each platform's defaults rather than fixed by the fixture.
+/// </param>
 /// <param name="AppIdentifier">Bundle ID (iOS) or package name (Android), e.g., "jp.beercats.beerbox".</param>
 /// <param name="AppBinaryPath">Absolute path to the .app bundle (iOS) or signed .apk (Android).</param>
 public abstract record PlatformConfig(
 	string PlatformVersion,
 	string DeviceName,
 	bool IsLightTheme,
+	CultureInfo AppLocale,
 	string AppIdentifier,
 	string AppBinaryPath
 )
@@ -51,6 +61,16 @@ public abstract record PlatformConfig(
 
 	/// <summary>The Appium automationName capability ("XCUITest" or "UiAutomator2").</summary>
 	public abstract string AutomationName { get; }
+
+	/// <summary>The locale the framework launches the app in on this fixture, such as ja-JP.</summary>
+	public CultureInfo AppLocale
+	{
+		get;
+		init => field = RequireRegion(value, nameof(AppLocale));
+	} = RequireRegion(AppLocale, nameof(AppLocale));
+
+	/// <summary>Names the devices this fixture runs on; two fixtures with the same key would share them.</summary>
+	internal virtual string DeviceKey => DeviceName;
 
 	/// <summary>
 	/// How many devices this fixture runs on at once. Each is a separate simulator or emulator
@@ -97,11 +117,8 @@ public abstract record PlatformConfig(
 	/// </summary>
 	public abstract double MaxDiffPixelPercentage { get; init; }
 
-	/// <summary>Human-readable identifier used as the screenshot subdirectory name.</summary>
-	public string DisplayName => $"{Platform} · {PlatformVersion} · {DeviceName} · {(IsLightTheme ? "light" : "dark")}";
-
 	/// <inheritdoc/>
-	public sealed override string ToString() => DisplayName;
+	public sealed override string ToString() => DeviceName;
 
 	/// <summary>
 	/// Builds and starts an Appium driver bound to one of this fixture's devices. The framework
@@ -326,6 +343,14 @@ public abstract record PlatformConfig(
 	/// Does nothing on a platform whose helpers do not outlive the run that started them.
 	/// </summary>
 	internal virtual void KillStaleHelperProcesses() { }
+
+	private static CultureInfo RequireRegion(CultureInfo locale, string paramName) =>
+		locale.IsNeutralCulture || locale.Name.Length == 0
+			? throw new ArgumentException(
+				$"'{locale.Name}' names no region; pass a culture with one, such as ja-JP.",
+				paramName
+			)
+			: locale;
 
 	internal static int FindFreePort()
 	{

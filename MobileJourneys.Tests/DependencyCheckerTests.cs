@@ -46,10 +46,7 @@ public sealed class DependencyCheckerTests
 		{
 			var config = new FrameworkConfig(
 				DisplayName: "Test",
-				PlatformConfigs:
-				[
-					new AndroidPlatformConfig("15", "Pixel", "avd", true, "com.example", "/path/app.apk", null, 200, 550, 3 * 10, 0.005),
-				],
+				PlatformConfigs: [TestFixtures.Android],
 				Journeys: [new JourneyDefinition(new TestEnv(), [new TestExpect()], [], [], "j")]
 			);
 
@@ -70,8 +67,6 @@ public sealed class DependencyCheckerTests
 		public string Name => "Test";
 
 		public string BackendUrl => "";
-
-		public IJourneyEnvironment ForFixture(PlatformConfig config) => this;
 	}
 
 	private sealed record TestExpect() : Expectation

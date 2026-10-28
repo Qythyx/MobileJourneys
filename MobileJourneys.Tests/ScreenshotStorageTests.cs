@@ -12,7 +12,6 @@ namespace MobileJourneys.Tests;
 public sealed class ScreenshotStorageTests
 {
 	private InMemoryScreenshotStorage _storage = null!;
-	private IosPlatformConfig _platform = null!;
 	private FrameworkConfig _config = null!;
 	private JourneyDefinition _journey = null!;
 
@@ -20,7 +19,6 @@ public sealed class ScreenshotStorageTests
 	public void SetUp()
 	{
 		_storage = new();
-		_platform = new("26.2", "iPhone", IsLightTheme: true, "com.example.app", "/unused", 100, 210, 3 * 2, 0.005);
 		_journey = new(
 			new TestJourneyEnvironment(),
 			[new TestExpectation("Initial")],
@@ -28,12 +26,12 @@ public sealed class ScreenshotStorageTests
 			[],
 			"PrimaryJourney"
 		);
-		_config = new("Tests", [_platform], [_journey]);
+		_config = new("Tests", [TestFixtures.Ios], [_journey]);
 	}
 
 	private string InitialStep => $"01 {_journey.InitialName}";
 
-	private TestStep K(string journey, string step) => new(_platform, journey, step, journey);
+	private static TestStep K(string journey, string step) => new(TestFixtures.Ios, journey, step, journey);
 
 	private List<string> FindExtraneous(bool delete) => _storage.FindExtraneous(_config, delete);
 
@@ -42,8 +40,6 @@ public sealed class ScreenshotStorageTests
 		public string Name => "Test";
 
 		public string BackendUrl => "";
-
-		public IJourneyEnvironment ForFixture(PlatformConfig config) => this;
 	}
 
 	private sealed record TestExpectation(string? TargetLabel = null) : Expectation(TargetLabel)
@@ -58,7 +54,11 @@ public sealed class ScreenshotStorageTests
 
 		var paths = FindExtraneous(delete: false);
 
-		_ = paths.Should().ContainSingle().Which.Should().Be($"{_platform.DisplayName}/OrphanJourney/01 Step.png");
+		_ = paths
+			.Should()
+			.ContainSingle()
+			.Which.Should()
+			.Be($"{TestFixtures.Ios.DeviceName}/OrphanJourney/01 Step.png");
 	}
 
 	[Test]
@@ -73,7 +73,7 @@ public sealed class ScreenshotStorageTests
 			.Should()
 			.ContainSingle()
 			.Which.Should()
-			.Be($"{_platform.DisplayName}/{_journey.Name}/99 RemovedStep.png");
+			.Be($"{TestFixtures.Ios.DeviceName}/{_journey.Name}/99 RemovedStep.png");
 	}
 
 	[Test]
@@ -101,13 +101,13 @@ public sealed class ScreenshotStorageTests
 			.Should()
 			.ContainSingle()
 			.Which.Should()
-			.Be($"{_platform.DisplayName}/{_journey.Name}/99 RemovedStep [{_journey.Name}].new.png");
+			.Be($"{TestFixtures.Ios.DeviceName}/{_journey.Name}/99 RemovedStep [{_journey.Name}].new.png");
 	}
 
 	[Test]
 	public void ReturnsFailureArtifactsAttributedToUnknownJourneys()
 	{
-		_storage.WriteNewScreenshot(new(_platform, _journey.Name, InitialStep, "GhostJourney"), [0]);
+		_storage.WriteNewScreenshot(new(TestFixtures.Ios, _journey.Name, InitialStep, "GhostJourney"), [0]);
 
 		var paths = FindExtraneous(delete: false);
 
@@ -125,12 +125,12 @@ public sealed class ScreenshotStorageTests
 			null,
 			"Root"
 		);
-		var config = new FrameworkConfig("Tests", [_platform], [.. tree.Flatten()]);
+		var config = new FrameworkConfig("Tests", [TestFixtures.Ios], [.. tree.Flatten()]);
 		foreach (var journey in config.Journeys)
 		{
 			foreach (var (container, stepName) in journey.ExpectedStepLocations())
 			{
-				_storage.WriteBaseline(new(_platform, container, stepName, journey.Name), [0]);
+				_storage.WriteBaseline(new(TestFixtures.Ios, container, stepName, journey.Name), [0]);
 			}
 		}
 
@@ -167,10 +167,10 @@ public sealed class ScreenshotStorageTests
 	public void ReturnsEmptyWhenPlatformContainerMissing() => _ = FindExtraneous(delete: false).Should().BeEmpty();
 
 	private void AcceptCapturesWithoutBaselines(FrameworkConfig config) =>
-		_storage.AcceptCapturesWithoutBaselines(_platform, new ExpectedScreenshots(config.Journeys));
+		_storage.AcceptCapturesWithoutBaselines(TestFixtures.Ios, new ExpectedScreenshots(config.Journeys));
 
 	/// <summary>Two journeys branching off a root whose initial step both of them run.</summary>
-	private (FrameworkConfig Config, TestStep Alpha, TestStep Beta) SharedStep()
+	private static (FrameworkConfig Config, TestStep Alpha, TestStep Beta) SharedStep()
 	{
 		var tree = new JourneyTree(
 			new TestJourneyEnvironment(),
@@ -183,9 +183,13 @@ public sealed class ScreenshotStorageTests
 			null,
 			"Root"
 		);
-		var config = new FrameworkConfig("Tests", [_platform], [.. tree.Flatten()]);
+		var config = new FrameworkConfig("Tests", [TestFixtures.Ios], [.. tree.Flatten()]);
 		var (container, stepName) = config.Journeys[0].ExpectedStepLocations().First();
-		return (config, new(_platform, container, stepName, "Alpha"), new(_platform, container, stepName, "Beta"));
+		return (
+			config,
+			new(TestFixtures.Ios, container, stepName, "Alpha"),
+			new(TestFixtures.Ios, container, stepName, "Beta")
+		);
 	}
 
 	[Test]

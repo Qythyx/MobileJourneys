@@ -237,7 +237,7 @@ internal sealed class FilesystemScreenshotStorage(string rootDir) : ScreenshotSt
 		File.WriteAllText(Path.Combine(dir, fileName), content);
 	}
 
-	private string PlatformDir(PlatformConfig config) => Path.Combine(RootDir, config.DisplayName);
+	private string PlatformDir(PlatformConfig config) => Path.Combine(RootDir, config.DeviceName);
 
 	private string ContainerDir(PlatformConfig config, string container) =>
 		Path.Combine(PlatformDir(config), container.Replace('/', Path.DirectorySeparatorChar));

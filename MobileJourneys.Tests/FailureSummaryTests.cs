@@ -16,39 +16,11 @@ public sealed class FailureSummaryTests
 	[SetUp]
 	public void Reset() => FailureSummary.ResetForTest();
 
-	private static readonly IosPlatformConfig IosFixture = new(
-		"26.2",
-		"iPhone 16",
-		IsLightTheme: true,
-		"com.example.app",
-		"/path/to/app.app",
-		100,
-		210,
-		3 * 2,
-		0.005
-	);
-
-	private static readonly AndroidPlatformConfig AndroidFixture = new(
-		"15",
-		"Pixel",
-		"Pixel_API35",
-		IsLightTheme: false,
-		"com.example.app",
-		"/path/to/app.apk",
-		null,
-		200,
-		550,
-		3 * 10,
-		0.005
-	);
-
 	private sealed record TestEnv : IJourneyEnvironment
 	{
 		public string Name => "Test";
 
 		public string BackendUrl => "";
-
-		public IJourneyEnvironment ForFixture(PlatformConfig config) => this;
 	}
 
 	private sealed record TestExpect() : Expectation
@@ -62,35 +34,35 @@ public sealed class FailureSummaryTests
 	[Test]
 	public void RecordFailureFirstCallAddsConfigEntry()
 	{
-		FailureSummary.RecordFailure(MakeCase(IosFixture, "Login"));
+		FailureSummary.RecordFailure(MakeCase(TestFixtures.Ios, "Login"));
 
 		var snapshot = FailureSummary.SnapshotForTest();
 		_ = snapshot.Should().HaveCount(1);
-		_ = snapshot[IosFixture.ToString()].Should().BeEquivalentTo(["Login"]);
+		_ = snapshot[TestFixtures.Ios.ToString()].Should().BeEquivalentTo(["Login"]);
 	}
 
 	[Test]
 	public void RecordFailureMultipleJourneysSameConfigAggregateUnderOneKey()
 	{
-		FailureSummary.RecordFailure(MakeCase(IosFixture, "Login"));
-		FailureSummary.RecordFailure(MakeCase(IosFixture, "Logout"));
-		FailureSummary.RecordFailure(MakeCase(IosFixture, "Settings"));
+		FailureSummary.RecordFailure(MakeCase(TestFixtures.Ios, "Login"));
+		FailureSummary.RecordFailure(MakeCase(TestFixtures.Ios, "Logout"));
+		FailureSummary.RecordFailure(MakeCase(TestFixtures.Ios, "Settings"));
 
 		var snapshot = FailureSummary.SnapshotForTest();
 		_ = snapshot.Should().HaveCount(1);
-		_ = snapshot[IosFixture.ToString()].Should().BeEquivalentTo(["Login", "Logout", "Settings"]);
+		_ = snapshot[TestFixtures.Ios.ToString()].Should().BeEquivalentTo(["Login", "Logout", "Settings"]);
 	}
 
 	[Test]
 	public void RecordFailureDifferentConfigsStayInSeparateEntries()
 	{
-		FailureSummary.RecordFailure(MakeCase(IosFixture, "Login"));
-		FailureSummary.RecordFailure(MakeCase(AndroidFixture, "Login"));
+		FailureSummary.RecordFailure(MakeCase(TestFixtures.Ios, "Login"));
+		FailureSummary.RecordFailure(MakeCase(TestFixtures.Android, "Login"));
 
 		var snapshot = FailureSummary.SnapshotForTest();
 		_ = snapshot.Should().HaveCount(2);
-		_ = snapshot[IosFixture.ToString()].Should().BeEquivalentTo(["Login"]);
-		_ = snapshot[AndroidFixture.ToString()].Should().BeEquivalentTo(["Login"]);
+		_ = snapshot[TestFixtures.Ios.ToString()].Should().BeEquivalentTo(["Login"]);
+		_ = snapshot[TestFixtures.Android.ToString()].Should().BeEquivalentTo(["Login"]);
 	}
 
 	[Test]
@@ -106,9 +78,9 @@ public sealed class FailureSummaryTests
 	[Test]
 	public void PrintBannerIncludesTotalFailureCount()
 	{
-		FailureSummary.RecordFailure(MakeCase(IosFixture, "Login"));
-		FailureSummary.RecordFailure(MakeCase(IosFixture, "Logout"));
-		FailureSummary.RecordFailure(MakeCase(AndroidFixture, "Login"));
+		FailureSummary.RecordFailure(MakeCase(TestFixtures.Ios, "Login"));
+		FailureSummary.RecordFailure(MakeCase(TestFixtures.Ios, "Logout"));
+		FailureSummary.RecordFailure(MakeCase(TestFixtures.Android, "Login"));
 		using var sw = new StringWriter();
 
 		FailureSummary.Print(sw);
@@ -119,14 +91,14 @@ public sealed class FailureSummaryTests
 	[Test]
 	public void PrintGroupsJourneysUnderTheirConfigName()
 	{
-		FailureSummary.RecordFailure(MakeCase(IosFixture, "Login"));
-		FailureSummary.RecordFailure(MakeCase(IosFixture, "Logout"));
+		FailureSummary.RecordFailure(MakeCase(TestFixtures.Ios, "Login"));
+		FailureSummary.RecordFailure(MakeCase(TestFixtures.Ios, "Logout"));
 		using var sw = new StringWriter();
 
 		FailureSummary.Print(sw);
 
 		var output = sw.ToString();
-		_ = output.Should().Contain(IosFixture.ToString());
+		_ = output.Should().Contain(TestFixtures.Ios.ToString());
 		_ = output.Should().Contain("    - Login");
 		_ = output.Should().Contain("    - Logout");
 	}
@@ -136,15 +108,15 @@ public sealed class FailureSummaryTests
 	{
 		// Insertion order is iOS first, but Android sorts before iOS — verify the banner
 		// reflects sort order, not insertion order, so reports are stable across runs.
-		FailureSummary.RecordFailure(MakeCase(IosFixture, "Login"));
-		FailureSummary.RecordFailure(MakeCase(AndroidFixture, "Login"));
+		FailureSummary.RecordFailure(MakeCase(TestFixtures.Ios, "Login"));
+		FailureSummary.RecordFailure(MakeCase(TestFixtures.Android, "Login"));
 		using var sw = new StringWriter();
 
 		FailureSummary.Print(sw);
 
 		var output = sw.ToString();
-		var androidIdx = output.IndexOf(AndroidFixture.ToString(), StringComparison.Ordinal);
-		var iosIdx = output.IndexOf(IosFixture.ToString(), StringComparison.Ordinal);
+		var androidIdx = output.IndexOf(TestFixtures.Android.ToString(), StringComparison.Ordinal);
+		var iosIdx = output.IndexOf(TestFixtures.Ios.ToString(), StringComparison.Ordinal);
 		_ = androidIdx.Should().BeGreaterThanOrEqualTo(0);
 		_ = iosIdx.Should().BeGreaterThanOrEqualTo(0);
 		_ = androidIdx.Should().BeLessThan(iosIdx);
@@ -153,9 +125,9 @@ public sealed class FailureSummaryTests
 	[Test]
 	public void PrintSortsJourneysAlphabeticallyWithinAConfig()
 	{
-		FailureSummary.RecordFailure(MakeCase(IosFixture, "Zeta"));
-		FailureSummary.RecordFailure(MakeCase(IosFixture, "Alpha"));
-		FailureSummary.RecordFailure(MakeCase(IosFixture, "Mu"));
+		FailureSummary.RecordFailure(MakeCase(TestFixtures.Ios, "Zeta"));
+		FailureSummary.RecordFailure(MakeCase(TestFixtures.Ios, "Alpha"));
+		FailureSummary.RecordFailure(MakeCase(TestFixtures.Ios, "Mu"));
 		using var sw = new StringWriter();
 
 		FailureSummary.Print(sw);

@@ -427,13 +427,13 @@ internal abstract class RunReporter(RunLog log)
 				.. timings
 					.Select(entry =>
 						(
-							FixtureLabel(entry.Key),
+							entry.Key.DeviceName,
 							results.Count(result => result.TestCase.Config == entry.Key),
 							entry.Value.Summarize(),
 							entry.Value.WaitBudget
 						)
 					)
-					.OrderBy(row => row.Item1, StringComparer.Ordinal),
+					.OrderBy(row => row.DeviceName, StringComparer.Ordinal),
 			];
 		}
 
@@ -494,12 +494,6 @@ internal abstract class RunReporter(RunLog log)
 		duration.TotalMinutes < 1
 			? duration.TotalSeconds.ToString("F1", CultureInfo.InvariantCulture) + "s"
 			: $"{(int)duration.TotalMinutes}m {duration.Seconds}s";
-
-	/// <summary>Names a fixture the short way — device and theme, without the platform and version.</summary>
-	/// <param name="config">The fixture to name.</param>
-	/// <returns>The label, e.g. <c>iPhone 17 Pro light</c>.</returns>
-	internal static string FixtureLabel(PlatformConfig config) =>
-		$"{config.DeviceName} {(config.IsLightTheme ? "light" : "dark")}";
 
 	/// <summary>Indents every line of a block of text by four spaces, trimming trailing space.</summary>
 	/// <param name="text">The text to indent.</param>

@@ -39,10 +39,9 @@ internal static class JourneyRunner
 					var deviceId = driver.GetDeviceId();
 					config.SetSystemFontSize(deviceId, SystemFontSize.Large);
 					config.SetSystemTheme(deviceId, config.IsLightTheme);
-					var environment = journey.Scenario.ForFixture(config);
-					driver.CurrentJourneyEnv = driver.Backend?.PrepareFor(environment) ?? environment;
+					var prepared = driver.Backend?.PrepareFor(journey.Scenario) ?? journey.Scenario;
 					driver.ClearAppLogs();
-					driver.RelaunchApp(driver.CurrentJourneyEnv);
+					driver.RelaunchApp(prepared);
 					ProcessExpectations(driver, journey.InitialExpect);
 				},
 				journey.InitialMaskElements ?? [],

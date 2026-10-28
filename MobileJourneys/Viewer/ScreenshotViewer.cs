@@ -446,13 +446,13 @@ public static class ScreenshotViewer
 		{
 			"all" => [],
 			"failed" => ["--rerun"],
-			_ => ["--filter", platforms[0].DisplayName],
+			_ => ["--filter", platforms[0].DeviceName],
 		};
 
 		LaunchRerun(
 			context,
 			config,
-			$"{string.Join(", ", journeys.Select(j => j.Name))} on {string.Join(", ", platforms.Select(p => p.DisplayName))}"
+			$"{string.Join(", ", journeys.Select(j => j.Name))} on {string.Join(", ", platforms.Select(p => p.DeviceName))}"
 				+ (request.Embed ? " (rebuilding app)" : string.Empty),
 			request.Embed ? ["-p:EmbedAssemblies=true"] : [],
 			["--journey", .. journeys.Select(j => j.Name), .. scopeArgs]
@@ -484,12 +484,12 @@ public static class ScreenshotViewer
 		}
 
 		List<string> journeyArgs = failed ? ["--rerun"] : [];
-		List<string> platformArgs = platform is null ? [] : ["--filter", platform.DisplayName];
+		List<string> platformArgs = platform is null ? [] : ["--filter", platform.DeviceName];
 		LaunchRerun(
 			context,
 			config,
 			(failed ? "failed journeys" : "all journeys")
-				+ (platform is null ? string.Empty : $" on {platform.DisplayName}")
+				+ (platform is null ? string.Empty : $" on {platform.DeviceName}")
 				+ (embed ? " (rebuilding app)" : string.Empty),
 			embed ? ["-p:EmbedAssemblies=true"] : [],
 			[.. journeyArgs, .. platformArgs]

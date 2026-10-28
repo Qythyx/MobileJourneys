@@ -12,16 +12,11 @@ namespace MobileJourneys.Tests;
 public sealed class InMemoryScreenshotStorageTests
 {
 	private InMemoryScreenshotStorage _storage = null!;
-	private IosPlatformConfig _config = null!;
 
 	[SetUp]
-	public void SetUp()
-	{
-		_storage = new();
-		_config = new("26.2", "iPhone", IsLightTheme: true, "com.example.app", "/unused", 100, 210, 3 * 2, 0.005);
-	}
+	public void SetUp() => _storage = new();
 
-	private TestStep K(string journey, string step) => new(_config, journey, step, journey);
+	private static TestStep K(string journey, string step) => new(TestFixtures.Ios, journey, step, journey);
 
 	private static JourneyDefinition J(string name) =>
 		new(new TestJourneyEnvironment(), [new TestExpectation()], [], [], name);
@@ -31,8 +26,6 @@ public sealed class InMemoryScreenshotStorageTests
 		public string Name => "Test";
 
 		public string BackendUrl => "";
-
-		public IJourneyEnvironment ForFixture(PlatformConfig config) => this;
 	}
 
 	private sealed record TestExpectation : Expectation
@@ -73,7 +66,10 @@ public sealed class InMemoryScreenshotStorageTests
 		_storage.WriteDiffImage(K("Journey", "01 Step"), pixelErrorPercentage: 5.123, pixelErrorCount: 42, [0]);
 
 		_ = _storage.DiffImageExists(K("Journey", "01 Step")).Should().BeTrue();
-		_ = _storage.ListAllFiles(_config, "Journey").Should().Contain("01 Step [Journey]_diff_5.123%_42px.png");
+		_ = _storage
+			.ListAllFiles(TestFixtures.Ios, "Journey")
+			.Should()
+			.Contain("01 Step [Journey]_diff_5.123%_42px.png");
 	}
 
 	[Test]
@@ -82,7 +78,7 @@ public sealed class InMemoryScreenshotStorageTests
 		_storage.WriteFailScreenshot(K("Journey", "01 Step"), suffix: "CRASH", [0]);
 
 		_ = _storage.FailScreenshotExists(K("Journey", "01 Step")).Should().BeTrue();
-		_ = _storage.ListAllFiles(_config, "Journey").Should().Contain("01 Step [Journey]_FAIL_CRASH.png");
+		_ = _storage.ListAllFiles(TestFixtures.Ios, "Journey").Should().Contain("01 Step [Journey]_FAIL_CRASH.png");
 	}
 
 	[Test]
@@ -92,7 +88,7 @@ public sealed class InMemoryScreenshotStorageTests
 
 		_ = _storage.CrashLogExists(K("Journey", "01 Step")).Should().BeTrue();
 		_ = _storage
-			.ReadRaw(_config, "Journey", "01 Step [Journey].CRASH.txt")
+			.ReadRaw(TestFixtures.Ios, "Journey", "01 Step [Journey].CRASH.txt")
 			.Should()
 			.BeEquivalentTo("hello world"u8.ToArray());
 	}
@@ -105,10 +101,10 @@ public sealed class InMemoryScreenshotStorageTests
 		_storage.WriteFailScreenshot(K("JFail", "01 Step"), "CRASH", [0]);
 		_storage.WriteCrashLog(K("JCrash", "01 Step"), "boom");
 
-		_ = _storage.HasFailureArtifacts(_config, J("JNew")).Should().BeTrue();
-		_ = _storage.HasFailureArtifacts(_config, J("JDiff")).Should().BeTrue();
-		_ = _storage.HasFailureArtifacts(_config, J("JFail")).Should().BeTrue();
-		_ = _storage.HasFailureArtifacts(_config, J("JCrash")).Should().BeTrue();
+		_ = _storage.HasFailureArtifacts(TestFixtures.Ios, J("JNew")).Should().BeTrue();
+		_ = _storage.HasFailureArtifacts(TestFixtures.Ios, J("JDiff")).Should().BeTrue();
+		_ = _storage.HasFailureArtifacts(TestFixtures.Ios, J("JFail")).Should().BeTrue();
+		_ = _storage.HasFailureArtifacts(TestFixtures.Ios, J("JCrash")).Should().BeTrue();
 	}
 
 	[Test]
@@ -116,12 +112,12 @@ public sealed class InMemoryScreenshotStorageTests
 	{
 		_storage.WriteBaseline(K("Journey", "01 Step"), [0]);
 
-		_ = _storage.HasFailureArtifacts(_config, J("Journey")).Should().BeFalse();
+		_ = _storage.HasFailureArtifacts(TestFixtures.Ios, J("Journey")).Should().BeFalse();
 	}
 
 	[Test]
 	public void HasFailureArtifactsFalseWhenJourneyMissing() =>
-		_ = _storage.HasFailureArtifacts(_config, J("Missing")).Should().BeFalse();
+		_ = _storage.HasFailureArtifacts(TestFixtures.Ios, J("Missing")).Should().BeFalse();
 
 	[Test]
 	public void DeleteFailureArtifactsForStepRemovesAllFourKindsForOneStep()
@@ -161,9 +157,9 @@ public sealed class InMemoryScreenshotStorageTests
 		_storage.WriteFailScreenshot(K("Journey", "02 Step"), "CRASH", [0]);
 		_storage.WriteCrashLog(K("Journey", "02 Step"), "boom");
 
-		_storage.DeleteAllFailureArtifacts(_config, J("Journey"));
+		_storage.DeleteAllFailureArtifacts(TestFixtures.Ios, J("Journey"));
 
-		_ = _storage.ListAllFiles(_config, "Journey").Should().BeEquivalentTo(["01 Step.png", "02 Step.png"]);
+		_ = _storage.ListAllFiles(TestFixtures.Ios, "Journey").Should().BeEquivalentTo(["01 Step.png", "02 Step.png"]);
 	}
 
 	[Test]
@@ -171,9 +167,9 @@ public sealed class InMemoryScreenshotStorageTests
 	{
 		var aboutJourney = J("About") with { StepContainers = ["Home/Menu"] };
 		var contactJourney = J("ContactUs") with { StepContainers = ["Home/Menu"] };
-		_storage.WriteNewScreenshot(new(_config, "Home/Menu", "02 Step", "About"), [0]);
+		_storage.WriteNewScreenshot(new(TestFixtures.Ios, "Home/Menu", "02 Step", "About"), [0]);
 
-		_ = _storage.HasFailureArtifacts(_config, aboutJourney).Should().BeTrue();
-		_ = _storage.HasFailureArtifacts(_config, contactJourney).Should().BeFalse();
+		_ = _storage.HasFailureArtifacts(TestFixtures.Ios, aboutJourney).Should().BeTrue();
+		_ = _storage.HasFailureArtifacts(TestFixtures.Ios, contactJourney).Should().BeFalse();
 	}
 }

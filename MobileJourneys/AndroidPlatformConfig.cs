@@ -15,9 +15,10 @@ namespace MobileJourneys;
 /// Android emulator fixture (UiAutomator2).
 /// </summary>
 /// <param name="PlatformVersion">The Android version, e.g., "15".</param>
-/// <param name="DeviceName">The emulator's display name (purely cosmetic for IDE/test reporting).</param>
+/// <param name="DeviceName">Names the fixture: unique within the suite, and the name of its screenshot folder.</param>
 /// <param name="AvdName">The Android Virtual Device name (e.g., "Pixel_8_API35").</param>
 /// <param name="IsLightTheme">When <c>true</c>, the system theme is forced to light before each journey.</param>
+/// <param name="AppLocale">The locale the framework launches the app in on this fixture, such as ja-JP.</param>
 /// <param name="AppIdentifier">Package name (e.g., "jp.beercats.beerbox").</param>
 /// <param name="AppBinaryPath">Absolute path to the signed .apk.</param>
 /// <param name="MainActivity">Optional. Defaults to <c>$"{AppIdentifier}.MainActivity"</c>.</param>
@@ -30,6 +31,7 @@ public sealed record AndroidPlatformConfig(
 	string DeviceName,
 	string AvdName,
 	bool IsLightTheme,
+	CultureInfo AppLocale,
 	string AppIdentifier,
 	string AppBinaryPath,
 	string? MainActivity,
@@ -37,13 +39,16 @@ public sealed record AndroidPlatformConfig(
 	int NotificationBannerBottom,
 	int ColorTolerance,
 	double MaxDiffPixelPercentage
-) : PlatformConfig(PlatformVersion, DeviceName, IsLightTheme, AppIdentifier, AppBinaryPath)
+) : PlatformConfig(PlatformVersion, DeviceName, IsLightTheme, AppLocale, AppIdentifier, AppBinaryPath)
 {
 	/// <inheritdoc/>
 	public override TestPlatform Platform => TestPlatform.Android;
 
 	/// <inheritdoc/>
 	public override string AutomationName => "UiAutomator2";
+
+	/// <inheritdoc/>
+	internal override string DeviceKey => $"Android AVD {AvdName}";
 
 	/// <summary>The activity to launch on app start, falling back to <c>$"{AppIdentifier}.MainActivity"</c>.</summary>
 	public string ResolvedMainActivity => MainActivity ?? $"{AppIdentifier}.MainActivity";
@@ -115,6 +120,17 @@ public sealed record AndroidPlatformConfig(
 
 	internal override void LaunchApp(AppiumDriver driver, IJourneyEnvironment environment, string backendUrlVariable)
 	{
+		// Per-app locales persist on the device, so without this the app would start in whatever locale an earlier
+		// run left set.
+		_ = driver.ExecuteScript(
+			"mobile: shell",
+			new Dictionary<string, object>
+			{
+				["command"] = "cmd",
+				["args"] = new List<string> { "locale", "set-app-locales", AppIdentifier, "--locales", AppLocale.Name },
+			}
+		);
+
 		// Android has no way to hand an app environment variables, so it travels as an intent extra.
 		List<string> amArgs =
 		[
@@ -380,6 +396,8 @@ public sealed record AndroidPlatformConfig(
 
 	internal override void VerifyDependencies()
 	{
+		VerifyPlatformVersion();
+
 		var androidHome = Environment.GetEnvironmentVariable("ANDROID_HOME");
 		if (string.IsNullOrEmpty(androidHome))
 		{
@@ -401,6 +419,25 @@ public sealed record AndroidPlatformConfig(
 			"--version",
 			$"adb at '{adbPath}' is present but failed to run. Reinstall Android platform-tools."
 		);
+	}
+
+	/// <summary>The first Android version with per-app locales, which <see cref="LaunchApp"/> sets.</summary>
+	private const int MinimumVersionForAppLocales = 13;
+
+	/// <summary>Checks that <see cref="PlatformConfig.PlatformVersion"/> is one the framework can launch the app on.</summary>
+	/// <exception cref="InvalidOperationException">The version is not a number, or is older than Android 13.</exception>
+	internal void VerifyPlatformVersion()
+	{
+		if (
+			!int.TryParse(PlatformVersion.Split('.')[0], NumberStyles.None, CultureInfo.InvariantCulture, out var major)
+			|| major < MinimumVersionForAppLocales
+		)
+		{
+			throw new InvalidOperationException(
+				$"Android '{PlatformVersion}' can't launch an app in a locale of its own; give a version of "
+					+ $"{MinimumVersionForAppLocales} or later, such as \"15\"."
+			);
+		}
 	}
 
 	private static string? CaptureLogcat(string deviceId)

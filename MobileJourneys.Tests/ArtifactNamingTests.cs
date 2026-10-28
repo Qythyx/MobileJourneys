@@ -6,21 +6,7 @@ namespace MobileJourneys.Tests;
 [TestFixture]
 public sealed class ArtifactNamingTests
 {
-	private static readonly AndroidPlatformConfig Config = new(
-		"15",
-		"Pixel 8",
-		"Pixel_API35",
-		IsLightTheme: true,
-		"com.example.app",
-		"/path/Signed.apk",
-		null,
-		200,
-		550,
-		3 * 10,
-		0.005
-	);
-
-	private static TestStep Step => new(Config, "Journey", "01 Step", "Journey");
+	private static TestStep Step => new(TestFixtures.Android, "Journey", "01 Step", "Journey");
 
 	[Test]
 	public void DiffFileNameRoundTripsPercentageAndPixelCount()

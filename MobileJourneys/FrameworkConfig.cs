@@ -22,7 +22,27 @@ public sealed record FrameworkConfig(
 	/// artifact attribution, and (for tree-defined journeys) the screenshot folder layout.
 	/// </summary>
 	public IReadOnlyList<JourneyDefinition> Journeys { get; } =
-	[.. EnsureDistinctNames(Journeys).OrderByDescending(journey => journey.ExpectedStepLocations().Count())];
+	[
+		.. EnsureDistinct(Journeys, journey => journey.Name, "Journey names must be unique", nameof(Journeys))
+			.OrderByDescending(journey => journey.ExpectedStepLocations().Count()),
+	];
+
+	/// <summary>
+	/// The fixture matrix the suite runs against. Validated at construction so that no two fixtures share
+	/// a <see cref="PlatformConfig.DeviceName"/> or a device.
+	/// </summary>
+	public IReadOnlyList<PlatformConfig> PlatformConfigs { get; } =
+		EnsureDistinct(
+			EnsureDistinct(
+				PlatformConfigs,
+				platform => platform.DeviceName,
+				"Fixture device names must be unique",
+				nameof(PlatformConfigs)
+			),
+			platform => platform.DeviceKey,
+			"Fixtures run at the same time, so each needs devices of its own",
+			nameof(PlatformConfigs)
+		);
 
 	/// <summary>
 	/// Optional storage backend for screenshots and journey artifacts. Defaults to a
@@ -51,13 +71,13 @@ public sealed record FrameworkConfig(
 	public sealed record BackendSetup(Func<PlatformConfig, string, IJourneyBackend> Create, string UrlVariable);
 
 	/// <summary>
-	/// Finds the fixture named by its <see cref="PlatformConfig.DisplayName"/>, which is how a
+	/// Finds the fixture named by its <see cref="PlatformConfig.DeviceName"/>, which is how a
 	/// fixture is named by anything outside this process — a page's request, a runner's event.
 	/// </summary>
-	/// <param name="displayName">The display name to look for.</param>
+	/// <param name="deviceName">The device name to look for.</param>
 	/// <returns>The fixture, or <c>null</c> when the matrix holds none of that name.</returns>
-	public PlatformConfig? FindPlatform(string? displayName) =>
-		PlatformConfigs.FirstOrDefault(platform => platform.DisplayName == displayName);
+	public PlatformConfig? FindPlatform(string? deviceName) =>
+		PlatformConfigs.FirstOrDefault(platform => platform.DeviceName == deviceName);
 
 	/// <summary>
 	/// Finds screenshot files no journey references — see <see cref="ScreenshotStorage.FindExtraneous"/>.
@@ -65,14 +85,19 @@ public sealed record FrameworkConfig(
 	/// <param name="deleteExtraneous">When <c>true</c>, deletes the extraneous files after collecting them.</param>
 	public List<string> FindExtraneous(bool deleteExtraneous) => Storage.FindExtraneous(this, deleteExtraneous);
 
-	private static IReadOnlyList<JourneyDefinition> EnsureDistinctNames(IReadOnlyList<JourneyDefinition> journeys)
+	private static IReadOnlyList<T> EnsureDistinct<T>(
+		IReadOnlyList<T> items,
+		Func<T, string> keyOf,
+		string rule,
+		string paramName
+	)
 	{
-		var duplicates = journeys.GroupBy(j => j.Name).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+		List<string> duplicates =
+		[
+			.. items.GroupBy(keyOf).Where(group => group.Count() > 1).Select(group => group.Key),
+		];
 		return duplicates.Count == 0
-			? journeys
-			: throw new ArgumentException(
-				$"Journey names must be unique; duplicates: {string.Join(", ", duplicates)}.",
-				nameof(journeys)
-			);
+			? items
+			: throw new ArgumentException($"{rule}; duplicates: {string.Join(", ", duplicates)}.", paramName);
 	}
 }

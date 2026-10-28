@@ -33,7 +33,7 @@ public sealed class RunLogTests
 
 		log.Log.Write(TestFixtures.Android, 2, "device up");
 
-		_ = log.Text.Should().Contain($"  {TestFixtures.Android.DisplayName} #2  device up");
+		_ = log.Text.Should().Contain($"  {TestFixtures.Android.DeviceName} #2  device up");
 	}
 
 	[Test]

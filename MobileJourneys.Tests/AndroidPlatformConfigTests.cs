@@ -41,6 +41,29 @@ public sealed class AndroidPlatformConfigTests
 			.Throw<ArgumentOutOfRangeException>();
 
 	[Test]
+	public void VerifyPlatformVersionRejectsAVersionWithoutPerAppLocales() =>
+		_ = FluentActions
+			.Invoking((TestFixtures.Android with { PlatformVersion = "12" }).VerifyPlatformVersion)
+			.Should()
+			.Throw<InvalidOperationException>()
+			.WithMessage("*'12'*13 or later*");
+
+	[Test]
+	public void VerifyPlatformVersionAcceptsTheFirstVersionWithPerAppLocales() =>
+		_ = FluentActions
+			.Invoking((TestFixtures.Android with { PlatformVersion = "13" }).VerifyPlatformVersion)
+			.Should()
+			.NotThrow();
+
+	[Test]
+	public void VerifyPlatformVersionRejectsAVersionThatIsNotANumber() =>
+		_ = FluentActions
+			.Invoking((TestFixtures.Android with { PlatformVersion = "Baklava" }).VerifyPlatformVersion)
+			.Should()
+			.Throw<InvalidOperationException>()
+			.WithMessage("*'Baklava'*");
+
+	[Test]
 	public void VerifyDependenciesFailsWithHelpfulMessageWhenAdbMissingFromAndroidHome()
 	{
 		// Point ANDROID_HOME at a temp dir without platform-tools/adb so the missing-binary

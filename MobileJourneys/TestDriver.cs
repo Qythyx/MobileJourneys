@@ -57,11 +57,10 @@ public sealed class TestDriver(
 	public PlatformConfig Config { get; } = config;
 
 	/// <summary>
-	/// The current journey's environment. Populated by <c>JourneyRunner</c> before each
-	/// journey runs; consumer-side actions read this to derive fixture-aware behavior
-	/// (e.g., picking the right localized label).
+	/// The environment the app is running in for the current journey: the one last passed to
+	/// <see cref="RelaunchApp"/> or <see cref="AdoptEnvironment"/>.
 	/// </summary>
-	public IJourneyEnvironment CurrentJourneyEnv { get; set; } = null!;
+	public IJourneyEnvironment CurrentJourneyEnv { get; private set; } = null!;
 
 	/// <summary>
 	/// The stand-in backend this fixture's app talks to, or <c>null</c> when the suite declares none.
@@ -111,15 +110,15 @@ public sealed class TestDriver(
 			);
 	}
 
-	/// <summary>Terminates the app and relaunches it with fresh environment variables.</summary>
-	/// <param name="environment">Per-journey mock state to pass as env vars.</param>
+	/// <summary>
+	/// Terminates the app, records <paramref name="environment"/> as the journey's (see <see cref="AdoptEnvironment"/>),
+	/// and launches the app with it in the fixture's <see cref="PlatformConfig.AppLocale"/>.
+	/// </summary>
+	/// <param name="environment">The environment to launch the app with.</param>
 	public void RelaunchApp(IJourneyEnvironment environment)
 	{
 		Config.TerminateApp(App);
-		// The app is now running this environment, so steps deriving their next one from
-		// CurrentJourneyEnv build on it rather than on whatever the journey started with.
-		CurrentJourneyEnv = environment;
-		Backend?.ServeEnvironment(environment);
+		AdoptEnvironment(environment);
 		Config.LaunchApp(App, environment, backendUrlVariable);
 		WaitUntilAppIsSettled();
 
@@ -138,6 +137,17 @@ public sealed class TestDriver(
 	}
 
 	private bool _firstLaunchPromptAnswered;
+
+	/// <summary>
+	/// Records <paramref name="environment"/> as the state the app is now in, without relaunching it:
+	/// <see cref="CurrentJourneyEnv"/> returns it, and the backend serves it to the app's next launch.
+	/// </summary>
+	/// <param name="environment">The state the app is now in.</param>
+	public void AdoptEnvironment(IJourneyEnvironment environment)
+	{
+		CurrentJourneyEnv = environment;
+		Backend?.ServeEnvironment(environment);
+	}
 
 	/// <summary>
 	/// Starts the app with nothing handed to it, as the device's own launcher would, and waits for it

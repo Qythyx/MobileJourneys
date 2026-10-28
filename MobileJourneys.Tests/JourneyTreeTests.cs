@@ -20,8 +20,6 @@ public sealed class JourneyTreeTests
 		public string Name => "Test";
 
 		public string BackendUrl => "";
-
-		public IJourneyEnvironment ForFixture(PlatformConfig config) => this;
 	}
 
 	private sealed record TestAction(string? Target = null) : JourneyAction(Target)

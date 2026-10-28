@@ -136,7 +136,7 @@ internal static class ViewerManifest
 
 			baselines.Sort(StringComparer.Ordinal);
 			extraneous.Sort(StringComparer.Ordinal);
-			files[platform.DisplayName] = new
+			files[platform.DeviceName] = new
 			{
 				baselines,
 				failures,
@@ -149,14 +149,14 @@ internal static class ViewerManifest
 				&& TryReadDimensions(config.Storage, platform, fb.Container, fb.File) is { } size
 			)
 			{
-				dims[platform.DisplayName] = new { w = size.Width, h = size.Height };
+				dims[platform.DeviceName] = new { w = size.Width, h = size.Height };
 			}
 		}
 
 		var manifest = new
 		{
 			title = config.DisplayName,
-			configs = config.PlatformConfigs.Select(p => p.DisplayName).ToList(),
+			configs = config.PlatformConfigs.Select(p => p.DeviceName).ToList(),
 			nodes,
 			journeys,
 			files,

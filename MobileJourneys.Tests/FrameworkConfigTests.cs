@@ -9,7 +9,7 @@ public sealed class FrameworkConfigTests
 	[Test]
 	public void FrameworkConfigPreservesAllConstructorArguments()
 	{
-		var platform = new IosPlatformConfig("26.2", "iPhone", true, "com.example.app", "/path/app", 100, 210, 3 * 2, 0.005);
+		var platform = TestFixtures.Ios;
 		var journey = new JourneyDefinition(new TestEnv(), [new TestExpectation()], [], [], "TestJourney");
 		var config = new FrameworkConfig("Display", [platform], [journey]);
 
@@ -21,19 +21,41 @@ public sealed class FrameworkConfigTests
 	[Test]
 	public void FrameworkConfigThrowsOnDuplicateJourneyNames()
 	{
-		var platform = new IosPlatformConfig("26.2", "iPhone", true, "com.example.app", "/path/app", 100, 210, 3 * 2, 0.005);
 		var journeyA = new JourneyDefinition(new TestEnv(), [new TestExpectation()], [], [], "Dup");
 		var journeyB = new JourneyDefinition(new TestEnv(), [new TestExpectation()], [], [], "Dup");
 
-		var ctor = () => _ = new FrameworkConfig("D", [platform], [journeyA, journeyB]);
+		var ctor = () => _ = new FrameworkConfig("D", [TestFixtures.Ios], [journeyA, journeyB]);
 
 		_ = ctor.Should().Throw<ArgumentException>().WithMessage("*unique*Dup*");
 	}
 
 	[Test]
+	public void FrameworkConfigThrowsOnFixturesSharingADeviceName()
+	{
+		var journey = new JourneyDefinition(new TestEnv(), [new TestExpectation()], [], [], "J");
+		var otherAvd = TestFixtures.Android with { AvdName = "Another_AVD" };
+
+		var ctor = () => _ = new FrameworkConfig("D", [TestFixtures.Android, otherAvd], [journey]);
+
+		_ = ctor.Should()
+			.Throw<ArgumentException>()
+			.WithMessage($"*device names must be unique*{otherAvd.DeviceName}*");
+	}
+
+	[Test]
+	public void FrameworkConfigThrowsOnAndroidFixturesSharingAnAvd()
+	{
+		var journey = new JourneyDefinition(new TestEnv(), [new TestExpectation()], [], [], "J");
+		var renamed = TestFixtures.Android with { DeviceName = "Another label", IsLightTheme = false };
+
+		var ctor = () => _ = new FrameworkConfig("D", [TestFixtures.Android, renamed], [journey]);
+
+		_ = ctor.Should().Throw<ArgumentException>().WithMessage($"*devices of its own*{renamed.DeviceKey}*");
+	}
+
+	[Test]
 	public void FrameworkConfigOrdersJourneysLongestFirst()
 	{
-		var platform = new IosPlatformConfig("26.2", "iPhone", true, "com.example.app", "/path/app", 100, 210, 3 * 2, 0.005);
 		static JourneyDefinition MakeJourney(string name, int steps) =>
 			new(
 				new TestEnv(),
@@ -45,7 +67,7 @@ public sealed class FrameworkConfigTests
 
 		var config = new FrameworkConfig(
 			"D",
-			[platform],
+			[TestFixtures.Ios],
 			[MakeJourney("short", 1), MakeJourney("long", 5), MakeJourney("mid", 3), MakeJourney("alsoMid", 3)]
 		);
 
@@ -86,8 +108,6 @@ public sealed class FrameworkConfigTests
 		public string Name => "Test";
 
 		public string BackendUrl => "";
-
-		public IJourneyEnvironment ForFixture(PlatformConfig config) => this;
 	}
 
 	private sealed record TestExpectation(string? Target = null) : Expectation(Target)

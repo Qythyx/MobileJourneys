@@ -38,7 +38,7 @@ internal sealed class WebReporter(string url, IReadOnlyList<TestCase> selected, 
 					.GroupBy(testCase => testCase.Config)
 					.Select(group => new
 					{
-						config = group.Key.DisplayName,
+						config = group.Key.DeviceName,
 						journeys = group.Count(),
 						steps = group.Sum(testCase => testCase.Journey.ExpectedStepLocations().Count()),
 					}),
@@ -53,7 +53,7 @@ internal sealed class WebReporter(string url, IReadOnlyList<TestCase> selected, 
 			new
 			{
 				type = "fixture-ready",
-				config = config.DisplayName,
+				config = config.DeviceName,
 				worker,
 			}
 		);
@@ -64,7 +64,7 @@ internal sealed class WebReporter(string url, IReadOnlyList<TestCase> selected, 
 			new
 			{
 				type = "fixture-retrying",
-				config = config.DisplayName,
+				config = config.DeviceName,
 				worker,
 				reason,
 			}
@@ -76,7 +76,7 @@ internal sealed class WebReporter(string url, IReadOnlyList<TestCase> selected, 
 			new
 			{
 				type = "fixture-start-retrying",
-				config = config.DisplayName,
+				config = config.DeviceName,
 				reason,
 			}
 		);
@@ -87,7 +87,7 @@ internal sealed class WebReporter(string url, IReadOnlyList<TestCase> selected, 
 			new
 			{
 				type = "journey-starting",
-				config = config.DisplayName,
+				config = config.DeviceName,
 				worker,
 				journey = journeyName,
 			}
@@ -99,7 +99,7 @@ internal sealed class WebReporter(string url, IReadOnlyList<TestCase> selected, 
 			new
 			{
 				type = "worker-lost",
-				config = config.DisplayName,
+				config = config.DeviceName,
 				worker,
 				reason,
 			}
@@ -111,7 +111,7 @@ internal sealed class WebReporter(string url, IReadOnlyList<TestCase> selected, 
 			new
 			{
 				type = "fixture-skipped",
-				config = config.DisplayName,
+				config = config.DeviceName,
 				journeys = journeyCount,
 				reason,
 			}
@@ -131,7 +131,7 @@ internal sealed class WebReporter(string url, IReadOnlyList<TestCase> selected, 
 			new
 			{
 				type = "step-completed",
-				config = step.Config.DisplayName,
+				config = step.Config.DeviceName,
 				worker,
 				container = step.Container,
 				step = step.StepName,
@@ -150,7 +150,7 @@ internal sealed class WebReporter(string url, IReadOnlyList<TestCase> selected, 
 			new
 			{
 				type = "journey-completed",
-				config = result.TestCase.Config.DisplayName,
+				config = result.TestCase.Config.DeviceName,
 				journey = result.TestCase.Journey.Name,
 				passed = result.Passed,
 				seconds = result.Duration.TotalSeconds,

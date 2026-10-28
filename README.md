@@ -78,8 +78,8 @@ checkout. NuGet packaging is on the roadmap.
 Define a record that captures your app's per-journey state (the fields each journey can override).
 `BackendUrl` is the one value handed to the app at launch — as a process environment variable on iOS
 and an intent string extra on Android — under the name `FrameworkConfig.Backend` names. Everything
-else reaches the app from the backend, so it needs no launch plumbing. `ForFixture` lets you
-specialize the environment per-platform fixture (e.g., pin language to match the fixture's theme).
+else reaches the app from the backend, so it needs no launch plumbing. The app's locale comes from the
+fixture's `AppLocale` instead, which the framework applies each time `RelaunchApp` launches the app.
 
 ```csharp
 public record MyAppEnvironment : IJourneyEnvironment
@@ -92,8 +92,6 @@ public record MyAppEnvironment : IJourneyEnvironment
     public string ServiceUrl { get; init; } = "";
 
     public string BackendUrl => ServiceUrl;
-
-    public IJourneyEnvironment ForFixture(PlatformConfig config) => this;
 }
 ```
 
@@ -125,6 +123,7 @@ public static class MyAppPlatforms
             PlatformVersion: "26.2",
             DeviceName: "iPhone 17 Pro",
             IsLightTheme: true,
+            AppLocale: CultureInfo.GetCultureInfo("en-US"),
             AppIdentifier: AppId,
             AppBinaryPath: Path.Combine(TestAssembly.RepoRoot, "src/MyApp.app"),
             NotificationBannerTop: 176,
@@ -136,6 +135,7 @@ public static class MyAppPlatforms
             DeviceName: "Pixel 8",
             AvdName: "Pixel_8_API35",
             IsLightTheme: true,
+            AppLocale: CultureInfo.GetCultureInfo("en-US"),
             AppIdentifier: AppId,
             AppBinaryPath: Path.Combine(TestAssembly.RepoRoot, "src/MyApp-Signed.apk"),
             MainActivity: null,
@@ -146,6 +146,9 @@ public static class MyAppPlatforms
     ];
 }
 ```
+
+`AppLocale` must name a region (`en-US`, not `en`), so the date and number formats the app shows are fixed
+by the fixture. Android fixtures need Android 13 or later, the first with per-app locales.
 
 A step passes when no more than `MaxDiffPixelPercentage` percent of its pixels differ from the
 baseline by more than `ColorTolerance`, the sum of the red, green and blue differences. Masked
@@ -400,7 +403,7 @@ deletes files in the temporary directory after three days.
 ## Screenshots
 
 Baselines live under
-`<consumer-project>/Screenshots/<PlatformConfig.DisplayName>/<container>/<NN> <StepLabel>.png`,
+`<consumer-project>/Screenshots/<PlatformConfig.DeviceName>/<container>/<NN> <StepLabel>.png`,
 where the container is the journey's own folder for flat `JourneyDefinition`s, or the tree node's
 nested folder path (e.g. `Home/Menu/About/`) for tree-defined journeys — shared steps are stored
 once. A step with no baseline yet fails, and its capture is kept as the same `.new` artifact a
@@ -539,17 +542,23 @@ immediately without waiting for the next poll.
 ## Custom actions and expectations
 
 Subclass `JourneyAction` (override `Execute(TestDriver)`) or `Expectation` (override
-`Verify(TestDriver)`). Override the protected `Name` property if you want a wrapper class to share
-its parent's baseline filename:
+`Verify(TestDriver)`). Override the `Name` property if you want a wrapper class to share its
+parent's baseline filename. This one picks the label for the language of the fixture's `AppLocale`,
+which the framework launches the app in.
 
 ```csharp
 public sealed record TapLocalizedAlert(string English, string Japanese) : JourneyAction(English)
 {
-    protected override string Name => nameof(TapAlertButton); // baseline says "TapAlertButton …"
+    public override string Name => nameof(TapAlertButton); // baseline says "TapAlertButton …"
     public override void Execute(TestDriver driver) =>
-        new TapAlertButton(driver.Config.IsLightTheme ? English : Japanese).Execute(driver);
+        new TapAlertButton(driver.Config.AppLocale.TwoLetterISOLanguageName == "ja" ? Japanese : English)
+            .Execute(driver);
 }
 ```
+
+An action that reads the journey's environment gets it from `CurrentJourneyEnv`, which `RelaunchApp`
+updates, and which an action that changes the app's state without relaunching updates with
+`AdoptEnvironment`.
 
 Give your app-specific actions and expectations factory helpers of their own — a static `AppDsl`
 class mirroring `MobileJourneys.Dsl`, one thin method per type — and import it with a second

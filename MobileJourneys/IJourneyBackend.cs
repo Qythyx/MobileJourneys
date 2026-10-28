@@ -12,15 +12,15 @@ public interface IJourneyBackend : IDisposable
 	/// the app with: the one passed in, plus whatever only the backend can supply, such as the address
 	/// it is answering on.
 	/// </summary>
-	/// <param name="environment">The journey's environment, already specialized for the fixture.</param>
+	/// <param name="environment">The journey's environment.</param>
 	/// <returns>The environment the app should launch with.</returns>
 	IJourneyEnvironment PrepareFor(IJourneyEnvironment environment);
 
 	/// <summary>
-	/// Puts the device state the app reads at start-up in place. Called before every launch, so a step
-	/// that relaunches with something changed cannot leave the backend serving the previous value.
+	/// Puts the device state the app reads at start-up in place. Called whenever the journey's environment
+	/// changes, so the app's next launch never reads a previous value.
 	/// </summary>
-	/// <param name="environment">The environment the app is about to launch with.</param>
+	/// <param name="environment">The environment the app now runs in, or is about to launch with.</param>
 	void ServeEnvironment(IJourneyEnvironment environment);
 
 	/// <summary>

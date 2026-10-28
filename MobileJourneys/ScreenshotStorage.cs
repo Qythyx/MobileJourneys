@@ -67,11 +67,11 @@ public abstract class ScreenshotStorage
 	protected abstract void DeleteEmptyContainers(PlatformConfig config);
 
 	/// <summary>Returns a display string identifying a step's container (used in failure messages).</summary>
-	public virtual string GetReportPath(TestStep testStep) => $"{testStep.Config.DisplayName}/{testStep.Container}/";
+	public virtual string GetReportPath(TestStep testStep) => $"{testStep.Config.DeviceName}/{testStep.Container}/";
 
 	/// <summary>Returns a display string identifying a single stored file (used in the extraneous-files report).</summary>
 	protected virtual string GetReportPath(PlatformConfig config, StoredFile file) =>
-		$"{config.DisplayName}/{file.Container}/{file.FileName}";
+		$"{config.DeviceName}/{file.Container}/{file.FileName}";
 
 	/// <summary>
 	/// Finds stored files that no journey in <paramref name="config"/> references: baselines

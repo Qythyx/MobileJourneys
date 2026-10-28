@@ -29,11 +29,7 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 
 	private readonly Dictionary<PlatformConfig, FixtureProgress> rows = fixtures.ToDictionary(
 		fixture => fixture.Config,
-		fixture => new FixtureProgress(
-			RunReporter.FixtureLabel(fixture.Config),
-			fixture.Total,
-			fixture.Config.Instances
-		)
+		fixture => new FixtureProgress(fixture.Config.DeviceName, fixture.Total, fixture.Config.Instances)
 	);
 
 	private bool stopping;

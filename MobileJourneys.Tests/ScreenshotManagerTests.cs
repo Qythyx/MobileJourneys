@@ -157,9 +157,6 @@ public sealed class ScreenshotManagerTests
 
 	// --- CompareWithBaselineAndDispose (instance API) ---
 
-	private static IosPlatformConfig BuildConfig() =>
-		new("26.2", "iPhone", IsLightTheme: true, "com.example.app", "/unused", 100, 210, 3 * 2, 0.005);
-
 	/// <summary>Stores an image as the step's baseline, carrying the mask regions a run stores in its captures.</summary>
 	private static void SeedBaseline(
 		InMemoryScreenshotStorage storage,
@@ -182,7 +179,7 @@ public sealed class ScreenshotManagerTests
 	{
 		var storage = new InMemoryScreenshotStorage();
 		var manager = new ScreenshotManager(storage);
-		var key = new TestStep(BuildConfig(), "Journey", "01 Step", "Journey");
+		var key = new TestStep(TestFixtures.Ios, "Journey", "01 Step", "Journey");
 
 		var result = manager.CompareWithBaselineAndDispose(new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0)), key, []);
 
@@ -194,12 +191,11 @@ public sealed class ScreenshotManagerTests
 	{
 		var storage = new InMemoryScreenshotStorage();
 		var manager = new ScreenshotManager(storage);
-		var config = BuildConfig();
-		var key = new TestStep(config, "Journey", "01 Step", "Journey");
+		var key = new TestStep(TestFixtures.Ios, "Journey", "01 Step", "Journey");
 
 		_ = manager.CompareWithBaselineAndDispose(new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0)), key, []);
 
-		_ = storage.ListAllFiles(config, "Journey").Should().Equal("01 Step [Journey].new.png");
+		_ = storage.ListAllFiles(TestFixtures.Ios, "Journey").Should().Equal("01 Step [Journey].new.png");
 	}
 
 	[Test]
@@ -207,15 +203,14 @@ public sealed class ScreenshotManagerTests
 	{
 		var storage = new InMemoryScreenshotStorage();
 		var manager = new ScreenshotManager(storage);
-		var config = BuildConfig();
-		var key = new TestStep(config, "Journey", "01 Step", "Journey");
+		var key = new TestStep(TestFixtures.Ios, "Journey", "01 Step", "Journey");
 		SeedBaseline(storage, key, new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0)), []);
 
 		var result = manager.CompareWithBaselineAndDispose(new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0)), key, []);
 
 		_ = result.Outcome.Should().Be(ScreenshotOutcome.Matched);
 		_ = result.ReportPath.Should().BeNull();
-		_ = storage.ListAllFiles(config, "Journey").Should().ContainSingle().Which.Should().Be("01 Step.png");
+		_ = storage.ListAllFiles(TestFixtures.Ios, "Journey").Should().ContainSingle().Which.Should().Be("01 Step.png");
 	}
 
 	[Test]
@@ -223,8 +218,7 @@ public sealed class ScreenshotManagerTests
 	{
 		var storage = new InMemoryScreenshotStorage();
 		var manager = new ScreenshotManager(storage);
-		var config = BuildConfig();
-		var key = new TestStep(config, "Journey", "01 Step", "Journey");
+		var key = new TestStep(TestFixtures.Ios, "Journey", "01 Step", "Journey");
 
 		SeedBaseline(storage, key, new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0)), []);
 
@@ -243,8 +237,7 @@ public sealed class ScreenshotManagerTests
 	{
 		var storage = new InMemoryScreenshotStorage();
 		var manager = new ScreenshotManager(storage);
-		var config = BuildConfig();
-		var key = new TestStep(config, "Journey", "01 Step", "Journey");
+		var key = new TestStep(TestFixtures.Ios, "Journey", "01 Step", "Journey");
 
 		SeedBaseline(storage, key, new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0)), []);
 
@@ -255,10 +248,13 @@ public sealed class ScreenshotManagerTests
 		_ = storage.NewScreenshotExists(key).Should().BeTrue();
 		_ = storage.FailScreenshotExists(key).Should().BeTrue();
 		_ = storage
-			.ListAllFiles(config, "Journey")
+			.ListAllFiles(TestFixtures.Ios, "Journey")
 			.Should()
 			.BeEquivalentTo("01 Step.png", "01 Step [Journey].new.png", "01 Step [Journey]_FAIL_different size.png");
-		_ = storage.ReadRaw(config, "Journey", "01 Step [Journey]_FAIL_different size.png").Should().BeEmpty();
+		_ = storage
+			.ReadRaw(TestFixtures.Ios, "Journey", "01 Step [Journey]_FAIL_different size.png")
+			.Should()
+			.BeEmpty();
 	}
 
 	[Test]
@@ -266,8 +262,7 @@ public sealed class ScreenshotManagerTests
 	{
 		var storage = new InMemoryScreenshotStorage();
 		var manager = new ScreenshotManager(storage);
-		var config = BuildConfig();
-		var key = new TestStep(config, "Journey", "01 Step", "Journey");
+		var key = new TestStep(TestFixtures.Ios, "Journey", "01 Step", "Journey");
 
 		// Seed a baseline (green with a red stripe at x∈[20,40)) whose stored mask is a wide
 		// band x∈[10,40) — simulating a run where the dynamic element's content was wide.
@@ -289,8 +284,7 @@ public sealed class ScreenshotManagerTests
 	{
 		var storage = new InMemoryScreenshotStorage();
 		var manager = new ScreenshotManager(storage);
-		var config = BuildConfig();
-		var key = new TestStep(config, "Journey", "01 Step", "Journey");
+		var key = new TestStep(TestFixtures.Ios, "Journey", "01 Step", "Journey");
 		Rectangle[] liveMasks = [new Rectangle(10, 0, 30, 100)];
 
 		SeedBaseline(storage, key, new Image<Rgb24>(100, 100, new Rgb24(0, 128, 0)), []);
@@ -305,8 +299,7 @@ public sealed class ScreenshotManagerTests
 	{
 		var storage = new InMemoryScreenshotStorage();
 		var manager = new ScreenshotManager(storage);
-		var config = BuildConfig();
-		var key = new TestStep(config, "Journey", "01 Step", "Journey");
+		var key = new TestStep(TestFixtures.Ios, "Journey", "01 Step", "Journey");
 
 		// Same scenario, but the baseline carries no stored mask (older baseline / no masking on
 		// the seeding run). Without a baseline mask to union, the narrow live mask can't cover the
@@ -326,14 +319,13 @@ public sealed class ScreenshotManagerTests
 	{
 		var storage = new InMemoryScreenshotStorage();
 		var manager = new ScreenshotManager(storage);
-		var config = BuildConfig();
-		var key = new TestStep(config, "Journey", "01 Step", "Journey");
+		var key = new TestStep(TestFixtures.Ios, "Journey", "01 Step", "Journey");
 
 		using var stream = new MemoryStream();
 		new Image<Rgb24>(10, 10).SaveAsPng(stream);
 		_ = manager.WriteFailScreenshot(key, "boom", stream.ToArray(), "System.Exception: boom");
 
-		using var written = Image.Load(storage.ReadRaw(config, "Journey", "01 Step [Journey]_FAIL_boom.png"));
+		using var written = Image.Load(storage.ReadRaw(TestFixtures.Ios, "Journey", "01 Step [Journey]_FAIL_boom.png"));
 		_ = ImageHelpers.GetFailureDetails(written).Should().Be("System.Exception: boom");
 	}
 
@@ -342,8 +334,7 @@ public sealed class ScreenshotManagerTests
 	{
 		var storage = new InMemoryScreenshotStorage();
 		var manager = new ScreenshotManager(storage);
-		var config = BuildConfig();
-		var key = new TestStep(config, "Journey", "01 Step", "Journey");
+		var key = new TestStep(TestFixtures.Ios, "Journey", "01 Step", "Journey");
 
 		// A dead session answers a screenshot request the same way it answers everything else, so the
 		// failure that most needs explaining is the one arriving with no image to explain it in.
@@ -352,11 +343,11 @@ public sealed class ScreenshotManagerTests
 		_ = manager.WriteFailScreenshot(key, "sanitized and truncated", [], Details);
 
 		_ = storage
-			.ListAllFiles(config, "Journey")
+			.ListAllFiles(TestFixtures.Ios, "Journey")
 			.Should()
 			.BeEquivalentTo("01 Step [Journey]_FAIL_sanitized and truncated.png", "01 Step [Journey].ERROR.txt");
 		_ = System
-			.Text.Encoding.UTF8.GetString(storage.ReadRaw(config, "Journey", "01 Step [Journey].ERROR.txt"))
+			.Text.Encoding.UTF8.GetString(storage.ReadRaw(TestFixtures.Ios, "Journey", "01 Step [Journey].ERROR.txt"))
 			.Should()
 			.Be(Details);
 	}

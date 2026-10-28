@@ -15,7 +15,6 @@ public sealed class FilesystemScreenshotStorageTests
 {
 	private string _tempRoot = null!;
 	private FilesystemScreenshotStorage _storage = null!;
-	private IosPlatformConfig _config = null!;
 
 	[SetUp]
 	public void SetUp()
@@ -23,7 +22,6 @@ public sealed class FilesystemScreenshotStorageTests
 		_tempRoot = Path.Combine(Path.GetTempPath(), $"MobileJourneysTests-{Guid.NewGuid():N}");
 		_ = Directory.CreateDirectory(_tempRoot);
 		_storage = new(_tempRoot);
-		_config = new("26.2", "iPhone", IsLightTheme: true, "com.example.app", "/unused", 100, 210, 3 * 2, 0.005);
 	}
 
 	[TearDown]
@@ -35,7 +33,7 @@ public sealed class FilesystemScreenshotStorageTests
 		}
 	}
 
-	private TestStep K(string journey, string step) => new(_config, journey, step, journey);
+	private static TestStep K(string journey, string step) => new(TestFixtures.Ios, journey, step, journey);
 
 	private static JourneyDefinition J(string name) =>
 		new(new TestJourneyEnvironment(), [new TestExpectation()], [], [], name);
@@ -45,8 +43,6 @@ public sealed class FilesystemScreenshotStorageTests
 		public string Name => "Test";
 
 		public string BackendUrl => "";
-
-		public IJourneyEnvironment ForFixture(PlatformConfig config) => this;
 	}
 
 	private sealed record TestExpectation : Expectation
@@ -54,7 +50,7 @@ public sealed class FilesystemScreenshotStorageTests
 		public override void Verify(TestDriver driver) { }
 	}
 
-	private string JourneyPath(string journeyName) => Path.Combine(_tempRoot, _config.DisplayName, journeyName);
+	private string JourneyPath(string journeyName) => Path.Combine(_tempRoot, TestFixtures.Ios.DeviceName, journeyName);
 
 	private string FilePath(string journeyName, string fileName) => Path.Combine(JourneyPath(journeyName), fileName);
 
@@ -73,9 +69,11 @@ public sealed class FilesystemScreenshotStorageTests
 	[Test]
 	public void WriteBaselineNestsContainerPathSegments()
 	{
-		_storage.WriteBaseline(new(_config, "Home/Menu", "02 Step", "About"), [0]);
+		_storage.WriteBaseline(new(TestFixtures.Ios, "Home/Menu", "02 Step", "About"), [0]);
 
-		_ = File.Exists(Path.Combine(_tempRoot, _config.DisplayName, "Home", "Menu", "02 Step.png")).Should().BeTrue();
+		_ = File.Exists(Path.Combine(_tempRoot, TestFixtures.Ios.DeviceName, "Home", "Menu", "02 Step.png"))
+			.Should()
+			.BeTrue();
 	}
 
 	[Test]
@@ -115,7 +113,7 @@ public sealed class FilesystemScreenshotStorageTests
 	{
 		_storage.WriteNewScreenshot(K("Journey", "01 Step"), [0]);
 
-		_ = _storage.HasFailureArtifacts(_config, J("Journey")).Should().BeTrue();
+		_ = _storage.HasFailureArtifacts(TestFixtures.Ios, J("Journey")).Should().BeTrue();
 	}
 
 	[Test]
@@ -123,7 +121,7 @@ public sealed class FilesystemScreenshotStorageTests
 	{
 		_storage.WriteBaseline(K("Journey", "01 Step"), [0]);
 
-		_ = _storage.HasFailureArtifacts(_config, J("Journey")).Should().BeFalse();
+		_ = _storage.HasFailureArtifacts(TestFixtures.Ios, J("Journey")).Should().BeFalse();
 	}
 
 	[Test]
@@ -146,14 +144,14 @@ public sealed class FilesystemScreenshotStorageTests
 	[Test]
 	public void DeleteFailureArtifactsForStepLeavesOtherJourneysArtifactsInSharedContainer()
 	{
-		var aboutStep = new TestStep(_config, "Home/Menu", "02 Step", "About");
-		var contactStep = new TestStep(_config, "Home/Menu", "02 Step", "ContactUs");
+		var aboutStep = new TestStep(TestFixtures.Ios, "Home/Menu", "02 Step", "About");
+		var contactStep = new TestStep(TestFixtures.Ios, "Home/Menu", "02 Step", "ContactUs");
 		_storage.WriteNewScreenshot(aboutStep, [0]);
 		_storage.WriteNewScreenshot(contactStep, [0]);
 
 		_storage.DeleteFailureArtifactsForStep(aboutStep);
 
-		var sharedDir = Path.Combine(_tempRoot, _config.DisplayName, "Home", "Menu");
+		var sharedDir = Path.Combine(_tempRoot, TestFixtures.Ios.DeviceName, "Home", "Menu");
 		_ = File.Exists(Path.Combine(sharedDir, "02 Step [About].new.png")).Should().BeFalse();
 		_ = File.Exists(Path.Combine(sharedDir, "02 Step [ContactUs].new.png")).Should().BeTrue();
 	}
@@ -165,7 +163,7 @@ public sealed class FilesystemScreenshotStorageTests
 		_storage.WriteNewScreenshot(K("Journey", "01 Step"), [0]);
 		_storage.WriteCrashLog(K("Journey", "01 Step"), "boom");
 
-		_storage.DeleteAllFailureArtifacts(_config, J("Journey"));
+		_storage.DeleteAllFailureArtifacts(TestFixtures.Ios, J("Journey"));
 
 		_ = File.Exists(FilePath("Journey", "01 Step.png")).Should().BeTrue();
 		_ = File.Exists(FilePath("Journey", "01 Step [Journey].new.png")).Should().BeFalse();
@@ -183,23 +181,23 @@ public sealed class FilesystemScreenshotStorageTests
 	public void FileVersionIsUnchangedWhenAFileIsRewrittenWithTheSameBytes()
 	{
 		_storage.WriteBaseline(K("Journey", "01 Step"), [1, 2, 3]);
-		var before = _storage.FileVersion(_config, "Journey", "01 Step.png");
+		var before = _storage.FileVersion(TestFixtures.Ios, "Journey", "01 Step.png");
 
 		_storage.WriteBaseline(K("Journey", "01 Step"), [1, 2, 3]);
 		File.SetLastWriteTimeUtc(FilePath("Journey", "01 Step.png"), DateTime.UtcNow.AddDays(1));
 
-		_ = _storage.FileVersion(_config, "Journey", "01 Step.png").Should().Be(before);
+		_ = _storage.FileVersion(TestFixtures.Ios, "Journey", "01 Step.png").Should().Be(before);
 	}
 
 	[Test]
 	public void FileVersionChangesWhenAFileIsRewrittenWithDifferentBytesOfTheSameLength()
 	{
 		_storage.WriteBaseline(K("Journey", "01 Step"), [1, 2, 3]);
-		var before = _storage.FileVersion(_config, "Journey", "01 Step.png");
+		var before = _storage.FileVersion(TestFixtures.Ios, "Journey", "01 Step.png");
 
 		_storage.WriteBaseline(K("Journey", "01 Step"), [3, 2, 1]);
 
-		_ = _storage.FileVersion(_config, "Journey", "01 Step.png").Should().NotBe(before);
+		_ = _storage.FileVersion(TestFixtures.Ios, "Journey", "01 Step.png").Should().NotBe(before);
 	}
 
 	[Test]
@@ -207,12 +205,12 @@ public sealed class FilesystemScreenshotStorageTests
 	{
 		_storage.WriteBaseline(K("Journey", "01 Step"), [1, 2, 3]);
 		var modified = File.GetLastWriteTimeUtc(FilePath("Journey", "01 Step.png"));
-		var before = _storage.FileVersion(_config, "Journey", "01 Step.png");
+		var before = _storage.FileVersion(TestFixtures.Ios, "Journey", "01 Step.png");
 
 		_storage.WriteBaseline(K("Journey", "01 Step"), [3, 2, 1]);
 		File.SetLastWriteTimeUtc(FilePath("Journey", "01 Step.png"), modified);
 
-		_ = _storage.FileVersion(_config, "Journey", "01 Step.png").Should().NotBe(before);
+		_ = _storage.FileVersion(TestFixtures.Ios, "Journey", "01 Step.png").Should().NotBe(before);
 	}
 
 	[Test]
@@ -220,11 +218,11 @@ public sealed class FilesystemScreenshotStorageTests
 	{
 		_storage.WriteBaseline(K("Journey", "01 Step"), [1, 2, 3]);
 		File.SetLastWriteTimeUtc(FilePath("Journey", "01 Step.png"), DateTime.UtcNow.AddHours(-1));
-		var before = _storage.FileVersion(_config, "Journey", "01 Step.png");
+		var before = _storage.FileVersion(TestFixtures.Ios, "Journey", "01 Step.png");
 
 		_storage.WriteBaseline(K("Journey", "01 Step"), [3, 2, 1]);
 
-		_ = _storage.FileVersion(_config, "Journey", "01 Step.png").Should().NotBe(before);
+		_ = _storage.FileVersion(TestFixtures.Ios, "Journey", "01 Step.png").Should().NotBe(before);
 	}
 
 	[Test]
@@ -233,17 +231,17 @@ public sealed class FilesystemScreenshotStorageTests
 		var modified = DateTime.UtcNow.AddHours(-1);
 		_storage.WriteBaseline(K("Journey", "01 Step"), [1, 2, 3]);
 		File.SetLastWriteTimeUtc(FilePath("Journey", "01 Step.png"), modified);
-		var before = _storage.FileVersion(_config, "Journey", "01 Step.png");
+		var before = _storage.FileVersion(TestFixtures.Ios, "Journey", "01 Step.png");
 
 		_storage.WriteBaseline(K("Journey", "01 Step"), [3, 2, 1]);
 		File.SetLastWriteTimeUtc(FilePath("Journey", "01 Step.png"), modified);
 
-		_ = _storage.FileVersion(_config, "Journey", "01 Step.png").Should().Be(before);
+		_ = _storage.FileVersion(TestFixtures.Ios, "Journey", "01 Step.png").Should().Be(before);
 	}
 
 	[Test]
 	public void FileVersionIsEmptyWhenTheFileIsMissing() =>
-		_ = _storage.FileVersion(_config, "Journey", "01 Step.png").Should().BeEmpty();
+		_ = _storage.FileVersion(TestFixtures.Ios, "Journey", "01 Step.png").Should().BeEmpty();
 
 	[Test]
 	public void DefaultRootsUnderTestAssemblyProjectRootPath()

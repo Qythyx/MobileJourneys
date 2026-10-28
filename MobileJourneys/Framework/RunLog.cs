@@ -42,14 +42,14 @@ internal sealed class RunLog(TextWriter writer, string filePath, TimeProvider cl
 	/// <summary>Writes something that happened to a fixture, or to one of its devices when no worker is known.</summary>
 	/// <param name="fixture">The fixture.</param>
 	/// <param name="text">What happened; lines after the first are indented under it.</param>
-	public void Write(PlatformConfig fixture, string text) => WriteEntry(fixture.DisplayName, text);
+	public void Write(PlatformConfig fixture, string text) => WriteEntry(fixture.DeviceName, text);
 
 	/// <summary>Writes something that happened to one of a fixture's workers.</summary>
 	/// <param name="fixture">The fixture the worker belongs to.</param>
 	/// <param name="worker">The worker's 1-based index.</param>
 	/// <param name="text">What happened; lines after the first are indented under it.</param>
 	public void Write(PlatformConfig fixture, int worker, string text) =>
-		WriteEntry($"{fixture.DisplayName} #{worker}", text);
+		WriteEntry($"{fixture.DeviceName} #{worker}", text);
 
 	/// <inheritdoc/>
 	public void Dispose()

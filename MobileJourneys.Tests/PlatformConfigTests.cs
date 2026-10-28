@@ -1,3 +1,4 @@
+using System.Globalization;
 using AwesomeAssertions;
 using NUnit.Framework;
 
@@ -10,6 +11,7 @@ public sealed class PlatformConfigTests
 		"26.2",
 		"iPhone 17 Pro",
 		IsLightTheme: true,
+		CultureInfo.GetCultureInfo("en-US"),
 		"com.example.app",
 		"/path/to/app.app",
 		100,
@@ -23,6 +25,7 @@ public sealed class PlatformConfigTests
 		"Small Phone",
 		"Pixel_API35",
 		IsLightTheme: false,
+		CultureInfo.GetCultureInfo("en-US"),
 		"com.example.app",
 		"/path/Signed.apk",
 		null,
@@ -47,15 +50,7 @@ public sealed class PlatformConfigTests
 	}
 
 	[Test]
-	public void DisplayNameFormatsAllFiveDimensions() =>
-		IosLight.DisplayName.Should().Be("iOS · 26.2 · iPhone 17 Pro · light");
-
-	[Test]
-	public void DisplayNameDarkThemeAppearsAsDark() =>
-		AndroidDark.DisplayName.Should().Be("Android · 15 · Small Phone · dark");
-
-	[Test]
-	public void ToStringEqualsDisplayName() => IosLight.ToString().Should().Be(IosLight.DisplayName);
+	public void ToStringEqualsDeviceName() => IosLight.ToString().Should().Be(IosLight.DeviceName);
 
 	[Test]
 	public void InstancesDefaultsToOne() => _ = IosLight.Instances.Should().Be(1);
@@ -65,10 +60,50 @@ public sealed class PlatformConfigTests
 
 	[Test]
 	public void InstancesRejectsZero() =>
+		_ = FluentActions.Invoking(() => IosLight with { Instances = 0 }).Should().Throw<ArgumentOutOfRangeException>();
+
+	[Test]
+	public void AppLocaleWithoutARegionIsRejectedWhenConstructed() =>
 		_ = FluentActions
-			.Invoking(() => IosLight with { Instances = 0 })
+			.Invoking(() =>
+				new IosPlatformConfig(
+					"26.2",
+					"iPhone",
+					true,
+					CultureInfo.GetCultureInfo("ja"),
+					"id",
+					"/app",
+					1,
+					2,
+					3,
+					0
+				)
+			)
 			.Should()
-			.Throw<ArgumentOutOfRangeException>();
+			.Throw<ArgumentException>()
+			.WithParameterName(nameof(PlatformConfig.AppLocale));
+
+	[Test]
+	public void AppLocaleWithoutARegionIsRejectedWhenCopied() =>
+		_ = FluentActions
+			.Invoking(() => AndroidDark with { AppLocale = CultureInfo.GetCultureInfo("ja") })
+			.Should()
+			.Throw<ArgumentException>()
+			.WithParameterName(nameof(PlatformConfig.AppLocale));
+
+	[Test]
+	public void AppLocaleInvariantIsRejected() =>
+		_ = FluentActions
+			.Invoking(() => IosLight with { AppLocale = CultureInfo.InvariantCulture })
+			.Should()
+			.Throw<ArgumentException>()
+			.WithParameterName(nameof(PlatformConfig.AppLocale));
+
+	[Test]
+	public void IosLaunchArgumentsSetTheAppsLanguageAndRegion() =>
+		_ = (IosLight with { AppLocale = CultureInfo.GetCultureInfo("ja-JP") })
+			.LaunchArguments.Should()
+			.Equal("-AppleLanguages", "(ja-JP)", "-AppleLocale", "ja_JP");
 
 	[Test]
 	public void WaitBudgetDefaultsToAMinute() => _ = IosLight.WaitBudget.Should().Be(TimeSpan.FromSeconds(60));

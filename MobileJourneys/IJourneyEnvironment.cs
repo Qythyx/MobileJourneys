@@ -16,11 +16,4 @@ public interface IJourneyEnvironment
 	/// <see cref="FrameworkConfig.BackendSetup.UrlVariable"/> gives.
 	/// </summary>
 	string BackendUrl { get; }
-
-	/// <summary>
-	/// Returns a copy of this environment specialized for the given fixture (platform +
-	/// theme). Implementations typically pin language or other fixture-derived state here.
-	/// </summary>
-	/// <param name="config">The platform fixture being executed.</param>
-	IJourneyEnvironment ForFixture(PlatformConfig config);
 }

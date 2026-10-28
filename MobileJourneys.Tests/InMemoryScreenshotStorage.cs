@@ -4,7 +4,7 @@ namespace MobileJourneys.Tests;
 
 /// <summary>
 /// In-memory <see cref="ScreenshotStorage"/> for unit tests. Files live in nested
-/// dictionaries keyed by platform display name, container path, and filename, using the
+/// dictionaries keyed by platform device name, container path, and filename, using the
 /// same <see cref="ArtifactNaming"/> layout as <see cref="FilesystemScreenshotStorage"/>
 /// so the two backends produce the same observable behavior.
 /// </summary>
@@ -24,7 +24,7 @@ internal sealed class InMemoryScreenshotStorage : ScreenshotStorage
 			&& container.TryGetValue(fileName, out var bytes)
 			? bytes
 			: throw new FileNotFoundException(
-				$"No baseline '{fileName}' under '{testStep.Config.DisplayName}/{testStep.Container}'."
+				$"No baseline '{fileName}' under '{testStep.Config.DeviceName}/{testStep.Container}'."
 			);
 	}
 
@@ -63,7 +63,7 @@ internal sealed class InMemoryScreenshotStorage : ScreenshotStorage
 			Encoding.UTF8.GetBytes(content);
 
 	protected override IReadOnlyList<StoredFile> ListFiles(PlatformConfig config) =>
-		_files.TryGetValue(config.DisplayName, out var platform)
+		_files.TryGetValue(config.DeviceName, out var platform)
 			?
 			[
 				.. platform.SelectMany(container =>
@@ -128,7 +128,7 @@ internal sealed class InMemoryScreenshotStorage : ScreenshotStorage
 
 	protected override void DeleteEmptyContainers(PlatformConfig config)
 	{
-		if (!_files.TryGetValue(config.DisplayName, out var platform))
+		if (!_files.TryGetValue(config.DeviceName, out var platform))
 		{
 			return;
 		}
@@ -169,23 +169,23 @@ internal sealed class InMemoryScreenshotStorage : ScreenshotStorage
 	internal byte[] ReadRaw(PlatformConfig config, string container, string fileName) =>
 		Lookup(config, container) is { } files && files.TryGetValue(fileName, out var bytes)
 			? bytes
-			: throw new FileNotFoundException($"No artifact '{fileName}' under '{config.DisplayName}/{container}'.");
+			: throw new FileNotFoundException($"No artifact '{fileName}' under '{config.DeviceName}/{container}'.");
 
 	/// <summary>Lists every stored file name under the container (test introspection only).</summary>
 	internal IReadOnlyList<string> ListAllFiles(PlatformConfig config, string container) =>
 		Lookup(config, container) is { } files ? [.. files.Keys] : [];
 
 	private Dictionary<string, byte[]>? Lookup(PlatformConfig config, string container) =>
-		_files.TryGetValue(config.DisplayName, out var platform) && platform.TryGetValue(container, out var files)
+		_files.TryGetValue(config.DeviceName, out var platform) && platform.TryGetValue(container, out var files)
 			? files
 			: null;
 
 	private Dictionary<string, byte[]> GetOrCreateContainer(PlatformConfig config, string container)
 	{
-		if (!_files.TryGetValue(config.DisplayName, out var platform))
+		if (!_files.TryGetValue(config.DeviceName, out var platform))
 		{
 			platform = [];
-			_files[config.DisplayName] = platform;
+			_files[config.DeviceName] = platform;
 		}
 
 		if (!platform.TryGetValue(container, out var files))

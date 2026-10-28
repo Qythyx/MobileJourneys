@@ -43,7 +43,7 @@ internal sealed class ConsoleReporter(RunLog log) : RunReporter(log)
 		lock (Gate)
 		{
 			AnsiConsole.MarkupLine(
-				$"{mark} {Markup.Escape(Tag(FixtureLabel(result.TestCase.Config)))} {name} [dim]{seconds}s[/]"
+				$"{mark} {Markup.Escape(Tag(result.TestCase.Config.DeviceName))} {name} [dim]{seconds}s[/]"
 			);
 		}
 	}
@@ -90,7 +90,7 @@ internal sealed class ConsoleReporter(RunLog log) : RunReporter(log)
 
 	/// <summary>Names a worker the short way, for a step line's tag.</summary>
 	private static string StepLabel(PlatformConfig config, int worker) =>
-		config.Instances == 1 ? FixtureLabel(config) : $"{FixtureLabel(config)} #{worker}";
+		config.Instances == 1 ? config.DeviceName : $"{config.DeviceName} #{worker}";
 
 	/// <summary>Names a worker the long way, for lines that stand on their own.</summary>
 	private static string WorkerLabel(PlatformConfig config, int worker) =>
