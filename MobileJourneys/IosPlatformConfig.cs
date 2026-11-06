@@ -352,21 +352,18 @@ public sealed record IosPlatformConfig(
 		// Enables hardware keyboard on an iOS simulator so the software keyboard doesn't appear.
 		// The Appium connectHardwareKeyboard capability only works when Appium launches the
 		// simulator; for pre-booted simulators the preference must be set directly.
-		ProcessRunner.Run(
-			"xcrun",
-			[
-				"simctl",
-				"spawn",
-				deviceId,
-				"defaults",
-				"write",
-				"com.apple.Preferences",
-				"ConnectHardwareKeyboard",
-				"-bool",
-				"true",
-			]
-		);
+		WritePreference("com.apple.Preferences", "ConnectHardwareKeyboard", true);
+
+		// The spell checker underlines a typed test value it does not know, some time after the
+		// input is left, so whether a screenshot carries the underline is a race.
+		WritePreference("com.apple.keyboard.preferences", "KeyboardCheckSpelling", false);
 		driver.DismissAlertIfPresent(TimeSpan.FromSeconds(5));
+
+		void WritePreference(string domain, string key, bool value) =>
+			ProcessRunner.Run(
+				"xcrun",
+				["simctl", "spawn", deviceId, "defaults", "write", domain, key, "-bool", value ? "true" : "false"]
+			);
 	}
 
 	internal static string ToIosContentSize(SystemFontSize size) =>
