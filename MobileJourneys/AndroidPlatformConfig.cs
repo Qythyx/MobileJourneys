@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.Text.RegularExpressions;
 using MobileJourneys.Framework;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Appium;
@@ -26,7 +27,7 @@ namespace MobileJourneys;
 /// <param name="NotificationBannerBottom">Where a notification banner's bottom edge sits on this device, in screenshot pixels.</param>
 /// <param name="ColorTolerance">Permitted per-pixel color delta (sum of R, G, B deltas) when comparing against baselines.</param>
 /// <param name="MaxDiffPixelPercentage">Percentage of pixels permitted to exceed <paramref name="ColorTolerance"/> before the step fails.</param>
-public sealed record AndroidPlatformConfig(
+public sealed partial record AndroidPlatformConfig(
 	string PlatformVersion,
 	string DeviceName,
 	string AvdName,
@@ -828,10 +829,13 @@ public sealed record AndroidPlatformConfig(
 	/// activity, so readiness ends with starting the home screen — the kind of call a session opens
 	/// with, given the time a session gives it. One that times out has stopped answering, and waiting
 	/// longer does not bring it back.
+	/// <para/>
+	/// A device that started its home screen is faulty when <see cref="FindStatusBarFault"/> finds one.
 	/// </remarks>
 	internal override DeviceReadiness WaitUntilDeviceIsReady(
 		string deviceId,
 		TimeSpan timeout,
+		RunLog log,
 		CancellationToken cancellationToken
 	)
 	{
@@ -858,7 +862,17 @@ public sealed record AndroidPlatformConfig(
 				: null;
 			if (home is { ExitCode: 0 })
 			{
-				return DeviceReadiness.Ready;
+				var fault = FindStatusBarFault(
+					RunAdb(deviceId, "shell", "dumpsys window | grep -m1 type=statusBars")?.Output ?? string.Empty,
+					RunAdb(deviceId, "shell", "dumpsys display | grep -m1 -o 'DisplayCutout{insets=[^}]*'")?.Output
+						?? string.Empty
+				);
+				if (fault is not null)
+				{
+					log.Write(this, $"{deviceId} is faulty: {fault}");
+				}
+
+				return fault is null ? DeviceReadiness.Ready : DeviceReadiness.Faulty;
 			}
 
 			if (home is { Status: ProcessRunner.ShellResultStatus.TimedOut })
@@ -872,6 +886,47 @@ public sealed record AndroidPlatformConfig(
 
 		return DeviceReadiness.Booting;
 	}
+
+	/// <summary>
+	/// Checks that the status bar is at least as tall as the camera cutout, as Android sizes it on a
+	/// screen with one. An emulator can come out of a cold boot with its status bar at the height for a
+	/// screen without a cutout, and it stays that way until it is restarted. Windows inset by the
+	/// status bar then sit higher than windows inset by the cutout, so a screenshot shifts by the
+	/// difference.
+	/// </summary>
+	/// <param name="statusBarSource">The status bar's <c>InsetsSource</c> line from <c>dumpsys window</c>.</param>
+	/// <param name="cutout">
+	/// The <c>DisplayCutout{insets=…</c> text from <c>dumpsys display</c>, which is empty on a screen
+	/// without a cutout, since Android prints none for it.
+	/// </param>
+	/// <returns>What is wrong, ready to log, or <c>null</c> when the status bar covers the cutout.</returns>
+	internal static string? FindStatusBarFault(string statusBarSource, string cutout)
+	{
+		string? fault = null;
+		var statusBar = StatusBarBottom().Match(statusBarSource);
+		if (!statusBar.Success)
+		{
+			fault = $"its status bar could not be read from \"{statusBarSource.Trim()}\"";
+		}
+		else if (CutoutTop().Match(cutout) is { Success: true } cutoutTop)
+		{
+			var statusBarHeight = int.Parse(statusBar.Groups[1].Value, CultureInfo.InvariantCulture);
+			var cutoutHeight = int.Parse(cutoutTop.Groups[1].Value, CultureInfo.InvariantCulture);
+			if (statusBarHeight < cutoutHeight)
+			{
+				fault =
+					$"its status bar is {statusBarHeight} px tall, shorter than its {cutoutHeight} px camera cutout";
+			}
+		}
+
+		return fault;
+	}
+
+	[GeneratedRegex(@"type=statusBars frame=\[\d+,\d+\]\[\d+,(\d+)\]")]
+	private static partial Regex StatusBarBottom();
+
+	[GeneratedRegex(@"DisplayCutout\{insets=Rect\(\d+, (\d+) - ")]
+	private static partial Regex CutoutTop();
 
 	/// <summary>
 	/// adb keeps a device it dropped to "offline" there until the host kicks the transport, so

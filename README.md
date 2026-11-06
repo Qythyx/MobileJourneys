@@ -78,8 +78,9 @@ checkout. NuGet packaging is on the roadmap.
 Define a record that captures your app's per-journey state (the fields each journey can override).
 `BackendUrl` is the one value handed to the app at launch — as a process environment variable on iOS
 and an intent string extra on Android — under the name `FrameworkConfig.Backend` names. Everything
-else reaches the app from the backend, so it needs no launch plumbing. The app's locale comes from the
-fixture's `AppLocale` instead, which the framework applies each time `RelaunchApp` launches the app.
+else reaches the app from the backend, so it needs no launch plumbing. The app's locale comes from
+the fixture's `AppLocale` instead, which the framework applies each time `RelaunchApp` launches the
+app.
 
 ```csharp
 public record MyAppEnvironment : IJourneyEnvironment
@@ -147,8 +148,8 @@ public static class MyAppPlatforms
 }
 ```
 
-`AppLocale` must name a region (`en-US`, not `en`), so the date and number formats the app shows are fixed
-by the fixture. Android fixtures need Android 13 or later, the first with per-app locales.
+`AppLocale` must name a region (`en-US`, not `en`), so the date and number formats the app shows are
+fixed by the fixture. Android fixtures need Android 13 or later, the first with per-app locales.
 
 A step passes when no more than `MaxDiffPixelPercentage` percent of its pixels differ from the
 baseline by more than `ColorTolerance`, the sum of the red, green and blue differences. Masked
@@ -192,6 +193,12 @@ journeys. A device cannot host the app when no session opens on it, when the app
 twice, or when its backend fails to start; one also drops out when its session dies, or the app
 stops responding on it, more often than its retry budget allows. Once its devices are up, the
 fixture is abandoned only when none of them can host the app.
+
+An Android emulator can come out of a cold boot with its status bar shorter than its camera cutout.
+What Android places below the status bar, such as a flyout menu, then sits higher than what it
+places below the cutout, so every screenshot showing it differs from its baseline. A run checks each
+emulator for this before opening its session, restarts one that has it, and drops it out if the
+restart doesn't fix it. The run log says which emulator it was and the two heights.
 
 ### 4. Write journeys
 
@@ -403,18 +410,18 @@ deletes files in the temporary directory after three days.
 ## Screenshots
 
 Baselines live under
-`<consumer-project>/Screenshots/<PlatformConfig.DeviceName>/<container>/<NN> <StepLabel>.png`,
-where the container is the journey's own folder for flat `JourneyDefinition`s, or the tree node's
-nested folder path (e.g. `Home/Menu/About/`) for tree-defined journeys — shared steps are stored
-once. A step with no baseline yet fails, and its capture is kept as the same `.new` artifact a
-mismatch leaves; it becomes the baseline only once it is accepted in the viewer, so no screenshot is
-compared against until someone has looked at it. Later runs compare against it (on shared steps,
-mask-aware, so every journey through the step is held to the one baseline). Failure artifacts
-(the actual capture for a mismatch, the diff visualization, FAIL screenshots from exceptions, and
-crash logs) land alongside the baseline, stamped with the producing journey's name so runs through a
-shared node can't clobber each other's evidence, and are auto-cleaned when the step next passes.
-Filename layout is owned by the storage backend; with the default `FilesystemScreenshotStorage` they
-appear as `<step> [<journey>].new.png`, `<step> [<journey>]_diff_<pct>%.png`,
+`<consumer-project>/Screenshots/<PlatformConfig.DeviceName>/<container>/<NN> <StepLabel>.png`, where
+the container is the journey's own folder for flat `JourneyDefinition`s, or the tree node's nested
+folder path (e.g. `Home/Menu/About/`) for tree-defined journeys — shared steps are stored once. A
+step with no baseline yet fails, and its capture is kept as the same `.new` artifact a mismatch
+leaves; it becomes the baseline only once it is accepted in the viewer, so no screenshot is compared
+against until someone has looked at it. Later runs compare against it (on shared steps, mask-aware,
+so every journey through the step is held to the one baseline). Failure artifacts (the actual
+capture for a mismatch, the diff visualization, FAIL screenshots from exceptions, and crash logs)
+land alongside the baseline, stamped with the producing journey's name so runs through a shared node
+can't clobber each other's evidence, and are auto-cleaned when the step next passes. Filename layout
+is owned by the storage backend; with the default `FilesystemScreenshotStorage` they appear as
+`<step> [<journey>].new.png`, `<step> [<journey>]_diff_<pct>%.png`,
 `<step> [<journey>]_FAIL_<reason>.png`, `<step> [<journey>].CRASH.txt`, and
 `<step> [<journey>].ERROR.txt`.
 

@@ -598,8 +598,9 @@ public static class SuiteRunner
 	/// Opens a worker's Appium session, retrying. A session started against a device that has only
 	/// just come up races the tail of its boot, and the failure that produces is transient — waiting
 	/// for the device to finish and asking again costs one attempt and saves the whole worker. A
-	/// device that has stopped answering does not recover by being waited on, so it is restarted
-	/// instead, at most once — see <see cref="ShouldRestartDevice"/>.
+	/// device that has stopped answering, or booted faulty, does not recover by being waited on, so it
+	/// is restarted instead, at most once — see <see cref="ShouldRestartDevice"/>. One still faulty
+	/// then gets no session.
 	/// </summary>
 	/// <param name="worker">The worker to open a session for.</param>
 	/// <param name="manager">Screenshot storage the driver writes through.</param>
@@ -627,6 +628,7 @@ public static class SuiteRunner
 			var readiness = worker.Config.WaitUntilDeviceIsReady(
 				worker.DeviceId,
 				DeviceReadyTimeout,
+				reporter.Log,
 				cancellationToken
 			);
 
@@ -653,26 +655,39 @@ public static class SuiteRunner
 					reporter.FixtureRetrying(
 						worker.Config,
 						worker.Index,
-						readiness == PlatformConfig.DeviceReadiness.Unresponsive
-							? "its device stopped responding — restarting it and waiting for it to boot"
-							: "restarting its device for the last attempt, and waiting for it to boot"
+						readiness switch
+						{
+							PlatformConfig.DeviceReadiness.Unresponsive =>
+								"its device stopped responding — restarting it and waiting for it to boot",
+							PlatformConfig.DeviceReadiness.Faulty =>
+								"its device booted faulty — restarting it and waiting for it to boot",
+							_ => "restarting its device for the last attempt, and waiting for it to boot",
+						}
 					);
 				}
 
 				restarted = worker.Config.RestartDevice(worker.DeviceId, DeviceReadyTimeout, reporter.Log);
 				if (restarted)
 				{
-					var afterRestart = worker.Config.WaitUntilDeviceIsReady(
+					readiness = worker.Config.WaitUntilDeviceIsReady(
 						worker.DeviceId,
 						DeviceReadyTimeout,
+						reporter.Log,
 						cancellationToken
 					);
 					reporter.Log.Write(
 						worker.Config,
 						worker.Index,
-						$"after its restart, its device was {afterRestart.ToString().ToLowerInvariant()}"
+						$"after its restart, its device was {readiness.ToString().ToLowerInvariant()}"
 					);
 				}
+			}
+
+			// A session would open on it, and every journey would then fail on what it shows.
+			if (readiness == PlatformConfig.DeviceReadiness.Faulty)
+			{
+				error = "its device booted faulty, and restarting it did not fix that, so it is not fit to run on";
+				return null;
 			}
 
 			try
@@ -710,9 +725,9 @@ public static class SuiteRunner
 
 	/// <summary>
 	/// Decides whether a session attempt should be made on a freshly restarted device. A device that
-	/// has stopped answering gets one straight away. One that looks ready, or is merely slow to boot,
-	/// gets one only for the last attempt, and only when the earlier attempts failed in a way the
-	/// device can be behind — a missing app binary fails the same on any device.
+	/// has stopped answering, or booted faulty, gets one straight away. One that looks ready, or is
+	/// merely slow to boot, gets one only for the last attempt, and only when the earlier attempts
+	/// failed in a way the device can be behind — a missing app binary fails the same on any device.
 	/// </summary>
 	/// <param name="readiness">What the readiness wait before this attempt found.</param>
 	/// <param name="isLastAttempt">Whether this is the last attempt before the worker is lost.</param>
@@ -723,7 +738,7 @@ public static class SuiteRunner
 		bool isLastAttempt,
 		Exception? lastFailure
 	) =>
-		readiness == PlatformConfig.DeviceReadiness.Unresponsive
+		readiness is PlatformConfig.DeviceReadiness.Unresponsive or PlatformConfig.DeviceReadiness.Faulty
 		|| (isLastAttempt && lastFailure is WebDriverException or TimeoutException);
 
 	/// <summary>

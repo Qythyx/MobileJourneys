@@ -106,6 +106,31 @@ public sealed class AndroidPlatformConfigTests
 	public void ParseAttachedDevicesIgnoresDevicesThatWillNotBecomeUsable(string output) =>
 		_ = AndroidPlatformConfig.ParseAttachedDevices(output).Should().BeEmpty();
 
+	private const string PixelCutout =
+		"DisplayCutout{insets=Rect(0, 132 - 0, 0) waterfall=Insets{left=0, top=0, right=0, bottom=0";
+
+	private static string StatusBarSource(int bottom) =>
+		$"        InsetsSource id=725f0000 type=statusBars frame=[0,0][1080,{bottom}] visible=true flags= sideHint=TOP boundingRects=null";
+
+	[Test]
+	public void FindStatusBarFaultReportsAStatusBarShorterThanTheCutout() =>
+		_ = AndroidPlatformConfig
+			.FindStatusBarFault(StatusBarSource(74), PixelCutout)
+			.Should()
+			.Be("its status bar is 74 px tall, shorter than its 132 px camera cutout");
+
+	[Test]
+	public void FindStatusBarFaultAcceptsAStatusBarAsTallAsTheCutout() =>
+		_ = AndroidPlatformConfig.FindStatusBarFault(StatusBarSource(132), PixelCutout).Should().BeNull();
+
+	[Test]
+	public void FindStatusBarFaultAcceptsAScreenWithoutACutout() =>
+		_ = AndroidPlatformConfig.FindStatusBarFault(StatusBarSource(48), string.Empty).Should().BeNull();
+
+	[Test]
+	public void FindStatusBarFaultReportsAStatusBarItCannotRead() =>
+		_ = AndroidPlatformConfig.FindStatusBarFault(string.Empty, PixelCutout).Should().NotBeNull();
+
 	[Test]
 	public void GetAlertButtonLocatorSimpleLabelProducesValidXPath() =>
 		_ = Compile(TestFixtures.Android.GetAlertButtonLocator("OK"));

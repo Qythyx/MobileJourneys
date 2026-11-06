@@ -214,12 +214,14 @@ public abstract record PlatformConfig(
 	/// </summary>
 	/// <param name="deviceId">The device to wait for.</param>
 	/// <param name="timeout">How long to wait for a device that is still booting.</param>
+	/// <param name="log">The run's log, told what is wrong with a device found <see cref="DeviceReadiness.Faulty"/>.</param>
 	/// <param name="cancellationToken">Cancelled when the reader interrupts the run.</param>
 	/// <returns>How far the device got by the time the wait ended.</returns>
 	/// <exception cref="OperationCanceledException">The run was interrupted.</exception>
 	internal virtual DeviceReadiness WaitUntilDeviceIsReady(
 		string deviceId,
 		TimeSpan timeout,
+		RunLog log,
 		CancellationToken cancellationToken
 	) => DeviceReadiness.Ready;
 
@@ -234,6 +236,12 @@ public abstract record PlatformConfig(
 
 		/// <summary>It has booted, but no longer answers, and only <see cref="RestartDevice"/> brings it back.</summary>
 		Unresponsive = 2,
+
+		/// <summary>
+		/// It answers, but booted into a state that changes what screens show, and only
+		/// <see cref="RestartDevice"/> clears it.
+		/// </summary>
+		Faulty = 3,
 	}
 
 	/// <summary>
