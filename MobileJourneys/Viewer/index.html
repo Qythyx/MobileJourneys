@@ -14,7 +14,6 @@
 			--muted: #8b93a3;
 			--accent: #4d9fff;
 			--fail: #ff5c5c;
-			--fail2: #d64545;
 			--extra: #ffab40;
 			--new: #c38bff;
 			--pending: #ffd54a;
@@ -105,17 +104,20 @@
 			border-color: var(--accent);
 		}
 
-		/* Joined segmented control; badges overlap the top edge, so it can't clip (overflow: visible)
-		   and the end segments carry the rounded corners the container border used to clip to. */
+		/* Joined segmented control. Each end segment rounds its own corners and clips its progress bar
+		   to them; clipping on the container instead would also clip the segments' focus rings. */
 		.seg {
 			display: flex;
 			border: 1px solid var(--border);
 			border-radius: 7px;
-			overflow: visible;
 		}
 
 		.seg button {
 			position: relative;
+			overflow: hidden;
+			display: inline-flex;
+			align-items: center;
+			gap: 5px;
 			background: transparent;
 			color: var(--muted);
 			border: 0;
@@ -138,31 +140,26 @@
 			color: #fff;
 		}
 
-		/* Notification-style counts overlapping the top-right of each device segment. */
 		.seg .badges {
-			position: absolute;
-			top: -10px;
-			right: -4px;
-			display: flex;
+			display: inline-flex;
 			gap: 3px;
-			pointer-events: none;
 		}
 
-		/* The badges themselves do take the pointer: each one says what it counts in a tooltip, and
-		   `pointer-events: none` would suppress it. A click on one still reaches the device button it
-		   is a child of, which is the button it belongs to. */
 		.seg .badge {
-			pointer-events: auto;
 			min-width: 16px;
 			padding: 0 4px;
 			border-radius: 8px;
-			background: var(--fail);
 			color: #fff;
 			font-size: 10px;
 			font-weight: 600;
+			line-height: 14px;
+			font-variant-numeric: tabular-nums;
 			text-align: center;
 			border: 1px solid var(--panel);
-			box-sizing: content-box;
+		}
+
+		.seg .badge.fail {
+			background: var(--fail);
 		}
 
 		.seg .badge.extra {
@@ -175,57 +172,68 @@
 			color: #2a0f45;
 		}
 
-		/* Failure badge splits into journeys | steps, joined like the device segments: two red
-		   panes divided by a full-height line, the steps pane a shade darker to read as distinct. */
-		.seg .badge.split {
-			padding: 0;
-			display: inline-flex;
-			align-items: stretch;
-			overflow: hidden;
+		/* A device's progress through the running rerun, along the bottom of its segment, over a faint
+		   track so an empty bar still shows. */
+		.seg .run-progress {
+			--run-accent: var(--accent);
+			display: none;
+			position: absolute;
+			left: 0;
+			right: 0;
+			bottom: 0;
+			height: 3px;
+			background: rgba(255, 255, 255, .15);
 		}
 
-		.seg .badge.split .part {
-			display: flex;
-			align-items: center;
-			padding: 1px 5px;
+		.seg button.active .run-progress {
+			--run-accent: #fff;
 		}
 
-		.seg .badge.split .steps {
-			background: var(--fail2);
-			border-left: 1px solid rgba(0, 0, 0, .3);
+		.seg .run-progress[data-state] {
+			display: block;
 		}
 
-		/* A running fixture's countdown wears the failure badge's shape in the accent colour. It never
-		   turns red: red is the failure badge, which is shown alongside it throughout the run. */
-		.seg .badge.progress {
-			background: var(--accent);
+		.seg .run-progress::after {
+			content: "";
+			position: absolute;
+			inset: 0;
+			width: var(--fill);
+			background: var(--run-accent);
 		}
 
-		.seg .badge.progress .steps {
-			background: #2f7ad6;
-		}
-
-		.seg .badge.progress.starting {
-			background: var(--accent);
-		}
-
-		.seg .badge.progress.done {
+		.seg .run-progress[data-state="done"]::after {
+			width: 100%;
 			background: var(--ok);
-			color: #10331b;
 		}
 
-		.seg .badge.progress.done .steps {
-			background: #45ab61;
+		.seg .run-progress[data-state="starting"] {
+			--dash-color: var(--run-accent);
 		}
 
-		.seg .badge.progress.retrying {
-			background: var(--extra);
-			color: #402800;
+		.seg .run-progress[data-state="retrying"] {
+			--dash-color: var(--extra);
 		}
 
-		.seg .badge.progress.skipped {
-			background: var(--muted);
-			color: var(--panel);
+		.seg .run-progress[data-state="skipped"] {
+			--dash-color: var(--muted);
+		}
+
+		.seg .run-progress[data-state="starting"]::after,
+		.seg .run-progress[data-state="retrying"]::after,
+		.seg .run-progress[data-state="skipped"]::after {
+			width: 100%;
+			background: linear-gradient(90deg, var(--dash-color) 50%, transparent 50%) 0 0 / 8px 100%;
+		}
+
+		.seg .run-progress[data-state="starting"]::after,
+		.seg .run-progress[data-state="retrying"]::after {
+			animation: run-dash 0.6s linear infinite;
+		}
+
+		@keyframes run-dash {
+			to {
+				background-position-x: 8px;
+			}
 		}
 
 		.keyhint {
@@ -1180,14 +1188,16 @@
 					document.documentElement.style.setProperty("--shot-h", boxH + "px");
 				})();
 			const configSeg = $("#config-seg");
-			M.configs.forEach((cfg, i) => {
+			for (const cfg of M.configs) {
 				const b = document.createElement("button");
 				b.textContent = cfg;
 				b.dataset.config = cfg;
-				b.title = `Switch to ${cfg} (${i + 1})`;
+				const bar = document.createElement("span");
+				bar.className = "run-progress";
+				b.appendChild(bar);
 				b.addEventListener("click", () => setConfig(cfg));
 				configSeg.appendChild(b);
-			});
+			}
 			$("#accept-new").addEventListener("click", async () => {
 				if (await api("accept-all-new", { config })) { refresh("Accepted every new screenshot on " + config); }
 			});
@@ -2161,7 +2171,7 @@
 						finishRun(ev);
 						return;
 				}
-				renderConfigBadges();
+				renderConfigSegments();
 				renderClock();
 			}
 
@@ -2177,7 +2187,7 @@
 				run.finished = true;
 				run.endedAt = Date.now();
 				stopClock();
-				renderConfigBadges();
+				renderConfigSegments();
 				if (stale && !run.body.embed) {
 					toast("Stale app on device — rebuilding with EmbedAssemblies and rerunning");
 					// The rebuilt run carries embed:true, so it can't escalate again — no loop.
@@ -2602,47 +2612,30 @@
 			}
 
 			// ---------- render ----------
-			function splitBadge(cls, left, right, title) {
+			function countBadge(cls, count, title) {
 				const s = document.createElement("span");
-				s.className = "badge split " + cls;
-				s.title = title;
-				const l = document.createElement("span");
-				l.className = "part journeys";
-				l.textContent = left;
-				const r = document.createElement("span");
-				r.className = "part steps";
-				r.textContent = right;
-				s.append(l, r);
-				return s;
-			}
-
-			function wordBadge(cls, text, title) {
-				const s = document.createElement("span");
-				s.className = "badge progress " + cls;
-				s.textContent = text;
+				s.className = "badge " + cls;
+				s.textContent = count;
 				s.title = title;
 				return s;
 			}
 
-			// What a running fixture has left to do, counting down to 0 | 0. Bringing the devices up takes
-			// minutes, so the badge says so from the moment the run is requested rather than waiting for a
-			// first result.
-			function progressBadge(cfg) {
+			// How a device's progress bar and tooltip line show its part of the running rerun, from the
+			// moment the run is requested, since bringing the devices up takes minutes; while it runs,
+			// `fraction` is the share of its steps done.
+			function progressDisplay(cfg) {
 				const p = run.progress.get(cfg);
-				if (!p) { return wordBadge("starting", "starting…", "waiting for the runner to start"); }
-				if (p.skipReason) { return wordBadge("skipped", "skipped", p.skipReason); }
-				if (p.retryReason && !p.ready) { return wordBadge("retrying", "retrying…", p.retryReason); }
-				if (!p.ready) { return wordBadge("starting", "starting…", `${cfg} — bringing the device up`); }
+				if (!p) { return { state: "starting", text: "waiting for the runner to start" }; }
+				if (p.skipReason) { return { state: "skipped", text: "skipped: " + p.skipReason }; }
+				if (p.retryReason && !p.ready) { return { state: "retrying", text: "retrying: " + p.retryReason }; }
+				if (!p.ready) { return { state: "starting", text: "bringing the device up" }; }
 				const journeysLeft = p.journeysTotal - p.journeysDone;
-				const stepsLeft = p.stepsTotal - p.stepsDone;
-				const badge = splitBadge(
-					"progress",
-					journeysLeft,
-					stepsLeft,
-					`still to run: ${plural(journeysLeft, "journey")} · ${plural(stepsLeft, "step")}`
-				);
-				if (journeysLeft === 0) { badge.classList.add("done"); }
-				return badge;
+				if (journeysLeft === 0) { return { state: "done", text: "done" }; }
+				return {
+					state: "running",
+					fraction: p.stepsDone / p.stepsTotal,
+					text: `still to run: ${plural(journeysLeft, "journey")} · ${plural(p.stepsTotal - p.stepsDone, "step")}`,
+				};
 			}
 
 			// Which devices this run covers. Known exactly once run-started arrives; before that, the
@@ -2652,43 +2645,45 @@
 				return [...run.scope.keys()];
 			}
 
-			function renderConfigBadges() {
+			function renderConfigSegments() {
 				const running = run && !run.finished;
 				const inRun = running ? new Set(runConfigs()) : null;
-				document.querySelectorAll("#config-seg button").forEach((b) => {
-					b.classList.toggle("active", b.dataset.config === config);
+				document.querySelectorAll("#config-seg button").forEach((b, i) => {
+					const cfg = b.dataset.config;
+					b.classList.toggle("active", cfg === config);
+					b.title = `Switch to ${cfg} (${i + 1})`;
+					// The bar is kept between renders, unlike the badges, so its dash animation doesn't restart
+					// on every run event.
+					const bar = b.querySelector(".run-progress");
+					if (running && inRun.has(cfg)) {
+						const shown = progressDisplay(cfg);
+						bar.dataset.state = shown.state;
+						bar.style.setProperty("--fill", `${(shown.fraction ?? 0) * 100}%`);
+						b.title += "\n" + shown.text;
+					} else {
+						delete bar.dataset.state;
+					}
 					b.querySelector(".badges")?.remove();
 					const box = document.createElement("span");
 					box.className = "badges";
-					if (running && inRun.has(b.dataset.config)) {
-						box.appendChild(progressBadge(b.dataset.config));
-					}
 					// The red badge means one thing at every moment — what is failing right now — so it stays
 					// up during a run too. Mid-run that is a mix: steps this run has redone, and steps still
 					// carrying the artifacts of the last one. It settles as the run reaches them.
-					const baselines = baselineSet(b.dataset.config);
-					const groups = failureGroups(b.dataset.config);
+					const baselines = baselineSet(cfg);
+					const groups = failureGroups(cfg);
 					const cfgFails = groups.filter((f) => !isNewScreenshot(baselines, f));
 					const journeys = new Set(cfgFails.flatMap((f) => f.journeys)).size;
 					if (cfgFails.length > 0) {
-						box.appendChild(splitBadge("", journeys, cfgFails.length,
+						box.appendChild(countBadge("fail", cfgFails.length,
 							`failing: ${plural(journeys, "journey")} · ${plural(cfgFails.length, "step")}`));
 					}
 					const fresh = groups.length - cfgFails.length;
 					if (fresh > 0) {
-						const s = document.createElement("span");
-						s.className = "badge new";
-						s.textContent = fresh;
-						s.title = plural(fresh, "new screenshot") + " to accept";
-						box.appendChild(s);
+						box.appendChild(countBadge("new", fresh, plural(fresh, "new screenshot") + " to accept"));
 					}
-					const extra = filesFor(b.dataset.config).extraneous.length;
+					const extra = filesFor(cfg).extraneous.length;
 					if (extra > 0) {
-						const s = document.createElement("span");
-						s.className = "badge extra";
-						s.textContent = extra;
-						s.title = plural(extra, "extraneous file");
-						box.appendChild(s);
+						box.appendChild(countBadge("extra", extra, plural(extra, "extraneous file")));
 					}
 					if (box.children.length > 0) { b.appendChild(box); }
 				});
@@ -2732,7 +2727,7 @@
 			}
 
 			function render() {
-				renderConfigBadges();
+				renderConfigSegments();
 				renderClock();
 				const baselines = baselineSet(config);
 				const newCount = currentFailures().filter((f) => isNewScreenshot(baselines, f)).length;

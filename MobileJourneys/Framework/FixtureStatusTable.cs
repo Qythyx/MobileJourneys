@@ -6,9 +6,9 @@ namespace MobileJourneys.Framework;
 /// <summary>
 /// A table that redraws in place: one row per platform fixture, showing how many of its journeys are
 /// done, still to come, and failed, plus the step each of its workers is on right now. Owns the
-/// wording of a row's current-activity cell as well as the layout, so both of its drivers —
-/// <see cref="LiveStatusReporter"/> for a run in this process, and the review server for the events
-/// a rerun posts back — render the same table.
+/// wording and colouring of a row's current-activity cell as well as the layout, so both of its
+/// drivers — <see cref="LiveStatusReporter"/> for a run in this process, and the review server for
+/// the events a rerun posts back — render the same table.
 /// </summary>
 /// <param name="fixtures">Each fixture the run will use, and how many journeys it will run.</param>
 internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int Total)> fixtures)
@@ -18,8 +18,8 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 	/// <summary>Narrowest the current-step column is allowed to get on a cramped terminal.</summary>
 	private const int MinCurrentWidth = 20;
 
-	/// <summary>What a fixture's row reads once it has no journeys left to run.</summary>
-	private const string Finished = "all journeys completed";
+	/// <summary>What a fixture's row shows once it has no journeys left to run, as markup.</summary>
+	private const string Finished = "[green]all journeys completed[/]";
 
 	/// <summary>The count columns, which are never wider than their headers.</summary>
 	private static readonly string[] CountHeaders = ["Total", "Done", "Left", "Fail"];
@@ -49,14 +49,16 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 		public int Failed { get; set; }
 
 		/// <summary>
-		/// What each worker is doing, by index. Every worker starts as its device coming up, since
-		/// that is the first thing the table shows rather than something that finished before it
-		/// appeared.
+		/// What each worker is doing, by index, as markup. Every worker starts as its device coming
+		/// up, since that is the first thing the table shows rather than something that finished
+		/// before it appeared.
 		/// </summary>
 		public Dictionary<int, string> Current { get; } =
-			Enumerable.Range(1, workers).ToDictionary(worker => worker, _ => "starting the device…");
+			Enumerable.Range(1, workers).ToDictionary(worker => worker, _ => AsPhase("starting the device…"));
 
-		/// <summary>Text that stands in for every worker's line once the fixture as a whole has an outcome.</summary>
+		/// <summary>
+		/// Markup that stands in for every worker's line once the fixture as a whole has an outcome.
+		/// </summary>
 		public string? Outcome { get; set; }
 
 		public bool Abandoned { get; set; }
@@ -66,7 +68,10 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 			?? (
 				Current.Count == 1
 					? Current.Values.Single()
-					: string.Join('\n', Current.OrderBy(line => line.Key).Select(line => $"{line.Key}: {line.Value}"))
+					: string.Join(
+						'\n',
+						Current.OrderBy(line => line.Key).Select(line => $"[dim]{line.Key}:[/] {line.Value}")
+					)
 			);
 	}
 
@@ -103,7 +108,8 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 	/// <summary>Shows a worker's device as up, with the app being made ready on it.</summary>
 	/// <param name="config">The fixture the worker belongs to.</param>
 	/// <param name="worker">The worker's 1-based index.</param>
-	public void Ready(PlatformConfig config, int worker) => SetCurrent(config, worker, "device up — preparing it…");
+	public void Ready(PlatformConfig config, int worker) =>
+		SetCurrent(config, worker, AsPhase("device up — preparing it…"));
 
 	/// <summary>
 	/// Shows a worker as setting a journey up: its device's theme and font size, its backend's data,
@@ -115,7 +121,7 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 	/// <param name="worker">The worker's 1-based index.</param>
 	/// <param name="journeyName">The journey being prepared.</param>
 	public void Preparing(PlatformConfig config, int worker, string journeyName) =>
-		SetCurrent(config, worker, $"{journeyName} — launching the app…");
+		SetCurrent(config, worker, $"{AsName(journeyName)} {AsPhase("— launching the app…")}");
 
 	/// <summary>Shows every worker of a fixture as waiting on a device that is being started again.</summary>
 	/// <param name="config">The fixture.</param>
@@ -128,7 +134,7 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 			{
 				foreach (var worker in row.Current.Keys.ToList())
 				{
-					row.Current[worker] = $"retrying — {reason}";
+					row.Current[worker] = AsRetrying(reason);
 				}
 			}
 		}
@@ -139,7 +145,7 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 	/// <param name="worker">The worker's 1-based index.</param>
 	/// <param name="reason">Why the previous attempt failed.</param>
 	public void Retrying(PlatformConfig config, int worker, string reason) =>
-		SetCurrent(config, worker, $"retrying — {reason}");
+		SetCurrent(config, worker, AsRetrying(reason));
 
 	/// <summary>Shows the step a worker has just finished.</summary>
 	/// <param name="config">The fixture the step ran on.</param>
@@ -155,16 +161,16 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 		int stepNumber,
 		int totalSteps,
 		string stepName
-	) => SetCurrent(config, worker, $"{journeyName} {stepNumber}/{totalSteps} {stepName}");
+	) => SetCurrent(config, worker, $"{AsName(journeyName)} [dim]{stepNumber}/{totalSteps}[/] {AsName(stepName)}");
 
 	/// <summary>Shows a worker as gone for the rest of the run, its line kept so the others do not move.</summary>
 	/// <param name="config">The fixture the worker belonged to.</param>
 	/// <param name="worker">The worker's 1-based index.</param>
 	/// <param name="reason">Why it is gone.</param>
 	public void Lost(PlatformConfig config, int worker, string reason) =>
-		SetCurrent(config, worker, $"lost — {reason}");
+		SetCurrent(config, worker, AsProblem($"lost — {reason}"));
 
-	/// <summary>The current-activity cell as the table renders it, one line per worker.</summary>
+	/// <summary>The current-activity cell's markup as the table renders it, one line per worker.</summary>
 	/// <param name="config">The fixture whose cell to read.</param>
 	internal string CurrentCell(PlatformConfig config)
 	{
@@ -209,7 +215,7 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 			if (rows.TryGetValue(config, out var row))
 			{
 				row.Abandoned = true;
-				row.Outcome = reason;
+				row.Outcome = AsProblem(reason);
 			}
 		}
 	}
@@ -277,7 +283,7 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 					Count(row.Done, "green"),
 					Count(left, left == 0 ? "grey" : "default"),
 					Count(row.Failed, row.Failed == 0 ? "grey" : "red"),
-					new Markup($"[grey]{Markup.Escape(row.Cell)}[/]").Ellipsis()
+					new Markup(row.Cell).Ellipsis()
 				);
 			}
 		}
@@ -287,6 +293,14 @@ internal sealed class FixtureStatusTable(IEnumerable<(PlatformConfig Config, int
 
 	private static Markup Count(int value, string colour) =>
 		new($"[{colour}]{value.ToString(CultureInfo.InvariantCulture)}[/]");
+
+	private static string AsName(string name) => $"[blue]{Markup.Escape(name)}[/]";
+
+	private static string AsPhase(string text) => $"[grey]{Markup.Escape(text)}[/]";
+
+	private static string AsProblem(string text) => $"[yellow]{Markup.Escape(text)}[/]";
+
+	private static string AsRetrying(string reason) => AsProblem($"retrying — {reason}");
 
 	/// <summary>
 	/// How much of the console the current-step column gets: everything the other columns do not need.
