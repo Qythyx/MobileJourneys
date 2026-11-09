@@ -30,6 +30,14 @@ public static class SuiteRunner
 	private const int SessionStartAttempts = 3;
 
 	/// <summary>
+	/// The end of a reason that puts a failure down to the adb server being stopped: that the device is
+	/// not at fault, and what stops the server.
+	/// </summary>
+	private const string AdbServerStopExplanation =
+		"which is no fault of the device. Something on this Mac stops the adb server, such as the VS Code "
+		+ ".NET MAUI extension or a tool that runs an adb of a different version from the one in ANDROID_HOME.";
+
+	/// <summary>
 	/// How many sessions a fixture may lose mid-run before it is abandoned. Sessions die
 	/// independently of each other, so a fixture needing several is one whose device is unwell, and
 	/// carrying on there reports the device's condition as failing journeys.
@@ -398,16 +406,16 @@ public static class SuiteRunner
 	/// <param name="Config">The platform fixture.</param>
 	/// <param name="Index">The worker's 1-based index within the fixture.</param>
 	/// <param name="DeviceId">The simulator UDID or emulator serial it runs on.</param>
-	/// <param name="BackendUrlVariable">
-	/// Name the app reads its backend URL from, kept so a replacement session can be opened on the
-	/// same terms as the first.
+	/// <param name="BackendSetup">
+	/// How the suite builds a backend for each of the worker's sessions, and the name the app reads its
+	/// address under, or <c>null</c> for an app that needs none.
 	/// </param>
 	/// <param name="Timings">The fixture's timing record, which every session on the worker writes to.</param>
 	private sealed record Worker(
 		PlatformConfig Config,
 		int Index,
 		string DeviceId,
-		string BackendUrlVariable,
+		FrameworkConfig.BackendSetup? BackendSetup,
 		FixtureTimings Timings
 	);
 
@@ -462,7 +470,6 @@ public static class SuiteRunner
 			var queue = new ConcurrentQueue<TestCase>(cases);
 			var started = 0;
 			var lost = new string?[deviceIds.Count];
-			var backendUrlVariable = backendSetup?.UrlVariable ?? string.Empty;
 			// Each worker minds the token itself and closes its own session on the way out, so the fixture
 			// waits for all of them rather than leaving one mid-cleanup when the run is interrupted.
 			Task.WaitAll([
@@ -470,15 +477,8 @@ public static class SuiteRunner
 					(deviceId, index) =>
 						Task.Run(() =>
 						{
-							var worker = new Worker(config, index + 1, deviceId, backendUrlVariable, timings);
-							var driver = StartWorker(
-								worker,
-								backendSetup,
-								reporter,
-								manager,
-								cancellationToken,
-								out var failure
-							);
+							var worker = new Worker(config, index + 1, deviceId, backendSetup, timings);
+							var driver = OpenSession(worker, reporter, manager, cancellationToken, out var failure);
 							if (driver is null)
 							{
 								// Once the run is interrupted, a worker that did not come up was stopped by it,
@@ -527,18 +527,16 @@ public static class SuiteRunner
 			: $"{summary}:\n" + string.Join('\n', lost.Select((reason, index) => $"worker {index + 1}: {reason}"));
 
 	/// <summary>
-	/// Brings one worker's session up with its backend attached.
+	/// Opens a session on a worker's device with a backend of its own attached.
 	/// </summary>
-	/// <param name="worker">The worker to bring up.</param>
-	/// <param name="backendSetup">The suite's backend, or <c>null</c> for an app that needs none.</param>
-	/// <param name="reporter">Told when the worker is up, or retrying.</param>
+	/// <param name="worker">The worker to open the session for.</param>
+	/// <param name="reporter">Told when the session is ready to run journeys, or being retried.</param>
 	/// <param name="manager">Screenshot storage the driver writes through.</param>
 	/// <param name="cancellationToken">Cancelled when the reader interrupts the run.</param>
-	/// <param name="failure">Why the worker could not be brought up, ready to print; empty on success.</param>
-	/// <returns>The live session, or <c>null</c> when the worker could not be brought up.</returns>
-	private static TestDriver? StartWorker(
+	/// <param name="failure">Why the session could not be opened with its backend, ready to print; empty on success.</param>
+	/// <returns>The live session, or <c>null</c> when it could not be opened with its backend.</returns>
+	private static TestDriver? OpenSession(
 		Worker worker,
-		FrameworkConfig.BackendSetup? backendSetup,
 		RunReporter reporter,
 		ScreenshotManager manager,
 		CancellationToken cancellationToken,
@@ -551,47 +549,71 @@ public static class SuiteRunner
 			return null;
 		}
 
-		if (driver.IsAppCrashed())
+		if (driver.IsAppCrashed() && StartCrashedApp() is { } appFailure)
 		{
-			// One crash is not yet the build's: an app can die once on a device that has only just
-			// booted and then run. A build that cannot start dies again.
-			reporter.FixtureRetrying(worker.Config, worker.Index, "the app crashed on startup, so it is started again");
-			if (!driver.TryStartApp())
-			{
-				var crashLog = driver.CaptureDeviceCrashLog() ?? "No crash log available.";
-				reporter.Log.Write(
-					worker.Config,
-					worker.Index,
-					$"the app crashed on startup twice; its crash log:\n{crashLog}"
-				);
-				QuitDriver(driver, worker, reporter.Log, cancellationToken);
-				failure =
-					"the app crashed on startup, and again when started a second time. "
-					+ (
-						crashLog.Contains(MissingAssembliesMarker, StringComparison.Ordinal)
-							? "Rebuild with -p:EmbedAssemblies=true to embed assemblies into the APK."
-							: "Its crash log is in the run log."
-					);
-				return null;
-			}
+			CloseSession(driver, worker, reporter.Log, cancellationToken);
+			failure = appFailure;
+			return null;
 		}
 
 		// The backend is built after the session, not before it, because it may have to bind itself to
 		// the device it serves and only a live session names that device.
 		try
 		{
-			driver.Backend = backendSetup?.Create(worker.Config, driver.GetDeviceId());
+			driver.Backend = worker.BackendSetup?.Create(worker.Config, driver.GetDeviceId());
 		}
 		catch (Exception ex)
 		{
 			reporter.Log.Write(worker.Config, worker.Index, $"its backend failed to start:\n{ex}");
-			QuitDriver(driver, worker, reporter.Log, cancellationToken);
-			failure = $"its backend failed to start: {ex.Message}";
+			failure = worker.Config.HasAdbServerStoppedSince(driver.AdbServerPid, reporter.Log)
+				? $"its backend failed to start because the adb server on this Mac was stopped while it was starting, {AdbServerStopExplanation}"
+				: $"its backend failed to start: {ex.Message}";
+			CloseSession(driver, worker, reporter.Log, cancellationToken);
 			return null;
 		}
 
 		reporter.FixtureReady(worker.Config, worker.Index);
 		return driver;
+
+		// Starts the app again after it looked crashed on startup. Returns why it would not run, ready
+		// to print, or null once it runs.
+		string? StartCrashedApp()
+		{
+			// The app's state is asked through the adb server, so a stopped server makes the app look
+			// crashed.
+			if (!worker.Config.HasAdbServerStoppedSince(driver.AdbServerPid, reporter.Log))
+			{
+				// One crash is not yet the build's: an app can die once on a device that has only just
+				// booted and then run. A build that cannot start dies again.
+				reporter.FixtureRetrying(
+					worker.Config,
+					worker.Index,
+					"the app crashed on startup, so it is started again"
+				);
+				if (driver.TryStartApp())
+				{
+					return null;
+				}
+
+				if (!worker.Config.HasAdbServerStoppedSince(driver.AdbServerPid, reporter.Log))
+				{
+					var crashLog = driver.CaptureDeviceCrashLog() ?? "No crash log available.";
+					reporter.Log.Write(
+						worker.Config,
+						worker.Index,
+						$"the app crashed on startup twice; its crash log:\n{crashLog}"
+					);
+					return "the app crashed on startup, and again when started a second time. "
+						+ (
+							crashLog.Contains(MissingAssembliesMarker, StringComparison.Ordinal)
+								? "Rebuild with -p:EmbedAssemblies=true to embed assemblies into the APK."
+								: "Its crash log is in the run log."
+						);
+				}
+			}
+
+			return $"the app could not be checked on startup because the adb server on this Mac was stopped, {AdbServerStopExplanation}";
+		}
 	}
 
 	/// <summary>
@@ -600,7 +622,8 @@ public static class SuiteRunner
 	/// for the device to finish and asking again costs one attempt and saves the whole worker. A
 	/// device that has stopped answering, or booted faulty, does not recover by being waited on, so it
 	/// is restarted instead, at most once — see <see cref="ShouldRestartDevice"/>. One still faulty
-	/// then gets no session.
+	/// then gets no session. An attempt during which the adb server was stopped says nothing about the
+	/// device, so it neither restarts the device nor finds it faulty.
 	/// </summary>
 	/// <param name="worker">The worker to open a session for.</param>
 	/// <param name="manager">Screenshot storage the driver writes through.</param>
@@ -618,11 +641,14 @@ public static class SuiteRunner
 	)
 	{
 		error = string.Empty;
-		Exception? lastFailure = null;
+		Exception? lastDeviceFailure = null;
 		var restartTried = false;
 		var restarted = false;
 		for (var attempt = 1; attempt <= SessionStartAttempts; attempt++)
 		{
+			worker.Config.StartAdbServer();
+			var adbServerPid = worker.Config.FindAdbServerPid(reporter.Log);
+
 			// Before the first attempt, not only between them: the retries exist to survive a session
 			// that fails, not to stand in for bringing the device up.
 			var readiness = worker.Config.WaitUntilDeviceIsReady(
@@ -644,7 +670,12 @@ public static class SuiteRunner
 			// The wait returns without looking at the token once the device is ready, and a restart
 			// the reader has already stopped the run for would take the device down for nothing.
 			cancellationToken.ThrowIfCancellationRequested();
-			if (!restartTried && ShouldRestartDevice(readiness, attempt == SessionStartAttempts, lastFailure))
+			var notReadyBecauseAdbServerStopped = IsNotReadyBecauseAdbServerStopped(readiness, adbServerPid);
+			if (
+				!restartTried
+				&& ShouldRestartDevice(readiness, attempt == SessionStartAttempts, lastDeviceFailure)
+				&& !notReadyBecauseAdbServerStopped
+			)
 			{
 				restartTried = true;
 
@@ -680,66 +711,103 @@ public static class SuiteRunner
 						worker.Index,
 						$"after its restart, its device was {readiness.ToString().ToLowerInvariant()}"
 					);
+					notReadyBecauseAdbServerStopped = IsNotReadyBecauseAdbServerStopped(readiness, adbServerPid);
 				}
 			}
 
-			// A session would open on it, and every journey would then fail on what it shows.
-			if (readiness == PlatformConfig.DeviceReadiness.Faulty)
+			string failure;
+			if (notReadyBecauseAdbServerStopped)
 			{
+				lastDeviceFailure = null;
+				failure =
+					$"the adb server on this Mac was stopped while the run waited for the device, {AdbServerStopExplanation}";
+			}
+			else if (readiness == PlatformConfig.DeviceReadiness.Faulty)
+			{
+				// A session would open on it, and every journey would then fail on what it shows.
 				error = "its device booted faulty, and restarting it did not fix that, so it is not fit to run on";
 				return null;
 			}
-
-			try
+			else
 			{
-				var driver = new TestDriver(
-					worker.Config.CreateAppiumDriver(worker.DeviceId),
-					worker.Config,
-					manager,
-					worker.BackendUrlVariable,
-					worker.Timings,
-					cancellationToken
-				);
-				reporter.Log.Write(worker.Config, worker.Index, $"Appium session {driver.App.SessionId} open");
-				return driver;
-			}
-			catch (Exception ex)
-				when (ex is WebDriverException or FileNotFoundException or TimeoutException
-					&& !cancellationToken.IsCancellationRequested
-				)
-			{
-				reporter.Log.Write(worker.Config, worker.Index, $"session attempt {attempt} failed:\n{ex}");
-				lastFailure = ex;
-				error = restarted
-					? $"the Appium session failed to start after {SessionStartAttempts} attempts, even on a freshly restarted device, so the device is not fit to run on: {ex.Message}"
-					: $"the Appium session failed to start after {SessionStartAttempts} attempts: {ex.Message}";
-				if (attempt < SessionStartAttempts)
+				try
 				{
-					reporter.FixtureRetrying(worker.Config, worker.Index, $"attempt {attempt} failed: {ex.Message}");
+					var driver = new TestDriver(
+						worker.Config.CreateAppiumDriver(worker.DeviceId),
+						worker.Config,
+						manager,
+						worker.BackendSetup?.UrlVariable ?? string.Empty,
+						worker.Timings,
+						cancellationToken
+					)
+					{
+						// Not adbServerPid: the server may have been stopped and started again while the
+						// run waited for the device, and the session opened through the one running now.
+						AdbServerPid = worker.Config.FindAdbServerPid(reporter.Log),
+					};
+					reporter.Log.Write(worker.Config, worker.Index, $"Appium session {driver.App.SessionId} open");
+					return driver;
 				}
+				catch (Exception ex)
+					when (ex is WebDriverException or FileNotFoundException or TimeoutException
+						&& !cancellationToken.IsCancellationRequested
+					)
+				{
+					reporter.Log.Write(worker.Config, worker.Index, $"session attempt {attempt} failed:\n{ex}");
+					if (
+						ex is not FileNotFoundException
+						&& worker.Config.HasAdbServerStoppedSince(adbServerPid, reporter.Log)
+					)
+					{
+						lastDeviceFailure = null;
+						failure =
+							$"the adb server on this Mac was stopped while the session was starting, {AdbServerStopExplanation}";
+					}
+					else
+					{
+						lastDeviceFailure = ex;
+						failure = ex.Message;
+					}
+				}
+			}
+
+			error =
+				restarted && lastDeviceFailure is not null
+					? $"no Appium session opened in {SessionStartAttempts} attempts, even on a freshly restarted device, so the device is not fit to run on: {failure}"
+					: $"no Appium session opened in {SessionStartAttempts} attempts: {failure}";
+			if (attempt < SessionStartAttempts)
+			{
+				reporter.FixtureRetrying(worker.Config, worker.Index, $"attempt {attempt} failed: {failure}");
 			}
 		}
 
 		return null;
+
+		bool IsNotReadyBecauseAdbServerStopped(PlatformConfig.DeviceReadiness readiness, int? adbServerPid) =>
+			readiness != PlatformConfig.DeviceReadiness.Ready
+			&& worker.Config.HasAdbServerStoppedSince(adbServerPid, reporter.Log);
 	}
 
 	/// <summary>
 	/// Decides whether a session attempt should be made on a freshly restarted device. A device that
 	/// has stopped answering, or booted faulty, gets one straight away. One that looks ready, or is
-	/// merely slow to boot, gets one only for the last attempt, and only when the earlier attempts
+	/// merely slow to boot, gets one only for the last attempt, and only when the previous attempt
 	/// failed in a way the device can be behind — a missing app binary fails the same on any device.
 	/// </summary>
 	/// <param name="readiness">What the readiness wait before this attempt found.</param>
 	/// <param name="isLastAttempt">Whether this is the last attempt before the worker is lost.</param>
-	/// <param name="lastFailure">Why the previous attempt failed, or <c>null</c> before the first.</param>
+	/// <param name="lastDeviceFailure">
+	/// Why the previous attempt failed, unless the adb server being stopped explains it; <c>null</c>
+	/// before the first attempt, and after one that the adb server being stopped explains.
+	/// </param>
 	/// <returns>Whether to restart the device before this attempt.</returns>
 	internal static bool ShouldRestartDevice(
 		PlatformConfig.DeviceReadiness readiness,
 		bool isLastAttempt,
-		Exception? lastFailure
+		Exception? lastDeviceFailure
 	) =>
 		readiness is PlatformConfig.DeviceReadiness.Unresponsive or PlatformConfig.DeviceReadiness.Faulty
-		|| (isLastAttempt && lastFailure is WebDriverException or TimeoutException);
+		|| (isLastAttempt && lastDeviceFailure is WebDriverException or TimeoutException);
 
 	/// <summary>
 	/// Runs journeys from the fixture's queue on one worker until the queue is empty, replacing the
@@ -747,7 +815,10 @@ public static class SuiteRunner
 	/// journey while the app and the Appium server both stay up, and every command after that fails
 	/// the same way, so a session outliving its device turns every journey the worker takes into a
 	/// failure that describes nothing. A worker that cannot replace its session, or has replaced it
-	/// too often, puts the journey it holds back on the queue and drops out.
+	/// too often, puts the journey it holds back on the queue and drops out. A session that died when
+	/// the adb server was stopped, which takes every open session with it, is replaced without counting
+	/// against the device. When the journey's second run dies because the adb server was stopped,
+	/// whatever caused the rerun, the worker puts that journey back on the queue and drops out.
 	/// </summary>
 	/// <param name="worker">The worker to run on.</param>
 	/// <param name="driver">Its live session, with the backend attached.</param>
@@ -765,7 +836,6 @@ public static class SuiteRunner
 		CancellationToken cancellationToken
 	)
 	{
-		var backend = driver.Backend;
 		var recoveriesLeft = SessionRecoveryAttempts;
 		var freezesLeft = NotRespondingRetries;
 		var live = driver;
@@ -780,7 +850,7 @@ public static class SuiteRunner
 					return null;
 				}
 
-				var sessionDied = !result.Passed && !live.IsSessionAlive();
+				var (sessionDied, diedWithAdbServer) = CheckSessionDeath(live, result);
 
 				// Asked of a live session only, and only about a journey that failed: the dialog is
 				// the system's, it sits over whatever the app was showing, and an expectation waiting
@@ -792,7 +862,7 @@ public static class SuiteRunner
 					continue;
 				}
 
-				if (sessionDied && recoveriesLeft == 0)
+				if (sessionDied && !diedWithAdbServer && recoveriesLeft == 0)
 				{
 					queue.Enqueue(testCase);
 					return Lose(
@@ -814,12 +884,15 @@ public static class SuiteRunner
 
 				if (sessionDied)
 				{
-					recoveriesLeft--;
-					if (ReplaceSession() is not { } replacement)
+					if (!diedWithAdbServer)
 					{
-						live = null;
+						recoveriesLeft--;
+					}
+
+					if (ReplaceSession(out var error) is not { } replacement)
+					{
 						queue.Enqueue(testCase);
-						return Lose("its session died and would not reopen.");
+						return Lose($"its session died and would not reopen: {error}");
 					}
 
 					live = replacement;
@@ -832,8 +905,9 @@ public static class SuiteRunner
 				reporter.FixtureRetrying(
 					worker.Config,
 					worker.Index,
-					frozen
-						? $"the app stopped responding under {testCase.Journey.Name}, so it runs again"
+					frozen ? $"the app stopped responding under {testCase.Journey.Name}, so it runs again"
+						: diedWithAdbServer
+							? $"its session died under {testCase.Journey.Name} when the adb server was stopped, so it runs again on a new one"
 						: $"its session died under {testCase.Journey.Name}, so it runs again on a new one"
 				);
 
@@ -842,6 +916,14 @@ public static class SuiteRunner
 				if (RunJourney(live, testCase) is not { } rerun)
 				{
 					return null;
+				}
+
+				if (CheckSessionDeath(live, rerun).DiedWithAdbServer)
+				{
+					queue.Enqueue(testCase);
+					return Lose(
+						$"its session died under {testCase.Journey.Name} while the journey ran a second time, when the adb server on this Mac was stopped, {AdbServerStopExplanation}"
+					);
 				}
 
 				reporter.JourneyCompleted(rerun);
@@ -853,16 +935,7 @@ public static class SuiteRunner
 		{
 			if (live is not null)
 			{
-				QuitDriver(live, worker, reporter.Log, cancellationToken);
-			}
-
-			try
-			{
-				backend?.Dispose();
-			}
-			catch (Exception ex)
-			{
-				reporter.Log.Write(worker.Config, worker.Index, $"the backend did not shut down cleanly:\n{ex}");
+				CloseSession(live, worker, reporter.Log, cancellationToken);
 			}
 		}
 
@@ -870,6 +943,12 @@ public static class SuiteRunner
 		{
 			reporter.WorkerLost(worker.Config, worker.Index, reason);
 			return reason;
+		}
+
+		(bool Died, bool DiedWithAdbServer) CheckSessionDeath(TestDriver on, JourneyResult result)
+		{
+			var died = !result.Passed && !on.IsSessionAlive();
+			return (died, died && worker.Config.HasAdbServerStoppedSince(on.AdbServerPid, reporter.Log));
 		}
 
 		// Returns the journey's outcome, or null once the reader has interrupted the run.
@@ -898,20 +977,19 @@ public static class SuiteRunner
 			}
 		}
 
-		// Closes the dead session and opens another on the same device, or returns null when the
-		// device will not take one. The backend is bound to the device rather than to the session,
-		// so the replacement inherits it.
-		TestDriver? ReplaceSession()
+		// Closes the dead session and opens another on the same device, with a new backend, since a
+		// backend bound to the device, such as through an adb port forward, does not outlive the adb
+		// server being stopped or the device restarting. Returns null, with the reason in error, when the
+		// new session would not open or come up.
+		TestDriver? ReplaceSession(out string error)
 		{
-			QuitDriver(live, worker, reporter.Log, cancellationToken);
-			var replacement = TryStartSession(worker, manager, reporter, cancellationToken, out var error);
-			if (replacement is null)
+			CloseSession(live, worker, reporter.Log, cancellationToken);
+			live = null;
+			if (OpenSession(worker, reporter, manager, cancellationToken, out error) is not { } replacement)
 			{
-				reporter.Log.Write(worker.Config, worker.Index, $"no session would replace the one that died: {error}");
 				return null;
 			}
 
-			replacement.Backend = backend;
 			try
 			{
 				worker.Config.OnBeforeTests(replacement, replacement.GetDeviceId());
@@ -919,7 +997,7 @@ public static class SuiteRunner
 			catch
 			{
 				// Not yet the worker's live session, so the worker's own cleanup would not close it.
-				QuitDriver(replacement, worker, reporter.Log, cancellationToken);
+				CloseSession(replacement, worker, reporter.Log, cancellationToken);
 				throw;
 			}
 
@@ -928,14 +1006,15 @@ public static class SuiteRunner
 	}
 
 	/// <summary>
-	/// Closes a worker's Appium session. A <see cref="WebDriverException"/> from closing it is logged
-	/// rather than thrown, and any failure once the run is interrupted is ignored.
+	/// Closes a worker's Appium session and disposes its backend. A <see cref="WebDriverException"/>
+	/// from closing the session, and any exception from disposing the backend, are logged rather than
+	/// thrown, and any failure to close the session once the run is interrupted is ignored.
 	/// </summary>
 	/// <param name="driver">The session to close.</param>
 	/// <param name="worker">The worker the session belongs to.</param>
 	/// <param name="log">The run's log.</param>
 	/// <param name="cancellationToken">Cancelled when the reader interrupts the run.</param>
-	private static void QuitDriver(TestDriver driver, Worker worker, RunLog log, CancellationToken cancellationToken)
+	private static void CloseSession(TestDriver driver, Worker worker, RunLog log, CancellationToken cancellationToken)
 	{
 		// Closing the session forgets its id.
 		var sessionId = driver.App.SessionId;
@@ -951,6 +1030,15 @@ public static class SuiteRunner
 		catch (WebDriverException ex)
 		{
 			log.Write(worker.Config, worker.Index, $"Appium session {sessionId} did not close cleanly:\n{ex}");
+		}
+
+		try
+		{
+			driver.Backend?.Dispose();
+		}
+		catch (Exception ex)
+		{
+			log.Write(worker.Config, worker.Index, $"the backend did not shut down cleanly:\n{ex}");
 		}
 	}
 

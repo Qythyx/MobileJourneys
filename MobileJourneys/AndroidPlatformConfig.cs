@@ -115,6 +115,9 @@ public sealed partial record AndroidPlatformConfig(
 		options.AddAdditionalAppiumOption($"settings[{WaitForIdleSetting}]", WaitForIdleTimeoutMs);
 		// The keyboard is its own window, and typing ends by tapping its confirm key.
 		options.AddAdditionalAppiumOption("settings[enableMultiWindows]", true);
+		// Appium otherwise restarts the adb server when it cannot reconnect a device, which ends every
+		// other Android session on the Mac.
+		options.AddAdditionalAppiumOption("suppressKillServer", true);
 	}
 
 	internal override AppiumDriver CreateDriver(AppiumOptions options) => new AndroidDriver(options);
@@ -728,29 +731,24 @@ public sealed partial record AndroidPlatformConfig(
 	{
 		var deadline = DateTime.UtcNow + timeout;
 		var consolePort = deviceId[EmulatorSerialPrefix.Length..];
-		// lsof exits 1 with nothing printed when no process listens on the port.
-		if (
-			ProcessRunner.RunWithResult(LsofPath, ["-nP", $"-iTCP:{consolePort}", "-sTCP:LISTEN", "-t"])
-			is not { Status: ProcessRunner.ShellResultStatus.Completed } listener
-		)
+		if (ListPortListeners(consolePort) is not { } listenerPids)
 		{
 			log.Write(this, $"not restarting {deviceId}: lsof could not say which process listens on its port");
 			return false;
 		}
 
 		var readOnly = RunsReadOnly;
-		var pid = listener.Output.Trim();
-		if (pid.Length == 0)
+		if (listenerPids.Count == 0)
 		{
 			log.Write(this, $"restarting {deviceId}: nothing listens on its port, so only starting it");
 		}
 		else
 		{
-			if (InstanceListeningOn(pid, RunningInstances()) is not { } instance)
+			if (InstanceListeningOn(listenerPids, RunningInstances()) is not { } instance)
 			{
 				log.Write(
 					this,
-					$"not restarting {deviceId}: its port is held by {(pid.Contains('\n', StringComparison.Ordinal) ? "pids" : "pid")} {pid.ReplaceLineEndings(", ")}, which is not one instance of {AvdName}"
+					$"not restarting {deviceId}: its port is held by {(listenerPids.Count > 1 ? "pids" : "pid")} {string.Join(", ", listenerPids)}, which is not one instance of {AvdName}"
 				);
 				return false;
 			}
@@ -758,7 +756,7 @@ public sealed partial record AndroidPlatformConfig(
 			log.Write(this, $"restarting {deviceId}: killing pid {PidOf(instance)}");
 			readOnly = instance.Contains(ReadOnlyFlag, StringComparison.Ordinal);
 			Kill(PidOf(instance));
-			while (InstanceListeningOn(pid, RunningInstances()) is not null)
+			while (InstanceListeningOn(listenerPids, RunningInstances()) is not null)
 			{
 				if (DateTime.UtcNow >= deadline)
 				{
@@ -791,15 +789,88 @@ public sealed partial record AndroidPlatformConfig(
 	/// Picks the running instance a console port's listener belongs to, so that a port some other
 	/// process has taken since is never what gets killed.
 	/// </summary>
-	/// <param name="listenerPids">What <c>lsof -t</c> printed for the port: one process id per line.</param>
+	/// <param name="listenerPids">The ids of the processes listening on the port.</param>
 	/// <param name="runningInstances">This AVD's instances, as <c>pgrep -fl</c> prints them.</param>
 	/// <returns>The instance's command line, or <c>null</c> unless the listener is exactly one of them.</returns>
-	internal static string? InstanceListeningOn(string listenerPids, IEnumerable<string> runningInstances) =>
-		listenerPids.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) is [var pid]
-			? runningInstances.FirstOrDefault(commandLine =>
-				commandLine.StartsWith($"{pid} ", StringComparison.Ordinal)
-			)
+	internal static string? InstanceListeningOn(
+		IReadOnlyList<int> listenerPids,
+		IEnumerable<string> runningInstances
+	) => listenerPids is [var pid] ? runningInstances.FirstOrDefault(instance => PidOf(instance) == pid) : null;
+
+	/// <summary>The port the adb server listens on: adb's default, which Appium names in every adb command it runs.</summary>
+	private const string AdbServerPort = "5037";
+
+	/// <inheritdoc/>
+	internal override void StartAdbServer() => _ = ProcessRunner.RunWithResult(AdbPath, ["start-server"]);
+
+	/// <inheritdoc/>
+	internal override int? FindAdbServerPid(RunLog log)
+	{
+		var listenerPids = ListPortListeners(AdbServerPort);
+		if (listenerPids is [var pid])
+		{
+			return pid;
+		}
+		else
+		{
+			log.Write(
+				this,
+				listenerPids switch
+				{
+					null =>
+						$"the adb server cannot be identified: lsof could not say which process listens on port {AdbServerPort}",
+					[] => $"the adb server cannot be identified: nothing listens on port {AdbServerPort}",
+					_ =>
+						$"the adb server cannot be identified: pids {string.Join(", ", listenerPids)} all listen on port {AdbServerPort}",
+				}
+			);
+			return null;
+		}
+	}
+
+	/// <inheritdoc/>
+	internal override bool HasAdbServerStoppedSince(int? pid, RunLog log)
+	{
+		var listenerPids = ListPortListeners(AdbServerPort);
+		if (pid is not null && listenerPids is null)
+		{
+			log.Write(
+				this,
+				$"whether the adb server was stopped cannot be told: lsof could not say which process listens on port {AdbServerPort}"
+			);
+		}
+
+		return HasStoppedSince(pid, listenerPids);
+	}
+
+	/// <summary>Decides from lsof's answer whether the process that listened on a port no longer does.</summary>
+	/// <param name="pid">The process that listened, or <c>null</c> when it was not identified.</param>
+	/// <param name="portListeners">What <see cref="ListPortListeners"/> returned for the port now.</param>
+	/// <returns>Whether it no longer listens; <c>false</c> when either value is <c>null</c>.</returns>
+	internal static bool HasStoppedSince(int? pid, IReadOnlyList<int>? portListeners) =>
+		pid is { } knownPid && portListeners is not null && !portListeners.Contains(knownPid);
+
+	/// <summary>Lists the processes listening on a TCP port on this machine.</summary>
+	/// <returns>
+	/// Their process ids (empty when none listens), or <c>null</c> when lsof could not tell: it did not
+	/// complete, or it exited non-zero with something on standard error.
+	/// </returns>
+	private static IReadOnlyList<int>? ListPortListeners(string port)
+	{
+		var lsof = ProcessRunner.RunWithResult(LsofPath, ["-nP", $"-iTCP:{port}", "-sTCP:LISTEN", "-t"]);
+		// -t also turns off lsof's warnings, so standard error stays empty unless lsof fails; lsof
+		// exits 1 with nothing on standard error when no process listens on the port.
+		return
+			lsof is { Status: ProcessRunner.ShellResultStatus.Completed }
+			&& (lsof.ExitCode == 0 || string.IsNullOrWhiteSpace(lsof.Error))
+			?
+			[
+				.. lsof
+					.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+					.Select(pid => int.Parse(pid, NumberStyles.None, CultureInfo.InvariantCulture)),
+			]
 			: null;
+	}
 
 	private const string EmulatorSerialPrefix = "emulator-";
 

@@ -216,21 +216,22 @@ internal abstract class RunReporter(RunLog log)
 	protected abstract void ReportFixtureSkipped(PlatformConfig config, int journeyCount, string reason);
 
 	/// <summary>
-	/// Notes that one of a fixture's devices is up and its journeys are about to start. Fixtures
-	/// start inside the display rather than before it, so without this a row would still read as
-	/// starting until its first step finished — most of a minute later.
+	/// Notes that one of a fixture's devices is up and its journeys are about to start, and again each
+	/// time that worker's session is replaced. Fixtures start inside the display rather than before it,
+	/// so without this a row would still read as starting until its first step finished — most of a
+	/// minute later.
 	/// </summary>
 	/// <param name="config">The fixture the worker belongs to.</param>
-	/// <param name="worker">The worker whose device came up, 1-based.</param>
+	/// <param name="worker">The worker whose device came up, or whose session was replaced, 1-based.</param>
 	public void FixtureReady(PlatformConfig config, int worker)
 	{
 		Log.Write(config, worker, "ready to run journeys");
 		ReportFixtureReady(config, worker);
 	}
 
-	/// <summary>Renders a worker whose device is up.</summary>
+	/// <summary>Renders a worker whose device is up, or whose session was replaced.</summary>
 	/// <param name="config">The fixture the worker belongs to.</param>
-	/// <param name="worker">The worker whose device came up, 1-based.</param>
+	/// <param name="worker">The worker whose device came up, or whose session was replaced, 1-based.</param>
 	protected virtual void ReportFixtureReady(PlatformConfig config, int worker) { }
 
 	/// <summary>

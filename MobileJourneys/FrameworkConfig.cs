@@ -62,7 +62,9 @@ public sealed record FrameworkConfig(
 	/// — which leaves the app waiting on a backend it never finds, with nothing to say so.
 	/// </summary>
 	/// <param name="Create">
-	/// Builds the backend for one fixture, given that fixture and the id of the device hosting it.
+	/// Builds the backend for one Appium session, given the fixture and the id of the device the session
+	/// runs on. Called once for each session, including one that replaces a session that died on the
+	/// same device, after the dead session's backend has been disposed.
 	/// </param>
 	/// <param name="UrlVariable">
 	/// The name <see cref="IJourneyEnvironment.BackendUrl"/> arrives under. Named by the consumer,

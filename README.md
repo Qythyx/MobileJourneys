@@ -111,6 +111,11 @@ new FrameworkConfig(...)
 The name is owned by the consumer rather than the framework, because the app reading it cannot
 reference this assembly.
 
+The run calls the function you pass to `Backend` once for each Appium session, after the session
+opens, and disposes that backend when it closes the session. When a session dies and the run opens a
+new one on the same device, the new session gets a backend of its own, created after the dead
+session's backend has been disposed, so keep nothing in a backend that a later session needs.
+
 ### 3. Define platform fixtures
 
 ```csharp
@@ -199,6 +204,27 @@ What Android places below the status bar, such as a flyout menu, then sits highe
 places below the cutout, so every screenshot showing it differs from its baseline. A run checks each
 emulator for this before opening its session, restarts one that has it, and drops it out if the
 restart doesn't fix it. The run log says which emulator it was and the two heights.
+
+Something on the Mac other than the run can stop the adb server, which ends every open Android
+session. The VS Code .NET MAUI extension does this over and over whenever an emulator starts or
+stops, including the ones the run starts, so disable it for all workspaces, not only the open one,
+or quit VS Code, while a run uses Android emulators. A tool that runs an adb of a different version
+from the one in `ANDROID_HOME` does it too: each adb stops a server of another version and starts
+its own, so that tool and the run keep stopping each other's server.
+
+When an Android session fails to open because the adb server was stopped while the run waited for
+the emulator or opened the session, the run starts the adb server again before its next attempt and
+does not restart the emulator for that failure, since the emulator isn't at fault. If the last
+attempt fails that way, the emulator drops out. If the adb server is stopped after the session has
+opened, so that the app cannot be checked on startup or its backend fails to start, the emulator
+drops out at once. When a session dies because the adb server was stopped, the run opens a new one
+with a new backend and runs the journey again, as it does whenever a session dies, but doesn't count
+that death against the emulator's retry budget. If the journey's second run dies because the adb
+server was stopped, whether it ran again because its session died or because the app stopped
+responding, the journey goes back to the fixture's other devices and the emulator drops out.
+Whenever an emulator drops out because the adb server was stopped, its reason says so. When
+something keeps stopping the adb server, each stop ends every emulator's session at once, so the
+emulators usually drop out together, and the remaining journeys are reported as skipped, not failed.
 
 ### 4. Write journeys
 

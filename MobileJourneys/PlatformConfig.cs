@@ -352,6 +352,22 @@ public abstract record PlatformConfig(
 	/// </summary>
 	internal virtual void KillStaleHelperProcesses() { }
 
+	// --- adb server ---
+
+	/// <summary>Starts the adb server if none is running. Does nothing on a platform without adb.</summary>
+	internal virtual void StartAdbServer() { }
+
+	/// <summary>Identifies the running adb server, without starting one.</summary>
+	/// <param name="log">The run's log, told why the server could not be identified.</param>
+	/// <returns>The adb server's process id, or <c>null</c> on a platform without adb, or when it cannot be identified.</returns>
+	internal virtual int? FindAdbServerPid(RunLog log) => null;
+
+	/// <summary>Checks whether the adb server <see cref="FindAdbServerPid"/> identified has been stopped since.</summary>
+	/// <param name="pid">What <see cref="FindAdbServerPid"/> returned.</param>
+	/// <param name="log">The run's log, told when whether it was stopped cannot be told.</param>
+	/// <returns>Whether it was stopped; <c>false</c> when it was not identified, or when that cannot be told.</returns>
+	internal virtual bool HasAdbServerStoppedSince(int? pid, RunLog log) => false;
+
 	private static CultureInfo RequireRegion(CultureInfo locale, string paramName) =>
 		locale.IsNeutralCulture || locale.Name.Length == 0
 			? throw new ArgumentException(

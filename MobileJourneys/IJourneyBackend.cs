@@ -1,9 +1,9 @@
 namespace MobileJourneys;
 
 /// <summary>
-/// A stand-in backend the app under test talks to. One instance serves one fixture, so fixtures the
-/// suite runs concurrently never share data, and it is created only once that fixture's device is up
-/// — a backend reachable from a device usually has to bind itself to it.
+/// A stand-in backend the app under test talks to. One instance serves one Appium session on one
+/// device, so devices the suite runs on at the same time never share data, and it is created only
+/// once that session is open — a backend reachable from a device usually has to bind itself to it.
 /// </summary>
 public interface IJourneyBackend : IDisposable
 {

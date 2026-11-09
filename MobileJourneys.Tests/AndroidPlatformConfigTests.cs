@@ -106,6 +106,26 @@ public sealed class AndroidPlatformConfigTests
 	public void ParseAttachedDevicesIgnoresDevicesThatWillNotBecomeUsable(string output) =>
 		_ = AndroidPlatformConfig.ParseAttachedDevices(output).Should().BeEmpty();
 
+	[Test]
+	public void HasStoppedSinceCannotTellWhenTheListenerWasNotIdentified() =>
+		_ = AndroidPlatformConfig.HasStoppedSince(null, [5151]).Should().BeFalse();
+
+	[Test]
+	public void HasStoppedSinceCannotTellWhenLsofCouldNot() =>
+		_ = AndroidPlatformConfig.HasStoppedSince(4242, null).Should().BeFalse();
+
+	[Test]
+	public void HasStoppedSinceFindsTheListenerStoppedWhenNothingListens() =>
+		_ = AndroidPlatformConfig.HasStoppedSince(4242, []).Should().BeTrue();
+
+	[Test]
+	public void HasStoppedSinceFindsTheSameListenerRunning() =>
+		_ = AndroidPlatformConfig.HasStoppedSince(4242, [4242]).Should().BeFalse();
+
+	[Test]
+	public void HasStoppedSinceFindsTheListenerStoppedWhenAnotherProcessListens() =>
+		_ = AndroidPlatformConfig.HasStoppedSince(4242, [5151]).Should().BeTrue();
+
 	private const string PixelCutout =
 		"DisplayCutout{insets=Rect(0, 132 - 0, 0) waterfall=Insets{left=0, top=0, right=0, bottom=0";
 

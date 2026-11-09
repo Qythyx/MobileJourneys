@@ -63,11 +63,19 @@ public sealed class TestDriver(
 	public IJourneyEnvironment CurrentJourneyEnv { get; private set; } = null!;
 
 	/// <summary>
-	/// The stand-in backend this fixture's app talks to, or <c>null</c> when the suite declares none.
-	/// Set by <c>SuiteRunner</c> once the fixture is up; consumer-side actions reach through it to
-	/// drive backend state part-way through a journey.
+	/// The stand-in backend the app talks to during this session, or <c>null</c> when the suite
+	/// declares none. Set by <see cref="Framework.SuiteRunner"/> once the session is open, and disposed
+	/// when it closes the session; consumer-side actions reach through it to drive backend state
+	/// part-way through a journey.
 	/// </summary>
 	public IJourneyBackend? Backend { get; set; }
+
+	/// <summary>
+	/// The process id of the adb server the session was opened through, as
+	/// <see cref="PlatformConfig.FindAdbServerPid"/> identified it once the session had opened;
+	/// <c>null</c> when it was not identified, and on a platform without adb.
+	/// </summary>
+	internal int? AdbServerPid { get; init; }
 
 	private Rectangle[] SystemMasks =>
 		field ??= [
