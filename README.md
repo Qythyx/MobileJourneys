@@ -199,11 +199,17 @@ twice, or when its backend fails to start; one also drops out when its session d
 stops responding on it, more often than its retry budget allows. Once its devices are up, the
 fixture is abandoned only when none of them can host the app.
 
-An Android emulator can come out of a cold boot with its status bar shorter than its camera cutout.
-What Android places below the status bar, such as a flyout menu, then sits higher than what it
-places below the cutout, so every screenshot showing it differs from its baseline. A run checks each
-emulator for this before opening its session, restarts one that has it, and drops it out if the
-restart doesn't fix it. The run log says which emulator it was and the two heights.
+An Android emulator is still laying out its status bar when its home screen first starts, so for a
+while the status bar can be missing or shorter than the screen's camera cutout. While it is shorter,
+what Android places below the status bar, such as a flyout menu, sits higher than what it places
+below the cutout, so every screenshot showing it differs from its baseline. A run waits for each
+emulator's status bar to cover its cutout before opening its session. It gives the status bar the
+same time it gives the device to boot
+([`DeviceReadyTimeout`](MobileJourneys/Framework/SuiteRunner.cs)), counted from when the home screen
+starts. It restarts an emulator whose status bar still doesn't cover its cutout by then, and drops
+it out if the restart doesn't fix it. The console's retrying and lost messages call such an emulator
+faulty and give the reason; the [run log](#the-run-log) has a line for the emulator each time the
+reason changes, and one when its status bar then passes.
 
 Something on the Mac other than the run can stop the adb server, which ends every open Android
 session. The VS Code .NET MAUI extension does this over and over whenever an emulator starts or

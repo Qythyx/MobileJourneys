@@ -209,21 +209,33 @@ public abstract record PlatformConfig(
 
 	/// <summary>
 	/// Blocks until a device is far enough through boot that a session can be started against it,
-	/// or until <paramref name="timeout"/> elapses. Returns at once where a device reports itself
-	/// attached only once it is genuinely usable.
+	/// or until a stage of its coming up has taken longer than <paramref name="timeout"/>. Returns at
+	/// once where a device reports itself attached only once it is genuinely usable.
 	/// </summary>
 	/// <param name="deviceId">The device to wait for.</param>
-	/// <param name="timeout">How long to wait for a device that is still booting.</param>
-	/// <param name="log">The run's log, told what is wrong with a device found <see cref="DeviceReadiness.Faulty"/>.</param>
+	/// <param name="timeout">
+	/// How long each stage of the wait is given; a platform that waits in more than one says so on its
+	/// override.
+	/// </param>
+	/// <param name="log">The run's log, told what is wrong with the device each time that changes during the wait.</param>
 	/// <param name="cancellationToken">Cancelled when the reader interrupts the run.</param>
+	/// <param name="fault">
+	/// What is wrong with a device found <see cref="DeviceReadiness.Faulty"/>, ready to print;
+	/// <c>null</c> for any other result.
+	/// </param>
 	/// <returns>How far the device got by the time the wait ended.</returns>
 	/// <exception cref="OperationCanceledException">The run was interrupted.</exception>
 	internal virtual DeviceReadiness WaitUntilDeviceIsReady(
 		string deviceId,
 		TimeSpan timeout,
 		RunLog log,
-		CancellationToken cancellationToken
-	) => DeviceReadiness.Ready;
+		CancellationToken cancellationToken,
+		out string? fault
+	)
+	{
+		fault = null;
+		return DeviceReadiness.Ready;
+	}
 
 	/// <summary>What <see cref="WaitUntilDeviceIsReady"/> found the device doing.</summary>
 	internal enum DeviceReadiness
@@ -238,8 +250,8 @@ public abstract record PlatformConfig(
 		Unresponsive = 2,
 
 		/// <summary>
-		/// It answers, but booted into a state that changes what screens show, and only
-		/// <see cref="RestartDevice"/> clears it.
+		/// It answers, but when the wait ended it was still in a state that changes what screens show.
+		/// <see cref="RestartDevice"/> may clear it.
 		/// </summary>
 		Faulty = 3,
 	}

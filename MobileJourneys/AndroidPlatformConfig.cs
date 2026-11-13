@@ -897,22 +897,33 @@ public sealed partial record AndroidPlatformConfig(
 	/// loaded host reports <c>device offline</c> and is waited out here too.
 	/// <para/>
 	/// A device long past its boot can pass every one of those checks and still not start an
-	/// activity, so readiness ends with starting the home screen — the kind of call a session opens
-	/// with, given the time a session gives it. One that times out has stopped answering, and waiting
-	/// longer does not bring it back.
+	/// activity, so the first stage of the wait ends with starting the home screen — the kind of call
+	/// a session opens with, given the time a session gives it. One that times out has stopped
+	/// answering, and waiting longer does not bring it back.
 	/// <para/>
-	/// A device that started its home screen is faulty when <see cref="FindStatusBarFault"/> finds one.
+	/// The second stage gives a device that started its home screen <paramref name="timeout"/> again
+	/// for its status bar to pass <see cref="FindStatusBarFault"/>, since Android is still laying the
+	/// status bar out when the home screen starts. It is faulty when the status bar has not passed by
+	/// then, or its camera cutout could still not be read.
 	/// </remarks>
 	internal override DeviceReadiness WaitUntilDeviceIsReady(
 		string deviceId,
 		TimeSpan timeout,
 		RunLog log,
-		CancellationToken cancellationToken
+		CancellationToken cancellationToken,
+		out string? fault
 	)
 	{
+		fault = null;
 		var deadline = DateTime.UtcNow + timeout;
-		while (DateTime.UtcNow < deadline)
+		var homeScreenStarted = false;
+		while (!homeScreenStarted)
 		{
+			if (DateTime.UtcNow >= deadline)
+			{
+				return DeviceReadiness.Booting;
+			}
+
 			var home = IsBootComplete(deviceId)
 				? ProcessRunner.RunWithResult(
 					AdbPath,
@@ -933,60 +944,103 @@ public sealed partial record AndroidPlatformConfig(
 				: null;
 			if (home is { ExitCode: 0 })
 			{
-				var fault = FindStatusBarFault(
-					RunAdb(deviceId, "shell", "dumpsys window | grep -m1 type=statusBars")?.Output ?? string.Empty,
-					RunAdb(deviceId, "shell", "dumpsys display | grep -m1 -o 'DisplayCutout{insets=[^}]*'")?.Output
-						?? string.Empty
-				);
-				if (fault is not null)
-				{
-					log.Write(this, $"{deviceId} is faulty: {fault}");
-				}
-
-				return fault is null ? DeviceReadiness.Ready : DeviceReadiness.Faulty;
+				homeScreenStarted = true;
 			}
-
-			if (home is { Status: ProcessRunner.ShellResultStatus.TimedOut })
+			else if (home is { Status: ProcessRunner.ShellResultStatus.TimedOut })
 			{
 				return DeviceReadiness.Unresponsive;
 			}
-
-			KickOfflineDevices();
-			cancellationToken.Sleep(BootPollInterval);
+			else
+			{
+				KickOfflineDevices();
+				cancellationToken.Sleep(BootPollInterval);
+			}
 		}
 
-		return DeviceReadiness.Booting;
+		var statusBarDeadline = DateTime.UtcNow + timeout;
+		string? cutout = null;
+		string? lastLoggedFault = null;
+		while (true)
+		{
+			string? found = null;
+			if (cutout is null)
+			{
+				var display = RunAdb(deviceId, "shell", "dumpsys", "display");
+				if (
+					display is { Status: ProcessRunner.ShellResultStatus.Completed }
+					&& !string.IsNullOrWhiteSpace(display.Output)
+				)
+				{
+					cutout = CutoutTop().Match(display.Output).Value;
+				}
+				else
+				{
+					found = $"its camera cutout could not be read from \"{display?.Error.Trim()}\"";
+				}
+			}
+
+			if (cutout is not null)
+			{
+				found = FindStatusBarFault(
+					RunAdb(deviceId, "shell", "dumpsys window | grep -m1 type=statusBars")?.Output ?? string.Empty,
+					cutout
+				);
+			}
+
+			if (found != lastLoggedFault)
+			{
+				log.Write(this, $"{deviceId}: {found ?? "its status bar check now passes"}");
+				lastLoggedFault = found;
+			}
+
+			if (found is null)
+			{
+				return DeviceReadiness.Ready;
+			}
+
+			if (DateTime.UtcNow >= statusBarDeadline)
+			{
+				fault = found;
+				return DeviceReadiness.Faulty;
+			}
+
+			cancellationToken.Sleep(BootPollInterval);
+		}
 	}
 
 	/// <summary>
 	/// Checks that the status bar is at least as tall as the camera cutout, as Android sizes it on a
-	/// screen with one. An emulator can come out of a cold boot with its status bar at the height for a
-	/// screen without a cutout, and it stays that way until it is restarted. Windows inset by the
-	/// status bar then sit higher than windows inset by the cutout, so a screenshot shifts by the
-	/// difference.
+	/// screen with one. While the status bar is shorter, windows inset by it sit higher than windows
+	/// inset by the cutout, so a screenshot shifts by the difference.
 	/// </summary>
 	/// <param name="statusBarSource">The status bar's <c>InsetsSource</c> line from <c>dumpsys window</c>.</param>
 	/// <param name="cutout">
 	/// The <c>DisplayCutout{insets=…</c> text from <c>dumpsys display</c>, which is empty on a screen
 	/// without a cutout, since Android prints none for it.
 	/// </param>
-	/// <returns>What is wrong, ready to log, or <c>null</c> when the status bar covers the cutout.</returns>
+	/// <returns>
+	/// What is wrong, ready to print, or <c>null</c> when the status bar covers the cutout or the
+	/// screen has none.
+	/// </returns>
 	internal static string? FindStatusBarFault(string statusBarSource, string cutout)
 	{
 		string? fault = null;
-		var statusBar = StatusBarBottom().Match(statusBarSource);
-		if (!statusBar.Success)
+		if (CutoutTop().Match(cutout) is { Success: true } cutoutTop)
 		{
-			fault = $"its status bar could not be read from \"{statusBarSource.Trim()}\"";
-		}
-		else if (CutoutTop().Match(cutout) is { Success: true } cutoutTop)
-		{
-			var statusBarHeight = int.Parse(statusBar.Groups[1].Value, CultureInfo.InvariantCulture);
-			var cutoutHeight = int.Parse(cutoutTop.Groups[1].Value, CultureInfo.InvariantCulture);
-			if (statusBarHeight < cutoutHeight)
+			var statusBar = StatusBarBottom().Match(statusBarSource);
+			if (!statusBar.Success)
 			{
-				fault =
-					$"its status bar is {statusBarHeight} px tall, shorter than its {cutoutHeight} px camera cutout";
+				fault = $"its status bar could not be read from \"{statusBarSource.Trim()}\"";
+			}
+			else
+			{
+				var statusBarHeight = int.Parse(statusBar.Groups[1].Value, CultureInfo.InvariantCulture);
+				var cutoutHeight = int.Parse(cutoutTop.Groups[1].Value, CultureInfo.InvariantCulture);
+				if (statusBarHeight < cutoutHeight)
+				{
+					fault =
+						$"its status bar is {statusBarHeight} px tall, shorter than its {cutoutHeight} px camera cutout";
+				}
 			}
 		}
 

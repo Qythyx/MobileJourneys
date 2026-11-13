@@ -24,8 +24,8 @@ public static class SuiteRunner
 
 	/// <summary>
 	/// How many times to try opening a fixture's Appium session before abandoning it. A further
-	/// attempt costs the wait below, and at most one of them a device restart besides; abandoning
-	/// the fixture costs every journey selected for it.
+	/// attempt costs a wait for the device, and at most one of them a device restart besides;
+	/// abandoning the fixture costs every journey selected for it.
 	/// </summary>
 	private const int SessionStartAttempts = 3;
 
@@ -52,8 +52,9 @@ public static class SuiteRunner
 	private const int NotRespondingRetries = 3;
 
 	/// <summary>
-	/// How long to give a device to become usable before retrying its session. The wait returns as
-	/// soon as the device is ready, so only a fixture already in trouble pays for a generous one.
+	/// How long to give a device for each stage of <see cref="PlatformConfig.WaitUntilDeviceIsReady"/>
+	/// before retrying its session. The wait returns as soon as the device is ready, so only a
+	/// fixture already in trouble pays for a generous one.
 	/// </summary>
 	private static readonly TimeSpan DeviceReadyTimeout = TimeSpan.FromMinutes(3);
 
@@ -620,10 +621,11 @@ public static class SuiteRunner
 	/// Opens a worker's Appium session, retrying. A session started against a device that has only
 	/// just come up races the tail of its boot, and the failure that produces is transient — waiting
 	/// for the device to finish and asking again costs one attempt and saves the whole worker. A
-	/// device that has stopped answering, or booted faulty, does not recover by being waited on, so it
-	/// is restarted instead, at most once — see <see cref="ShouldRestartDevice"/>. One still faulty
-	/// then gets no session. An attempt during which the adb server was stopped says nothing about the
-	/// device, so it neither restarts the device nor finds it faulty.
+	/// device that has stopped answering, or is still faulty after being waited on, does not recover by
+	/// being waited on longer, so it is restarted instead, at most once — see
+	/// <see cref="ShouldRestartDevice"/>. One still faulty then gets no session. An attempt during
+	/// which the adb server was stopped says nothing about the device, so it neither restarts the
+	/// device nor finds it faulty.
 	/// </summary>
 	/// <param name="worker">The worker to open a session for.</param>
 	/// <param name="manager">Screenshot storage the driver writes through.</param>
@@ -655,7 +657,8 @@ public static class SuiteRunner
 				worker.DeviceId,
 				DeviceReadyTimeout,
 				reporter.Log,
-				cancellationToken
+				cancellationToken,
+				out var fault
 			);
 
 			if (readiness != PlatformConfig.DeviceReadiness.Ready)
@@ -691,7 +694,7 @@ public static class SuiteRunner
 							PlatformConfig.DeviceReadiness.Unresponsive =>
 								"its device stopped responding — restarting it and waiting for it to boot",
 							PlatformConfig.DeviceReadiness.Faulty =>
-								"its device booted faulty — restarting it and waiting for it to boot",
+								$"its device is faulty ({fault}) — restarting it and waiting for it to boot",
 							_ => "restarting its device for the last attempt, and waiting for it to boot",
 						}
 					);
@@ -704,7 +707,8 @@ public static class SuiteRunner
 						worker.DeviceId,
 						DeviceReadyTimeout,
 						reporter.Log,
-						cancellationToken
+						cancellationToken,
+						out fault
 					);
 					reporter.Log.Write(
 						worker.Config,
@@ -725,7 +729,8 @@ public static class SuiteRunner
 			else if (readiness == PlatformConfig.DeviceReadiness.Faulty)
 			{
 				// A session would open on it, and every journey would then fail on what it shows.
-				error = "its device booted faulty, and restarting it did not fix that, so it is not fit to run on";
+				error =
+					$"its device is faulty ({fault}), and {(restarted ? "restarting it did not fix that" : "it could not be restarted")}, so it is not fit to run on";
 				return null;
 			}
 			else
@@ -790,7 +795,7 @@ public static class SuiteRunner
 
 	/// <summary>
 	/// Decides whether a session attempt should be made on a freshly restarted device. A device that
-	/// has stopped answering, or booted faulty, gets one straight away. One that looks ready, or is
+	/// has stopped answering, or is faulty, gets one straight away. One that looks ready, or is
 	/// merely slow to boot, gets one only for the last attempt, and only when the previous attempt
 	/// failed in a way the device can be behind — a missing app binary fails the same on any device.
 	/// </summary>

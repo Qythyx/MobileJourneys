@@ -148,6 +148,10 @@ public sealed class AndroidPlatformConfigTests
 		_ = AndroidPlatformConfig.FindStatusBarFault(StatusBarSource(48), string.Empty).Should().BeNull();
 
 	[Test]
+	public void FindStatusBarFaultAcceptsAStatusBarItCannotReadOnAScreenWithoutACutout() =>
+		_ = AndroidPlatformConfig.FindStatusBarFault(string.Empty, string.Empty).Should().BeNull();
+
+	[Test]
 	public void FindStatusBarFaultReportsAStatusBarItCannotRead() =>
 		_ = AndroidPlatformConfig.FindStatusBarFault(string.Empty, PixelCutout).Should().NotBeNull();
 
