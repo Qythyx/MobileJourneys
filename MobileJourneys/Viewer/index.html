@@ -1964,32 +1964,50 @@
 			const cssEscape = (s) => (window.CSS && CSS.escape ? CSS.escape(s) : s.replace(/["\\]/g, "\\$&"));
 
 			// Panning works anywhere, including on top of a screenshot; a press that does not move is
-			// still a click, so thumbnails stay interactive.
+			// still a click, so thumbnails stay interactive. A press starts on the graph but is followed on
+			// the whole window, since the pointer can leave the graph before it has moved far enough to
+			// capture it, and the graph would then never hear the press end.
 			let down = null;
+			// The press that ended last was a pan, so the click it makes must not reach a thumbnail.
+			let panned = false;
 			wrap.addEventListener("pointerdown", (e) => {
 				if (e.button !== 0) { return; }
 				// Don't capture here: capturing on pointerdown retargets the click to the wrapper, so a
 				// thumbnail click never reaches the image. Capture only once a real pan begins (below).
 				down = { x: e.clientX, y: e.clientY, moved: false, pointerId: e.pointerId };
+				panned = false;
 			});
-			wrap.addEventListener("pointermove", (e) => {
+			window.addEventListener("pointermove", (e) => {
 				if (!down) { return; }
 				const dx = e.clientX - down.x, dy = e.clientY - down.y;
 				if (!down.moved && Math.hypot(dx, dy) < 4) { return; }
 				if (!down.moved) {
 					down.moved = true;
 					wrap.classList.add("panning");
-					// Now it's a pan — capture so it keeps tracking even if the pointer leaves the wrapper.
+					// Now it's a pan — capture so the grabbing cursor stays and nothing the pointer crosses reacts.
 					try { wrap.setPointerCapture(down.pointerId); } catch { /* synthetic or released pointer */ }
 				}
 				tx += e.clientX - down.x; ty += e.clientY - down.y;
 				down.x = e.clientX; down.y = e.clientY;
 				applyTransform();
 			});
-			wrap.addEventListener("pointerup", () => { wrap.classList.remove("panning"); });
+			// The press ends here rather than on its click, which never comes when the element pressed on
+			// was replaced by a re-render during the drag.
+			const endPress = () => {
+				if (down) {
+					panned = down.moved;
+					down = null;
+				}
+				wrap.classList.remove("panning");
+			};
+			window.addEventListener("pointerup", endPress);
+			window.addEventListener("pointercancel", endPress);
 			wrap.addEventListener("click", (e) => {
-				if (down && down.moved) { e.stopPropagation(); e.preventDefault(); }
-				down = null;
+				if (panned) {
+					e.stopPropagation();
+					e.preventDefault();
+					panned = false;
+				}
 			}, true);
 			wrap.addEventListener("wheel", (e) => {
 				e.preventDefault();
@@ -2566,28 +2584,58 @@
 			// Refreshes apply one at a time in the order asked for, so an older manifest never lands last.
 			let refreshes = Promise.resolve();
 			function refresh(message, resolvedLabel) {
-				refreshes = refreshes.then(() => applyRefresh(message, resolvedLabel));
+				refreshes = refreshes.then(async () => {
+					const manifest = await fetchManifest();
+					if (manifest) { applyManifest(manifest, message, resolvedLabel); }
+				});
 			}
 			// Steps a running rerun reports while a re-scan waits share that re-scan.
 			let rescanQueued = false;
+			let rescanHeld = false;
 			function rescan() {
 				if (!rescanQueued) {
 					rescanQueued = true;
-					refresh(null, "passed on rerun");
+					refreshes = refreshes.then(async () => {
+						rescanQueued = false;
+						// Applying a manifest rebuilds the page, which drops any text selected on it, so a re-scan
+						// waits until the selection is cleared.
+						if (!document.getSelection().isCollapsed) {
+							rescanHeld = true;
+						} else {
+							const manifest = await fetchManifest();
+							if (manifest) {
+								if (document.getSelection().isCollapsed) {
+									applyManifest(manifest, null, "passed on rerun");
+								} else {
+									rescanHeld = true;
+								}
+							}
+						}
+					});
 				}
 			}
-			async function applyRefresh(message, resolvedLabel) {
-				rescanQueued = false;
-				const wasOn = selectedFailure();
+			document.addEventListener("selectionchange", () => {
+				if (rescanHeld && document.getSelection().isCollapsed) {
+					rescanHeld = false;
+					rescan();
+				}
+			});
+			// The manifest the server has now, or null after telling the user the fetch failed.
+			async function fetchManifest() {
 				try {
 					const res = await fetch("manifest.js", { cache: "no-store" });
 					if (!res.ok) { throw new Error("manifest returned " + res.status); }
 					new Function(await res.text())();
-					Object.assign(M, window.MANIFEST);
+					return window.MANIFEST;
 				} catch (err) {
 					toast("Refresh failed (" + err.message + ") — press u to retry");
-					return;
+					return null;
 				}
+			}
+			function applyManifest(manifest, message, resolvedLabel) {
+				rescanHeld = false;
+				const wasOn = selectedFailure();
+				Object.assign(M, manifest);
 
 				const clearedCurrent = resolvedLabel && wasOn
 					&& !currentFailures().some((f) => failureKey(f) === failureKey(wasOn));

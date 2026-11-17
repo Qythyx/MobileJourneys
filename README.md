@@ -517,9 +517,10 @@ the fixtures where it currently fails, each with or without rebuilding the app f
 journeys share asks which of them to rerun, or all. The scopes differ in which fixtures the rerun
 runs on, not in how many journeys run. It shells out to `dotnet run … -- --run --journey <names>`,
 narrowed by `--filter` for the current fixture or by `--rerun` for the fixtures that currently fail,
-with `-p:EmbedAssemblies=true` to rebuild, and reloads the view as each step lands. Only one rerun
-runs at a time, since concurrent runs would fight over the simulators. Press `u` to reload from disk
-by hand if a run's completion is ever missed.
+with `-p:EmbedAssemblies=true` to rebuild, and reloads the view as each step lands, waiting while
+text is selected on the page and catching up once the selection is cleared. Only one rerun runs at a
+time, since concurrent runs would fight over the simulators. Press `u` to reload from disk by hand if
+a run's completion is ever missed.
 
 ### How a rerun reports back
 
