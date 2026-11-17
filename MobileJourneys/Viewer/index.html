@@ -617,6 +617,22 @@
 			font-size: 11px;
 		}
 
+		#zoomview .failbox {
+			position: relative;
+			margin: 0 16px 10px;
+		}
+
+		#zoomview .failbox .failtext {
+			margin: 0;
+			padding-right: 28px;
+		}
+
+		#zoomview .failbox .copy {
+			position: absolute;
+			top: 4px;
+			right: 4px;
+		}
+
 		.panes {
 			display: flex;
 			gap: 6px;
@@ -711,6 +727,23 @@
 		#zoomview .zhead .pct {
 			color: var(--fail);
 			font-weight: 600;
+		}
+
+		#zoomview .copy {
+			display: flex;
+			padding: 2px;
+			border: 0;
+			background: none;
+			color: var(--muted);
+			cursor: pointer;
+		}
+
+		#zoomview .copy:hover {
+			color: var(--text);
+		}
+
+		#zoomview .zhead .copy {
+			align-self: center;
 		}
 
 		#zoomview .zhead .close {
@@ -1139,8 +1172,8 @@
 				}
 				return [...groups.values()];
 			};
-			// How a failure names the journeys it stands for.
-			const journeyLabel = (f) => f.journeys.length === 1 ? f.journeys[0] : plural(f.journeys.length, "journey");
+			// How the page names a set of journeys: one by its name, several by their count.
+			const journeyLabel = (journeys) => journeys.length === 1 ? journeys[0] : plural(journeys.length, "journey");
 			const currentFailures = () => failureGroups(config);
 			const selectedFailure = () => currentFailures()[selected];
 
@@ -1162,7 +1195,9 @@
 			}
 
 			const journeyEnd = (name) => M.journeys[name][M.journeys[name].length - 1];
-			// A journey-end chip only earns its space when the node is not already named after it.
+			// A journey that ends in a box and has that box's name is already named by the box's path.
+			const isNamedByBox = (journey, container) =>
+				journeyEnd(journey) === container && journey === nodeNameOf(container);
 			const journeyEnds = (() => {
 				const ends = new Map();
 				for (const name of Object.keys(M.journeys)) {
@@ -1172,7 +1207,9 @@
 				}
 				return ends;
 			})();
-			const chipsFor = (path) => (journeyEnds.get(path) || []).filter((j) => j !== nodeNameOf(path));
+			const chipsFor = (path) => (journeyEnds.get(path) || []).filter((j) => !isNamedByBox(j, path));
+			const stepPathText = (at) => [...at.container.split("/"), at.step].join(" › ");
+			const unnamedJourneys = (at) => at.journeys.filter((j) => !isNamedByBox(j, at.container));
 
 			// ---------- header ----------
 			document.title = M.title + " — Screenshots";
@@ -1428,7 +1465,11 @@
 				el.textContent = f.failureText || (f.kinds.diff
 						? "The capture differed from the baseline, but no new capture was kept, so there is nothing to accept. The baseline is usually missing under this step's current name \u2014 check whether the step was renamed."
 						: "No failure details were recorded for this step.");
-				return el;
+				if (!f.failureText) { return el; }
+				const box = document.createElement("div");
+				box.className = "failbox";
+				box.append(el, copyButton("the error message", f.failureText));
+				return box;
 			}
 
 			// Only the leading pane cycles; the rest are fixed references that never move, so b/n/d changes
@@ -1486,7 +1527,7 @@
 				group.className = "rerun-group";
 				const button = document.createElement("button");
 				button.className = "btn";
-				button.textContent = `Rerun ${journeyLabel({ journeys })} ▾`;
+				button.textContent = `Rerun ${journeyLabel(journeys)} ▾`;
 				button.disabled = !serverMode;
 				const menu = document.createElement("div");
 				menu.className = "rerun-menu";
@@ -1507,7 +1548,7 @@
 			// the ones failing somewhere can rerun on the failed devices.
 			function rerunJourneys(shown, s, embed) {
 				const journeys = s.scope === "failed" ? failingAnywhere(shown) : shown;
-				if (journeys.length === 0) { toast(`no device has a failure on ${journeyLabel({ journeys: shown })}`); return; }
+				if (journeys.length === 0) { toast(`no device has a failure on ${journeyLabel(shown)}`); return; }
 				if (journeys.length === 1) { rerun(journeys, s.scope, embed); return; }
 				const all = { name: `All ${journeys.length} journeys`, journeys };
 				const each = journeys.map((j) => ({ name: j, journeys: [j] }));
@@ -1544,6 +1585,27 @@
 			const paneZoom = { s: 1, x: 0, y: 0 };
 			let zoomPanes = [];      // { box, img, mark } for each image the zoom view shows
 			let blinking = false;    // d: the differing pixels blink red on every pane
+			// An icon button that copies `text` to the clipboard; `what` names the text in its tooltip and toast.
+			function copyButton(what, text) {
+				const copy = document.createElement("button");
+				copy.className = "copy";
+				copy.title = "Copy " + what;
+				copy.setAttribute("aria-label", "Copy " + what);
+				copy.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"`
+					+ ` stroke-width="2" stroke-linecap="round" stroke-linejoin="round">`
+					+ `<rect x="9" y="9" width="13" height="13" rx="2"/>`
+					+ `<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>`
+					+ `</svg>`;
+				copy.addEventListener("click", async () => {
+					try {
+						await navigator.clipboard.writeText(text);
+						toast("Copied " + what);
+					} catch (err) {
+						toast("Copy failed (" + err.message + ")");
+					}
+				});
+				return copy;
+			}
 			function zoomFrame(at) {
 				if (!zoomStep || zoomStep.container !== at.container || zoomStep.step !== at.step) { resetZoom(); }
 				zoomed = true;
@@ -1555,13 +1617,22 @@
 
 				const head = document.createElement("div");
 				head.className = "zhead";
+				const pathLabel = document.createElement("span");
+				const device = document.createElement("span");
+				device.style.color = "var(--muted)";
+				device.textContent = config + " › ";
 				const b = document.createElement("b");
-				b.textContent = at.journeys.length > 0 ? at.step + " — " + journeyLabel(at) : at.step;
-				b.title = at.journeys.join("\n");
-				const where = document.createElement("span");
-				where.style.color = "var(--muted)";
-				where.textContent = config + "/" + at.container;
-				head.append(b, where);
+				b.textContent = stepPathText(at);
+				pathLabel.append(device, b);
+				head.append(pathLabel, copyButton("the path", config + " › " + stepPathText(at)));
+				const unnamed = unnamedJourneys(at);
+				if (unnamed.length > 0) {
+					const journeysNote = document.createElement("span");
+					journeysNote.style.color = "var(--muted)";
+					journeysNote.textContent = "in " + journeyLabel(unnamed);
+					journeysNote.title = unnamed.join("\n");
+					head.appendChild(journeysNote);
+				}
 				view.appendChild(head);
 				return { view, head };
 			}
@@ -2039,7 +2110,9 @@
 				focusSelected();
 				if (zoomed) { openZoom(); }
 				const f = fails[selected];
-				toast(`${selected + 1}/${fails.length} · ${f.step} — ${journeyLabel(f)}`);
+				const unnamed = unnamedJourneys(f);
+				toast(`${selected + 1}/${fails.length} · ${stepPathText(f)}`
+					+ (unnamed.length > 0 ? " in " + journeyLabel(unnamed) : ""));
 			}
 
 			// ---------- live rerun progress ----------
@@ -2473,7 +2546,7 @@
 				chord = prefix;
 				toast(prefix === "R"
 					? "rerun all:  r = as-is   R = + rebuild app   f = failures only   F = failures + rebuild   d = this device   D = this device + rebuild   (Esc cancels)"
-					: `rerun ${journeyLabel(zoomStep)}:  ${rerunScopes.map((s) => `${s.key} = ${s.devices}`).join("   ")}   Shift = + rebuild app   (Esc cancels)`, true);
+					: `rerun ${journeyLabel(zoomStep.journeys)}:  ${rerunScopes.map((s) => `${s.key} = ${s.devices}`).join("   ")}   Shift = + rebuild app   (Esc cancels)`, true);
 				clearTimeout(chordTimer);
 				chordTimer = setTimeout(() => { chord = null; }, 4000);
 			}
