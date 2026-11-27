@@ -120,7 +120,8 @@ public sealed partial record AndroidPlatformConfig(
 		options.AddAdditionalAppiumOption("suppressKillServer", true);
 	}
 
-	internal override AppiumDriver CreateDriver(AppiumOptions options) => new AndroidDriver(options);
+	internal override AppiumDriver CreateDriver(Uri appiumServerUrl, AppiumOptions options) =>
+		new AndroidDriver(appiumServerUrl, options);
 
 	internal override void LaunchApp(AppiumDriver driver, IJourneyEnvironment environment, string backendUrlVariable)
 	{

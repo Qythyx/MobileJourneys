@@ -63,7 +63,8 @@ public sealed record IosPlatformConfig(
 	internal string[] LaunchArguments =>
 		["-AppleLanguages", $"({AppLocale.Name})", "-AppleLocale", AppLocale.Name.Replace('-', '_')];
 
-	internal override AppiumDriver CreateDriver(AppiumOptions options) => new IOSDriver(options);
+	internal override AppiumDriver CreateDriver(Uri appiumServerUrl, AppiumOptions options) =>
+		new IOSDriver(appiumServerUrl, options);
 
 	internal override void LaunchApp(AppiumDriver driver, IJourneyEnvironment environment, string backendUrlVariable) =>
 		_ = driver.ExecuteScript(

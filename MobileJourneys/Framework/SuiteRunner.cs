@@ -276,7 +276,8 @@ public static class SuiteRunner
 		try
 		{
 			appiumService.Start();
-			await RunFixturesAsync(config, selected, reporter, manager, cancellation.Token).ConfigureAwait(false);
+			await RunFixturesAsync(config, selected, appiumService.ServiceUrl, reporter, manager, cancellation.Token)
+				.ConfigureAwait(false);
 		}
 		finally
 		{
@@ -301,6 +302,7 @@ public static class SuiteRunner
 	/// </summary>
 	/// <param name="config">The suite.</param>
 	/// <param name="selected">The journeys to run.</param>
+	/// <param name="appiumServerUrl">The address of the run's Appium server.</param>
 	/// <param name="reporter">Told everything that happens.</param>
 	/// <param name="manager">Screenshot storage the drivers write through.</param>
 	/// <param name="cancellationToken">Cancelled when the reader interrupts the run.</param>
@@ -308,6 +310,7 @@ public static class SuiteRunner
 	private static async Task RunFixturesAsync(
 		FrameworkConfig config,
 		List<TestCase> selected,
+		Uri appiumServerUrl,
 		RunReporter reporter,
 		ScreenshotManager manager,
 		CancellationToken cancellationToken
@@ -334,6 +337,7 @@ public static class SuiteRunner
 											[.. group],
 											config.Backend,
 											group.Key.WaitBudget,
+											appiumServerUrl,
 											reporter,
 											manager,
 											cancellationToken
@@ -412,12 +416,14 @@ public static class SuiteRunner
 	/// address under, or <c>null</c> for an app that needs none.
 	/// </param>
 	/// <param name="Timings">The fixture's timing record, which every session on the worker writes to.</param>
+	/// <param name="AppiumServerUrl">The address of the Appium server the worker's sessions open on.</param>
 	private sealed record Worker(
 		PlatformConfig Config,
 		int Index,
 		string DeviceId,
 		FrameworkConfig.BackendSetup? BackendSetup,
-		FixtureTimings Timings
+		FixtureTimings Timings,
+		Uri AppiumServerUrl
 	);
 
 	/// <summary>
@@ -429,6 +435,7 @@ public static class SuiteRunner
 	/// <param name="cases">The journeys selected for it.</param>
 	/// <param name="backendSetup">The suite's backend, or <c>null</c> for an app that needs none.</param>
 	/// <param name="waitBudget">How long any one wait for the app may take before its step fails.</param>
+	/// <param name="appiumServerUrl">The address of the run's Appium server.</param>
 	/// <param name="reporter">Told what each worker is doing, and when the fixture has to be abandoned.</param>
 	/// <param name="manager">Screenshot storage the drivers write through.</param>
 	/// <param name="cancellationToken">Cancelled when the reader interrupts the run.</param>
@@ -437,6 +444,7 @@ public static class SuiteRunner
 		IReadOnlyList<TestCase> cases,
 		FrameworkConfig.BackendSetup? backendSetup,
 		TimeSpan waitBudget,
+		Uri appiumServerUrl,
 		RunReporter reporter,
 		ScreenshotManager manager,
 		CancellationToken cancellationToken
@@ -478,7 +486,7 @@ public static class SuiteRunner
 					(deviceId, index) =>
 						Task.Run(() =>
 						{
-							var worker = new Worker(config, index + 1, deviceId, backendSetup, timings);
+							var worker = new Worker(config, index + 1, deviceId, backendSetup, timings, appiumServerUrl);
 							var driver = OpenSession(worker, reporter, manager, cancellationToken, out var failure);
 							if (driver is null)
 							{
@@ -738,7 +746,7 @@ public static class SuiteRunner
 				try
 				{
 					var driver = new TestDriver(
-						worker.Config.CreateAppiumDriver(worker.DeviceId),
+						worker.Config.CreateAppiumDriver(worker.DeviceId, worker.AppiumServerUrl),
 						worker.Config,
 						manager,
 						worker.BackendSetup?.UrlVariable ?? string.Empty,

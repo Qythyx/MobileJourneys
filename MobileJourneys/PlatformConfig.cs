@@ -125,7 +125,8 @@ public abstract record PlatformConfig(
 	/// wraps the returned driver in a <see cref="TestDriver"/>; consumers do not call this directly.
 	/// </summary>
 	/// <param name="deviceId">The simulator UDID or emulator serial to open the session on.</param>
-	internal AppiumDriver CreateAppiumDriver(string deviceId)
+	/// <param name="appiumServerUrl">The address of the Appium server to open the session on.</param>
+	internal AppiumDriver CreateAppiumDriver(string deviceId, Uri appiumServerUrl)
 	{
 		var options = new AppiumOptions
 		{
@@ -138,8 +139,11 @@ public abstract record PlatformConfig(
 
 		options.AddAdditionalAppiumOption("udid", deviceId);
 		ConfigureAppiumOptions(options);
-		options.AddAdditionalAppiumOption("newCommandTimeout", 120);
-		return CreateDriver(options);
+		// 0 turns off Appium's idle timeout. When a device vanishes, UiAutomator2 4.2.9 can leave the
+		// timer armed after a failed session delete. It then fires, repeats the failing clean-up
+		// outside any request, and crashes the whole server. The runner ends every session itself.
+		options.AddAdditionalAppiumOption("newCommandTimeout", 0);
+		return CreateDriver(appiumServerUrl, options);
 	}
 
 	internal string ResolveAppBinaryPath() =>
@@ -152,7 +156,12 @@ public abstract record PlatformConfig(
 
 	internal abstract void ConfigureAppiumOptions(AppiumOptions options);
 
-	internal abstract AppiumDriver CreateDriver(AppiumOptions options);
+	/// <summary>
+	/// Builds this platform's driver, connected to the given Appium server.
+	/// </summary>
+	/// <param name="appiumServerUrl">The address of the Appium server to open the session on.</param>
+	/// <param name="options">The session's capabilities.</param>
+	internal abstract AppiumDriver CreateDriver(Uri appiumServerUrl, AppiumOptions options);
 
 	// --- App lifecycle ---
 
